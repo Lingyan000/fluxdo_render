@@ -16,3 +16,5 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # fixture 元数据(test/fixtures/*.yaml)校验脚本依赖
+  yaml: ^3.1.2
