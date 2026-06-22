@@ -20,3 +20,6 @@ Thumbs.db
 # Coverage
 coverage/
 .test_coverage.dart
+
+# Golden 测试失败时生成的对比图(本地查看用,不入仓)
+test/failures/
