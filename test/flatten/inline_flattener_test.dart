@@ -1,0 +1,490 @@
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fluxdo_render/src/flatten/inline_flattener.dart';
+import 'package:fluxdo_render/src/node/inline_node.dart';
+
+void main() {
+  const flattener = InlineFlattener();
+  const baseStyle = TextStyle(fontSize: 14, color: Color(0xFF000000));
+
+  test('空列表产出空 children', () {
+    final result = flattener.flatten([], baseStyle);
+    expect(result.span.style, baseStyle);
+    expect(result.span.children, isEmpty);
+    expect(result.recognizers, isEmpty);
+  });
+
+  test('纯文本', () {
+    final result = flattener.flatten([const TextRun('hello')], baseStyle);
+    final children = result.span.children!;
+    expect(children, hasLength(1));
+    expect((children[0] as TextSpan).text, 'hello');
+  });
+
+  test('em 注入 italic style', () {
+    final result = flattener.flatten(
+      [const EmRun(children: [TextRun('it')])],
+      baseStyle,
+    );
+    final em = result.span.children![0] as TextSpan;
+    expect(em.style?.fontStyle, FontStyle.italic);
+    expect(em.children, hasLength(1));
+    expect((em.children![0] as TextSpan).text, 'it');
+  });
+
+  test('strong 注入 bold style', () {
+    final result = flattener.flatten(
+      [const StrongRun(children: [TextRun('bd')])],
+      baseStyle,
+    );
+    final strong = result.span.children![0] as TextSpan;
+    expect(strong.style?.fontWeight, FontWeight.bold);
+  });
+
+  test('em 嵌套 strong 产生双层 span', () {
+    final result = flattener.flatten(
+      [
+        const EmRun(
+          children: [
+            StrongRun(children: [TextRun('x')]),
+          ],
+        ),
+      ],
+      baseStyle,
+    );
+    final em = result.span.children![0] as TextSpan;
+    final nestedStrong = em.children![0] as TextSpan;
+    expect(em.style?.fontStyle, FontStyle.italic);
+    expect(nestedStrong.style?.fontWeight, FontWeight.bold);
+  });
+
+  test('LineBreak 渲染为 \\n', () {
+    final result = flattener.flatten(
+      [
+        const TextRun('a'),
+        const LineBreakRun(),
+        const TextRun('b'),
+      ],
+      baseStyle,
+    );
+    final children = result.span.children!;
+    expect(children, hasLength(3));
+    expect((children[1] as TextSpan).text, '\n');
+  });
+
+  test('混合复合段落保持顺序', () {
+    final result = flattener.flatten(
+      [
+        const TextRun('hello '),
+        const StrongRun(children: [TextRun('bold')]),
+        const TextRun(' and '),
+        const EmRun(children: [TextRun('italic')]),
+        const LineBreakRun(),
+        const TextRun('newline'),
+      ],
+      baseStyle,
+    );
+    expect(result.span.children, hasLength(6));
+  });
+
+  group('LinkRun', () {
+    testWidgets('有 context 时产生 TapGestureRecognizer', (tester) async {
+      late BuildContext capturedContext;
+      await tester.pumpWidget(
+        Builder(
+          builder: (ctx) {
+            capturedContext = ctx;
+            return const SizedBox();
+          },
+        ),
+      );
+      String? tapped;
+      final result = flattener.flatten(
+        [const LinkRun(href: 'https://example.com', children: [TextRun('go')])],
+        baseStyle,
+        context: capturedContext,
+        linkHandler: (_, href) => tapped = href,
+      );
+      expect(result.recognizers, hasLength(1));
+      expect(result.recognizers[0], isA<TapGestureRecognizer>());
+
+      // 直接触发 onTap 验证 handler 被调
+      (result.recognizers[0] as TapGestureRecognizer).onTap!();
+      expect(tapped, 'https://example.com');
+
+      // 清理 recognizer 避免 leak warning
+      for (final r in result.recognizers) {
+        r.dispose();
+      }
+    });
+
+    test('无 context 时不创建 recognizer(link 不可点)', () {
+      final result = flattener.flatten(
+        [const LinkRun(href: 'https://example.com', children: [TextRun('go')])],
+        baseStyle,
+      );
+      expect(result.recognizers, isEmpty);
+      final linkSpan = result.span.children![0] as TextSpan;
+      expect(linkSpan.recognizer, isNull);
+    });
+
+    testWidgets('link span 走主题主色,无下划线(对齐 legacy 样式)', (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox();
+        }),
+      ));
+      final result = flattener.flatten(
+        [const LinkRun(href: 'https://example.com', children: [TextRun('x')])],
+        baseStyle,
+        context: ctx,
+      );
+      final linkSpan = result.span.children![0] as TextSpan;
+      // legacy: {color: theme.primary, text-decoration: none}
+      expect(linkSpan.style?.color, Theme.of(ctx).colorScheme.primary);
+      expect(linkSpan.style?.decoration, null);
+      for (final r in result.recognizers) {
+        r.dispose();
+      }
+    });
+
+    test('无 context 时 link 字色 fallback 为 null(由 baseStyle 决定)', () {
+      final result = flattener.flatten(
+        [const LinkRun(href: 'https://example.com', children: [TextRun('x')])],
+        baseStyle,
+      );
+      final linkSpan = result.span.children![0] as TextSpan;
+      expect(linkSpan.style?.color, isNull);
+    });
+
+    test('link 内嵌 strong 保留嵌套样式', () {
+      final result = flattener.flatten(
+        [
+          const LinkRun(
+            href: 'https://example.com',
+            children: [
+              TextRun('点击 '),
+              StrongRun(children: [TextRun('粗体')]),
+            ],
+          ),
+        ],
+        baseStyle,
+      );
+      final linkSpan = result.span.children![0] as TextSpan;
+      expect(linkSpan.children, hasLength(2));
+      final strong = linkSpan.children![1] as TextSpan;
+      expect(strong.style?.fontWeight, FontWeight.bold);
+    });
+
+    testWidgets('recognizer 透传到所有叶子 span(回归: Flutter recognizer 不 bubble)',
+        (tester) async {
+      // Flutter `TextSpan.recognizer` 不会从父 span 传播到 children;
+      // 必须挂到每个叶子 span(有 text 字段的那个),tap 才能响应。
+      late BuildContext ctx;
+      await tester.pumpWidget(Builder(builder: (c) {
+        ctx = c;
+        return const SizedBox();
+      }));
+
+      final result = flattener.flatten(
+        [
+          const LinkRun(
+            href: 'https://x.com',
+            children: [
+              TextRun('前 '),
+              StrongRun(children: [TextRun('粗')]),
+              InlineCodeRun('code'),
+            ],
+          ),
+        ],
+        baseStyle,
+        context: ctx,
+        linkHandler: (_, _) {},
+      );
+
+      // 收集所有叶子 TextSpan 的 recognizer
+      final leafRecognizers = <GestureRecognizer?>[];
+      void walk(InlineSpan s) {
+        if (s is TextSpan) {
+          if (s.text != null) {
+            leafRecognizers.add(s.recognizer);
+          }
+          if (s.children != null) {
+            for (final c in s.children!) {
+              walk(c);
+            }
+          }
+        }
+      }
+      walk(result.span);
+
+      // 三个叶子(TextRun / StrongRun 内的 TextRun / InlineCodeRun)
+      // 都必须挂同一个 recognizer
+      expect(leafRecognizers, hasLength(3));
+      expect(leafRecognizers.every((r) => r != null), isTrue);
+      expect(
+        leafRecognizers.toSet(),
+        hasLength(1),
+        reason: '一个 LinkRun 应该所有叶子共享同一个 recognizer 实例',
+      );
+
+      for (final r in result.recognizers) {
+        r.dispose();
+      }
+    });
+  });
+
+  group('InlineCodeRun', () {
+    testWidgets('light 主题:派生 onSurfaceVariant 字色(背景移到 painter,span 不带 background)',
+        (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(brightness: Brightness.light),
+        home: Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox();
+        }),
+      ));
+      final scheme = Theme.of(ctx).colorScheme;
+      final result = flattener.flatten(
+        [const InlineCodeRun('git status')],
+        baseStyle,
+        context: ctx,
+      );
+      final span = result.span.children![0] as TextSpan;
+      expect(span.text, 'git status');
+      expect(span.style?.fontFamily, 'FiraCode');
+      expect(span.style?.fontFamilyFallback, ['monospace', 'Menlo', 'Courier']);
+      // 0.85em
+      expect(span.style?.fontSize, closeTo(11.9, 0.01));
+      // 派生字色 onSurfaceVariant;背景由 InlineCodeBackgroundPainter 自绘 →
+      // span.style 不再带 background(否则只能直角、跨行裂块)。
+      expect(span.style?.color, scheme.onSurfaceVariant);
+      expect(span.style?.background, isNull,
+          reason: '背景移到 painter,span 不带 background');
+    });
+
+    testWidgets('dark 主题也走派生字色(颜色自动跟随)', (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark),
+        home: Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox();
+        }),
+      ));
+      final scheme = Theme.of(ctx).colorScheme;
+      final result = flattener.flatten(
+        [const InlineCodeRun('x')],
+        baseStyle,
+        context: ctx,
+      );
+      final span = result.span.children![0] as TextSpan;
+      expect(span.style?.color, scheme.onSurfaceVariant);
+      expect(span.style?.background, isNull);
+    });
+
+    test('无 context 时 color 退化为 null(背景始终在 painter,span 无 background)', () {
+      final result = flattener.flatten(
+        [const InlineCodeRun('x')],
+        baseStyle,
+      );
+      final span = result.span.children![0] as TextSpan;
+      expect(span.style?.color, isNull);
+      expect(span.style?.background, isNull);
+      // 字体/字号仍生效
+      expect(span.style?.fontFamily, 'FiraCode');
+      expect(span.style?.fontSize, closeTo(11.9, 0.01));
+    });
+
+    test('与 link / text 混排顺序保留', () {
+      final result = flattener.flatten(
+        [
+          const TextRun('使用 '),
+          const InlineCodeRun('git'),
+          const TextRun(' 命令'),
+        ],
+        baseStyle,
+      );
+      final children = result.span.children!;
+      expect(children, hasLength(3));
+      expect((children[0] as TextSpan).text, '使用 ');
+      expect((children[1] as TextSpan).text, 'git');
+      expect((children[2] as TextSpan).text, ' 命令');
+    });
+  });
+
+  group('EmojiRun', () {
+    testWidgets('普通 emoji 产出 WidgetSpan,size = baseStyle.fontSize', (tester) async {
+      late BuildContext ctx;
+      double? capturedSize;
+      EmojiRun? capturedRun;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox();
+        }),
+      ));
+      final result = flattener.flatten(
+        [const EmojiRun(name: 'heart', url: 'https://x/heart.png')],
+        baseStyle, // fontSize: 14
+        context: ctx,
+        emojiImageBuilder: (_, run, size) {
+          capturedRun = run;
+          capturedSize = size;
+          return const SizedBox();
+        },
+      );
+      final span = result.span.children![0];
+      expect(span, isA<WidgetSpan>());
+      // build 一次让 Builder 触发
+      await tester.pumpWidget(MaterialApp(home: Text.rich(result.span)));
+      expect(capturedSize, 14);
+      expect(capturedRun?.name, 'heart');
+    });
+
+    testWidgets('only-emoji 用 32dp', (tester) async {
+      double? capturedSize;
+      await tester.pumpWidget(MaterialApp(
+        home: Text.rich(TextSpan(children: [
+          flattener.flatten(
+            [const EmojiRun(name: 'tada', url: 'x.png', isOnlyEmoji: true)],
+            baseStyle,
+            emojiImageBuilder: (_, _, size) {
+              capturedSize = size;
+              return const SizedBox();
+            },
+          ).span,
+        ])),
+      ));
+      expect(capturedSize, 32);
+    });
+
+    testWidgets('h2 字号 21 时 emoji size 跟父 baseStyle', (tester) async {
+      double? capturedSize;
+      const h2Style = TextStyle(fontSize: 21);
+      await tester.pumpWidget(MaterialApp(
+        home: Text.rich(TextSpan(children: [
+          flattener.flatten(
+            [const EmojiRun(name: 'star', url: 'x.png')],
+            h2Style,
+            emojiImageBuilder: (_, _, size) {
+              capturedSize = size;
+              return const SizedBox();
+            },
+          ).span,
+        ])),
+      ));
+      expect(capturedSize, 21);
+    });
+
+    test('无 builder 时走 defaultEmojiImageBuilder(不抛)', () {
+      final result = flattener.flatten(
+        [const EmojiRun(name: 'heart', url: 'https://x/h.png')],
+        baseStyle,
+      );
+      final span = result.span.children![0];
+      expect(span, isA<WidgetSpan>());
+    });
+  });
+
+  group('MentionRun', () {
+    testWidgets('产出 WidgetSpan chip,tap 触发 handler 带 username + href',
+        (tester) async {
+      String? tappedUser;
+      String? tappedHref;
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Builder(builder: (c) {
+            ctx = c;
+            final result = flattener.flatten(
+              [const MentionRun(username: 'alice', href: '/u/alice')],
+              baseStyle,
+              context: c,
+              mentionTapHandler: (_, user, href) {
+                tappedUser = user;
+                tappedHref = href;
+              },
+            );
+            return Text.rich(result.span);
+          }),
+        ),
+      ));
+      // 找 chip 内的 GestureDetector,直接 tap
+      final gd = find.byType(GestureDetector);
+      expect(gd, findsWidgets);
+      await tester.tap(gd.first);
+      await tester.pump();
+      expect(tappedUser, 'alice');
+      expect(tappedHref, '/u/alice');
+      // 用 ctx 以防 unused var 警告
+      expect(ctx.mounted, isTrue);
+    });
+
+    testWidgets('chip 字色 = colorScheme.primary, 底色 = surfaceContainerHigh',
+        (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (c) {
+          ctx = c;
+          return Text.rich(flattener.flatten(
+            [const MentionRun(username: 'alice', href: '/u/alice')],
+            baseStyle,
+            context: c,
+          ).span);
+        }),
+      ));
+      final scheme = Theme.of(ctx).colorScheme;
+      // 找 chip 内的 Text 拿样式
+      final textWidget = tester.widget<Text>(
+        find.descendant(of: find.byType(Container), matching: find.byType(Text)),
+      );
+      expect(textWidget.data, '@alice');
+      expect(textWidget.style?.color, scheme.primary);
+      expect(textWidget.style?.fontSize, closeTo(14 * 0.82, 0.01));
+    });
+
+    testWidgets('statusEmoji 渲染到 username 右侧', (tester) async {
+      int builderCallCount = 0;
+      EmojiRun? receivedEmoji;
+      double? receivedSize;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (c) {
+          return Text.rich(flattener.flatten(
+            [
+              const MentionRun(
+                username: 'alice',
+                href: '/u/alice',
+                statusEmoji: EmojiRun(name: 'fire', url: 'x.png'),
+              ),
+            ],
+            baseStyle,
+            context: c,
+            emojiImageBuilder: (_, e, size) {
+              builderCallCount++;
+              receivedEmoji = e;
+              receivedSize = size;
+              return const SizedBox();
+            },
+          ).span);
+        }),
+      ));
+      expect(builderCallCount, 1);
+      expect(receivedEmoji?.name, 'fire');
+      // status emoji size = fontSize * 1.2 = 14 * 0.82 * 1.2 ≈ 13.78
+      expect(receivedSize, closeTo(14 * 0.82 * 1.2, 0.01));
+    });
+
+    test('无 handler 时走 defaultMentionTapHandler(不抛)', () {
+      final result = flattener.flatten(
+        [const MentionRun(username: 'a', href: '/u/a')],
+        baseStyle,
+      );
+      expect(result.span.children![0], isA<WidgetSpan>());
+    });
+  });
+}
