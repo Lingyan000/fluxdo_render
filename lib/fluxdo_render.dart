@@ -9,4 +9,5 @@
 /// 详细方案见 `docs/render_refactor_plan.md`。
 library;
 
+export 'src/dual/dual_render_widget.dart';
 export 'src/widget/fluxdo_render.dart';
