@@ -10,6 +10,8 @@
 library;
 
 export 'src/config/render_config.dart';
+export 'src/dev/fixtures_index.dart';
+export 'src/dev/fixtures_index.g.dart';
 export 'src/dual/dual_render_widget.dart';
 export 'src/flatten/inline_flattener.dart';
 export 'src/node/node.dart';
