@@ -262,8 +262,14 @@ class InlineFlattener {
   /// - `img.emoji`:`width: 1em; height: 1em; vertical-align: middle`
   /// - `img.emoji.only-emoji`:`width: 32px; height: 32px`
   ///
-  /// 子包不加载图片,实际渲染由 [EmojiImageBuilder] 注入(主项目用
-  /// 独立 emojiImageProvider 缓存池 + CDN 重写)。
+  /// 子包不加载图片,实际渲染由 [EmojiImageBuilder] 注入;**约定 builder
+  /// 自行用 size 约束尺寸**,这里不外包 SizedBox(否则 fallback 文本
+  /// 会被裁剪)。
+  ///
+  /// 垂直对齐策略:[PlaceholderAlignment.baseline] + `TextBaseline.alphabetic`,
+  /// 让 emoji 底部跟文字基线对齐(对图片这是 Discourse 视觉的默认形态)。
+  /// 不用 `middle`,因为 Flutter 的 `middle` 是 widget 中点对文字中线,
+  /// 在中文 + emoji 混排时偏低(中文基线本身就比拉丁基线高)。
   ///
   /// 选区注意:WidgetSpan 默认不参与选区文本,这里通过 `placeholder`
   /// 兜底视觉,实际选区文本由 SelectionArea 自处理(阶段 5 自研选区时
@@ -284,16 +290,13 @@ class InlineFlattener {
     final size = emoji.isOnlyEmoji ? 32.0 : emojiBaseSize;
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Builder(
-          builder: (ctx) {
-            // 优先用从 flattener 传入的 context(确保 Theme 可访问);
-            // 但 WidgetSpan child build 时已有自己的 context,两者通常等价
-            return emojiBuilder(context ?? ctx, emoji, size);
-          },
-        ),
+      baseline: TextBaseline.alphabetic,
+      child: Builder(
+        builder: (ctx) {
+          // 优先用从 flattener 传入的 context(确保 Theme 可访问);
+          // 但 WidgetSpan child build 时已有自己的 context,两者通常等价
+          return emojiBuilder(context ?? ctx, emoji, size);
+        },
       ),
     );
   }

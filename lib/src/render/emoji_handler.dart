@@ -3,6 +3,10 @@
 /// 子包不实现图片加载(主项目有 emojiImageProvider 独立缓存池、SVG 探测、
 /// upload:// 短链解析、CDN 重写 等),通过这个 typedef 注入。
 ///
+/// **约定**:builder 应该返回宽高 = [size] 的 widget(图片用 width/height,
+/// fallback 视情况)。子包不会在 builder 外再加 SizedBox 约束,以免
+/// fallback 文本被裁剪。
+///
 /// 调用方:
 /// ```dart
 /// FluxdoRender(
@@ -18,44 +22,59 @@
 
 library;
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../node/inline_node.dart';
 
 /// Emoji 渲染 builder。
 ///
 /// - [emoji] 包含 url / name / isOnlyEmoji
-/// - [size] 已根据 isOnlyEmoji + 父字号算好的最终显示 px(主项目按需用)
+/// - [size] 已根据 isOnlyEmoji + 父字号算好的最终显示 px
 typedef EmojiImageBuilder = Widget Function(
   BuildContext context,
   EmojiRun emoji,
   double size,
 );
 
-/// 默认 emoji builder —— 直接 Image.network,无缓存池、无 CDN 重写。
+/// 默认 emoji builder —— Image.network + chip 样式 fallback。
 ///
 /// 主项目接入时**必须**注入自定义 builder(性能差距大:Image.network
 /// 不走主项目的统一缓存池 + 鉴权)。子包默认值仅供 example gallery
 /// 和单测使用。
+///
+/// Fallback 形态:`:name:` 文本包在浅灰 chip 里,清晰提示"这里有 emoji
+/// 但没图"。完整显示 name,不裁剪。
 Widget defaultEmojiImageBuilder(
   BuildContext context,
   EmojiRun emoji,
   double size,
 ) {
-  if (emoji.url.isEmpty) {
-    // 兜底:URL 缺失时用纯文本 :name: 占位
-    return Text(
-      emoji.name.isEmpty ? ':?:' : ':${emoji.name}:',
-      style: TextStyle(fontSize: size * 0.9),
+  Widget placeholder() {
+    final text = emoji.name.isEmpty ? ':?:' : ':${emoji.name}:';
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: size * 0.75,
+          fontFamily: 'monospace',
+          color: scheme.onSurfaceVariant,
+          height: 1.0,
+        ),
+      ),
     );
   }
+
+  if (emoji.url.isEmpty) return placeholder();
   return Image.network(
     emoji.url,
     width: size,
     height: size,
-    errorBuilder: (_, _, _) => Text(
-      emoji.name.isEmpty ? ':?:' : ':${emoji.name}:',
-      style: TextStyle(fontSize: size * 0.9),
-    ),
+    errorBuilder: (_, _, _) => placeholder(),
   );
 }
