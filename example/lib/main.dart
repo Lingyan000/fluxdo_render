@@ -353,6 +353,11 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       buf.writeln('$pad$node');
     case CodeBlockNode():
       buf.writeln('$pad$node');
+    case QuoteCardNode():
+      buf.writeln('$pad$node');
+      for (final child in node.children) {
+        _writeNode(buf, child, indent + 1);
+      }
   }
 }
 

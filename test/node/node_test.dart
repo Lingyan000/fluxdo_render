@@ -103,6 +103,7 @@ void main() {
         BlockquoteNode() => 'blockquote',
         HorizontalRuleNode() => 'hr',
         CodeBlockNode() => 'code',
+        QuoteCardNode() => 'quoteCard',
       };
       expect(label, 'paragraph');
     });
@@ -391,6 +392,53 @@ void main() {
       expect(c.toString(), contains('b_3'));
       expect(c.toString(), contains('dart'));
       expect(c.toString(), contains('5 chars'));
+    });
+  });
+
+  group('QuoteCardNode', () {
+    test('==/hashCode 按 username/avatarUrl/title/href/topic/post/children', () {
+      const a = QuoteCardNode(
+        id: 'b_0',
+        username: 'alice',
+        topicId: 999,
+        postNumber: 3,
+        children: [ParagraphNode(id: 'b_1', inlines: [TextRun('x')])],
+      );
+      const b = QuoteCardNode(
+        id: 'b_99',
+        username: 'alice',
+        topicId: 999,
+        postNumber: 3,
+        children: [ParagraphNode(id: 'b_2', inlines: [TextRun('x')])],
+      );
+      expect(a, b);
+      const c = QuoteCardNode(id: 'b_0', username: 'bob');
+      expect(a == c, isFalse);
+    });
+
+    test('avatarUrl / titleText / titleHref / topicId / postNumber 默认 null',
+        () {
+      const q = QuoteCardNode(id: 'b_0', username: 'a');
+      expect(q.avatarUrl, isNull);
+      expect(q.titleText, isNull);
+      expect(q.titleHref, isNull);
+      expect(q.topicId, isNull);
+      expect(q.postNumber, isNull);
+      expect(q.children, isEmpty);
+    });
+
+    test('toString 含 username + topic/post 标记', () {
+      const a = QuoteCardNode(id: 'b_0', username: 'alice');
+      expect(a.toString(), contains('@alice'));
+      expect(a.toString(), isNot(contains('t=')));
+      const b = QuoteCardNode(
+        id: 'b_0',
+        username: 'alice',
+        topicId: 999,
+        postNumber: 3,
+      );
+      expect(b.toString(), contains('t=999'));
+      expect(b.toString(), contains('p=3'));
     });
   });
 }

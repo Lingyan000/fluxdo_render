@@ -22,6 +22,7 @@ import 'image_handler.dart';
 import 'inline_span_text.dart';
 import 'link_handler.dart';
 import 'mention_handler.dart';
+import 'quote_avatar_handler.dart';
 
 class NodeFactory {
   NodeFactory({
@@ -31,6 +32,7 @@ class NodeFactory {
     this.mentionTapHandler,
     this.imageContentBuilder,
     this.codeBlockHighlighter,
+    this.quoteAvatarBuilder,
     this.totalImagesInPost = 0,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
 
@@ -56,6 +58,10 @@ class NodeFactory {
   /// 不传时用 [defaultCodeBlockHighlighter](纯 monospace 无高亮)。
   final CodeBlockHighlighter? codeBlockHighlighter;
 
+  /// 引用卡头像 builder,主项目注入(主项目用 SmartAvatar 走鉴权 +
+  /// CDN 重写)。不传时用 [defaultQuoteAvatarBuilder](首字母 chip)。
+  final QuoteAvatarBuilder? quoteAvatarBuilder;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -72,6 +78,7 @@ class NodeFactory {
       BlockquoteNode() => buildBlockquote(context, node),
       HorizontalRuleNode() => buildHorizontalRule(context, node),
       CodeBlockNode() => buildCodeBlock(context, node),
+      QuoteCardNode() => buildQuoteCard(context, node),
     };
   }
 
@@ -336,6 +343,121 @@ class NodeFactory {
           ),
         ],
       ),
+    );
+  }
+
+  /// 引用卡渲染 — `<aside class="quote">`(Discourse 经典"@回复")。
+  ///
+  /// 样式对齐 legacy `quote_card_builder.dart`:
+  ///   外容器:跟 buildBlockquote 同款(灰底 + 左 4px 竖条 + 右上右下圆角)
+  ///   顶部:头像(radius 12)+ `username:` + 可选标题(主色,可点)
+  ///   内容:子 BlockNode 递归 build,DefaultTextStyle 注入 onSurfaceVariant
+  ///
+  /// 标题 onTap 走 [linkHandler] + titleHref(主项目走 launchContentLink)。
+  /// avatar 走 [quoteAvatarBuilder] callback,默认首字母 chip。
+  Widget buildQuoteCard(BuildContext context, QuoteCardNode node) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final avatarBuilder = quoteAvatarBuilder ?? defaultQuoteAvatarBuilder;
+    final usernameStyle = theme.textTheme.labelLarge?.copyWith(
+      color: scheme.onSurfaceVariant,
+      fontWeight: FontWeight.w500,
+    );
+    final titleStyle = theme.textTheme.labelMedium?.copyWith(
+      height: 1.2,
+      color: scheme.primary,
+    );
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        border: Border(
+          left: BorderSide(color: scheme.outline, width: 4),
+        ),
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(4),
+          bottomRight: Radius.circular(4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 顶部:头像 + username + 可选标题
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Row(
+              children: [
+                avatarBuilder(context, node.username, node.avatarUrl, 24),
+                const SizedBox(width: 8),
+                Text(
+                  '${node.username}:',
+                  style: usernameStyle,
+                ),
+                if (node.titleText != null) ...[
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: _QuoteTitle(
+                      text: node.titleText!,
+                      href: node.titleHref,
+                      style: titleStyle,
+                      onTap: node.titleHref == null || linkHandler == null
+                          ? null
+                          : () => linkHandler!(context, node.titleHref!),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          // 内容
+          if (node.children.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              child: DefaultTextStyle.merge(
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
+                  height: 1.5,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final child in node.children) build(context, child),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 引用卡标题文本(只是一行 InkWell-y 可点 Text;主色 + 省略)。
+class _QuoteTitle extends StatelessWidget {
+  const _QuoteTitle({
+    required this.text,
+    required this.href,
+    required this.style,
+    required this.onTap,
+  });
+
+  final String text;
+  final String? href;
+  final TextStyle? style;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final textWidget = Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
+    if (onTap == null) return textWidget;
+    return GestureDetector(
+      onTap: onTap,
+      child: textWidget,
     );
   }
 }

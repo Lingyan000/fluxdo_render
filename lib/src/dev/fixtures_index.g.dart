@@ -628,6 +628,47 @@ bold + italic 样式应该被保留,link 的下划线也应该有。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''quote_card/nested_quote.html''',
+    html: r'''<aside class="quote" data-username="outer_user" data-post="2" data-topic="111">
+<div class="title">
+<img alt="" src="https://example.com/avatar/outer/40.png" class="avatar">
+outer_user:
+</div>
+<blockquote>
+<p>外层引用包了一个内层引用:</p>
+<aside class="quote" data-username="inner_user" data-post="1" data-topic="111">
+<div class="title">
+<img alt="" src="https://example.com/avatar/inner/40.png" class="avatar">
+inner_user:
+</div>
+<blockquote>
+<p>这是最内层的引用内容。</p>
+</blockquote>
+</aside>
+<p>外层的回应。</p>
+</blockquote>
+</aside>
+''',
+    notes: r'''双层嵌套引用(quote 内含 quote)。验证 parser 递归 + renderer 内递归
+build,每层都有自己的灰底 + 头像。''',
+    source: r'''https://example.com/t/sample/1/qc4''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''quote_card/no_title_block.html''',
+    html: r'''<aside class="quote" data-username="dave" data-post="7" data-topic="999">
+<blockquote>
+<p>没有标题块,只有 data-username 和正文。</p>
+</blockquote>
+</aside>
+''',
+    notes: r'''反例:无 .title 块的 quote(罕见,但 Discourse 某些 plugin 输出会缺)。
+验证 parser 容错:avatarUrl/titleText/titleHref 均为 null,头像走
+首字母 chip fallback。''',
+    source: r'''https://example.com/t/sample/1/qc5''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
     relativePath: r'''quote_card/single_layer_simple.html''',
     html: r'''<aside class="quote no-group" data-username="alice" data-post="1" data-topic="999">
 <div class="title">
@@ -642,6 +683,46 @@ bold + italic 样式应该被保留,link 的下划线也应该有。''',
     notes: r'''单层引用卡(aside.quote)含用户头像 + 用户名 + 引用正文,后跟回复段落。
 这是 Discourse 最常见的"@回复"形态。''',
     source: r'''https://example.com/t/sample/1/4''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''quote_card/with_rich_content.html''',
+    html: r'''<aside class="quote" data-username="charlie" data-post="5" data-topic="999">
+<div class="title">
+<img alt="" src="https://example.com/avatar/charlie/40.png" class="avatar">
+charlie:
+</div>
+<blockquote>
+<p>第一段引用,含 <strong>粗体</strong>。</p>
+<p>第二段引用,含 <a href="https://example.com">链接</a> 和 <code>code</code>。</p>
+<ul>
+<li>列表项 1</li>
+<li>列表项 2</li>
+</ul>
+</blockquote>
+</aside>
+''',
+    notes: r'''引用正文含 inline 混排(strong/code/link)+ list,验证 _parseBlocks
+在 blockquote 内递归正常,所有 inline + block 都能在 quote 内显示。''',
+    source: r'''https://example.com/t/sample/1/qc3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''quote_card/with_title.html''',
+    html: r'''<aside class="quote" data-username="bob" data-post="3" data-topic="999">
+<div class="title">
+<div class="quote-controls"></div>
+<img alt="" width="20" height="20" src="https://example.com/avatar/bob/40.png" class="avatar">
+<a href="/t/topic-slug/999/3">原帖标题(新版格式)</a>
+</div>
+<blockquote>
+<p>带标题的引用,标题应该是主色可点。</p>
+</blockquote>
+</aside>
+''',
+    notes: r'''含标题(.title 内 a 标签)的引用,验证 titleText/titleHref 解析 +
+标题主色可点 + linkHandler 路由跳原帖。''',
+    source: r'''https://example.com/t/sample/1/qc2''',
     edgeCase: false,
   ),
 ];

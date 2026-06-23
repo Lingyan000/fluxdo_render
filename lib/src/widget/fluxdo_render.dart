@@ -8,13 +8,14 @@ import '../render/image_handler.dart';
 import '../render/link_handler.dart';
 import '../render/mention_handler.dart';
 import '../render/node_factory.dart';
+import '../render/quote_avatar_handler.dart';
 
 /// 帖子渲染入口 widget。
 ///
 /// 当前作用域(阶段 1):段落 + 标题 + 列表 + 引用块 + 分割线 + 代码块 +
-/// 行内 em/strong/br/text/link/inline_code/emoji/mention/image。
-/// 其他节点(quote_card / spoiler 等)按 docs/node_priority.md 顺序在
-/// 后续阶段实现。未识别块级会 fallback 成段落 + textContent。
+/// 引用卡 + 行内 em/strong/br/text/link/inline_code/emoji/mention/image。
+/// 其他节点(spoiler 等)按 docs/node_priority.md 顺序在后续阶段实现。
+/// 未识别块级会 fallback 成段落 + textContent。
 class FluxdoRender extends StatefulWidget {
   const FluxdoRender({
     super.key,
@@ -26,6 +27,7 @@ class FluxdoRender extends StatefulWidget {
     this.mentionTapHandler,
     this.imageContentBuilder,
     this.codeBlockHighlighter,
+    this.quoteAvatarBuilder,
   });
 
   /// Discourse cooked HTML 内容。
@@ -57,6 +59,10 @@ class FluxdoRender extends StatefulWidget {
   /// 代码块高亮 builder —— 主项目注入,走 HighlighterService(highlight.js)
   /// + Mermaid 等。不传则纯 monospace。
   final CodeBlockHighlighter? codeBlockHighlighter;
+
+  /// 引用卡头像 builder —— 主项目注入,走 SmartAvatar(鉴权 + CDN 重写)。
+  /// 不传则首字母 chip。
+  final QuoteAvatarBuilder? quoteAvatarBuilder;
 
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
@@ -95,6 +101,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           mentionTapHandler: widget.mentionTapHandler,
           imageContentBuilder: widget.imageContentBuilder,
           codeBlockHighlighter: widget.codeBlockHighlighter,
+          quoteAvatarBuilder: widget.quoteAvatarBuilder,
           totalImagesInPost: _totalImagesInPost,
         );
     if (_nodes.isEmpty) {

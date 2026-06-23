@@ -270,6 +270,98 @@ class CodeBlockNode extends BlockNode {
       'CodeBlockNode($id, lang=${language ?? "?"}, ${code.length} chars)';
 }
 
+/// 回复引用卡 — `<aside class="quote">`,Discourse 最常见的"@回复"形态。
+///
+/// HTML 形态(简化):
+/// ```html
+/// <aside class="quote" data-username="alice" data-post="3" data-topic="999">
+///   <div class="title">
+///     <img class="avatar" src="...">
+///     alice:
+///     <a href="/t/topic-slug/999/3">原帖标题</a>
+///   </div>
+///   <blockquote>
+///     <p>这是被引用的内容</p>
+///   </blockquote>
+/// </aside>
+/// ```
+///
+/// 视觉对齐 legacy `quote_card_builder.dart`:
+///   margin 上下 8;灰底 + 左 4px 竖条 + 右上右下圆角 4
+///   头部:头像 + "username:" + 可选标题(主色)
+///   内容:嵌套 BlockNode 递归渲染(走 buildBlockquote 同样的子样式)
+///
+/// **不持 categoryHtml**:Discourse badge 是独立组件,主项目接入再补。
+/// 头像复用主项目 [imageContentBuilder](通过一个 ImageRun adapter),
+/// 这样头像也走 discourseImageProvider 缓存池。
+@immutable
+class QuoteCardNode extends BlockNode {
+  const QuoteCardNode({
+    required super.id,
+    required this.username,
+    this.avatarUrl,
+    this.titleText,
+    this.titleHref,
+    this.topicId,
+    this.postNumber,
+    this.children = const [],
+  });
+
+  /// `data-username`,主项目用它构造用户卡跳转(同 MentionRun.username)。
+  /// 缺失时空串。
+  final String username;
+
+  /// `img.avatar` 的 src(原始 URL,parser 不重写)。
+  /// 缺失时 null,渲染走首字母 chip fallback。
+  final String? avatarUrl;
+
+  /// 引用标题的文本(legacy 是 html,我们简化为 text)。
+  final String? titleText;
+
+  /// 引用标题里的 `<a href>`,主项目用 LinkHandler 跳原帖。
+  /// 优先级:有 titleHref → 用它;无则 topicId + postNumber 拼。
+  final String? titleHref;
+
+  /// `data-topic`(`int.tryParse` 失败时 null)。
+  final int? topicId;
+
+  /// `data-post`(`int.tryParse` 失败时 null)。
+  final int? postNumber;
+
+  /// `<blockquote>` 内的递归 BlockNode。
+  final List<BlockNode> children;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is QuoteCardNode &&
+          runtimeType == other.runtimeType &&
+          username == other.username &&
+          avatarUrl == other.avatarUrl &&
+          titleText == other.titleText &&
+          titleHref == other.titleHref &&
+          topicId == other.topicId &&
+          postNumber == other.postNumber &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hash(
+        username,
+        avatarUrl,
+        titleText,
+        titleHref,
+        topicId,
+        postNumber,
+        Object.hashAll(children),
+      );
+
+  @override
+  String toString() =>
+      'QuoteCardNode($id, @$username'
+      '${topicId == null ? "" : ", t=$topicId/p=$postNumber"}, '
+      '${children.length} children)';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -315,6 +407,10 @@ int countImageRuns(List<BlockNode> nodes) {
           }
         }
       case BlockquoteNode(:final children):
+        for (final c in children) {
+          scanBlock(c);
+        }
+      case QuoteCardNode(:final children):
         for (final c in children) {
           scanBlock(c);
         }

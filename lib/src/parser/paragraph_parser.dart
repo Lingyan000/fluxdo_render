@@ -142,6 +142,20 @@ class ParagraphParser {
                   code: code,
                   language: language,
                 ));
+              case 'aside':
+                // class="quote" → QuoteCardNode;其他 aside(如 onebox)
+                // 留给后续阶段实现(目前 fallback 到 textContent)
+                if (node.classes.contains('quote')) {
+                  out.add(_parseQuoteCard(node, nextId, nextImageIndex));
+                } else {
+                  final text = node.text;
+                  if (text.trim().isNotEmpty) {
+                    out.add(ParagraphNode(
+                      id: nextId(),
+                      inlines: List.unmodifiable([TextRun(text)]),
+                    ));
+                  }
+                }
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——
@@ -218,6 +232,57 @@ class ParagraphParser {
       ordered: ordered,
       depth: depth,
       items: List.unmodifiable(items),
+    );
+  }
+
+  /// 解析 `<aside class="quote">` 为 QuoteCardNode。
+  ///
+  /// 提取 data-username / data-topic / data-post + img.avatar + title 标题 +
+  /// blockquote 内容(递归 _parseBlocks)。
+  ///
+  /// 兼容两种标题形态:
+  /// - 新版:`.quote-title__text-content > a`
+  /// - 老版:`.title > a`(legacy quote_card_builder 同样回退)
+  QuoteCardNode _parseQuoteCard(
+    dom.Element asideEl,
+    String Function() nextId,
+    int Function() nextImageIndex,
+  ) {
+    final username = asideEl.attributes['data-username']?.trim() ?? '';
+    final topicId = int.tryParse(asideEl.attributes['data-topic'] ?? '');
+    final postNumber = int.tryParse(asideEl.attributes['data-post'] ?? '');
+
+    final avatarEl = asideEl.querySelector('img.avatar');
+    final avatarUrl = avatarEl?.attributes['src']?.trim();
+
+    // 标题:新版 .quote-title__text-content > a;老版 .title > a
+    final titleAEl = asideEl.querySelector(
+          '.quote-title__text-content a',
+        ) ??
+        asideEl.querySelector('.title a');
+    String? titleText;
+    String? titleHref;
+    if (titleAEl != null) {
+      titleText = titleAEl.text.trim();
+      titleHref = titleAEl.attributes['href']?.trim();
+      if (titleText.isEmpty) titleText = null;
+      if ((titleHref ?? '').isEmpty) titleHref = null;
+    }
+
+    final blockquoteEl = asideEl.querySelector('blockquote');
+    final children = blockquoteEl == null
+        ? const <BlockNode>[]
+        : _parseBlocks(blockquoteEl.nodes, nextId, nextImageIndex);
+
+    return QuoteCardNode(
+      id: nextId(),
+      username: username,
+      avatarUrl: (avatarUrl ?? '').isEmpty ? null : avatarUrl,
+      titleText: titleText,
+      titleHref: titleHref,
+      topicId: topicId,
+      postNumber: postNumber,
+      children: children,
     );
   }
 
