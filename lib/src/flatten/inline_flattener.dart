@@ -453,12 +453,21 @@ class InlineFlattener {
     int totalImagesInPost,
     BuildContext? context,
   ) {
+    // lightbox 图(典型形态:Discourse cooked 上传图)单独成行,
+    // 加上下小 margin 区隔相邻图片 / 文字。普通 inline <img> 不加。
+    final isLightbox = image.lightboxUrl != null;
+    final child = Builder(
+      builder: (ctx) =>
+          imageBuilder(context ?? ctx, image, totalImagesInPost),
+    );
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
-      child: Builder(
-        builder: (ctx) =>
-            imageBuilder(context ?? ctx, image, totalImagesInPost),
-      ),
+      child: isLightbox
+          ? Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: child,
+            )
+          : child,
     );
   }
 
