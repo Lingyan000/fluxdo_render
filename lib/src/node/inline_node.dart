@@ -1,7 +1,8 @@
 /// 行内节点 sealed family。
 ///
-/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji / Mention
-/// 后续会扩展 ImageRun 等。
+/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji /
+/// Mention / Image
+/// 后续会扩展更多行内节点(spoiler 等)。
 
 library;
 
@@ -246,4 +247,58 @@ class MentionRun extends InlineNode {
   @override
   String toString() =>
       'MentionRun(@$username, $href${statusEmoji == null ? "" : ", emoji"})';
+}
+
+/// `<img>` 行内图片(不含 `class="emoji"` 的那种,emoji 走 [EmojiRun])。
+///
+/// Discourse cooked 形态:
+/// ```html
+/// <img src="https://.../upload/..." alt="screenshot" width="600" height="400">
+/// <img src="https://example.com/foo.png">
+/// ```
+///
+/// 子包**不实际加载图片 / 不做 gallery / 不做 lightbox**(主项目有 Hero
+/// + 长按菜单 + upload:// 短链解析 + emojiImageProvider 等复杂逻辑),
+/// 渲染时通过 [ImageContentBuilder] callback 由主项目注入。子包默认
+/// fallback 是 `Image.network` + broken-image icon。
+///
+/// **不持 ImageProvider**:子包不依赖任何具体 image loading 实现,
+/// 只把 raw src 字符串原值暴露给 builder,主项目自己解析 + 重写 CDN。
+@immutable
+class ImageRun extends InlineNode {
+  const ImageRun({
+    required this.src,
+    this.alt = '',
+    this.width,
+    this.height,
+  });
+
+  /// 完整图片 URL(parser 不做任何重写;含 upload:// 短链时由主项目解析)。
+  final String src;
+
+  /// alt 文本,a11y + 加载失败时占位。
+  final String alt;
+
+  /// HTML attribute 里的 width(px),null 表示由 builder 决定。
+  final double? width;
+
+  /// HTML attribute 里的 height(px),null 表示由 builder 决定。
+  final double? height;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImageRun &&
+          runtimeType == other.runtimeType &&
+          src == other.src &&
+          alt == other.alt &&
+          width == other.width &&
+          height == other.height;
+
+  @override
+  int get hashCode => Object.hash(src, alt, width, height);
+
+  @override
+  String toString() =>
+      'ImageRun($src${width == null ? "" : ", ${width}x$height"})';
 }

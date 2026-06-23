@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import '../flatten/inline_flattener.dart';
 import '../node/node.dart';
 import 'emoji_handler.dart';
+import 'image_handler.dart';
 import 'inline_span_text.dart';
 import 'link_handler.dart';
 import 'mention_handler.dart';
@@ -26,6 +27,7 @@ class NodeFactory {
     this.linkHandler,
     this.emojiImageBuilder,
     this.mentionTapHandler,
+    this.imageContentBuilder,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
 
   final InlineFlattener _inlineFlattener;
@@ -41,6 +43,10 @@ class NodeFactory {
   /// Mention chip 点击跳用户卡 callback,主项目注入。
   /// 不传时用 [defaultMentionTapHandler](仅 debugPrint)。
   final MentionTapHandler? mentionTapHandler;
+
+  /// 内容图片(非 emoji)builder,主项目注入。
+  /// 不传时用 [defaultImageContentBuilder](Image.network + broken-image 占位)。
+  final ImageContentBuilder? imageContentBuilder;
 
   /// 入口 dispatch — sealed class exhaustive switch。
   Widget build(BuildContext context, BlockNode node) {
@@ -71,6 +77,7 @@ class NodeFactory {
         linkHandler: linkHandler,
         emojiImageBuilder: emojiImageBuilder,
         mentionTapHandler: mentionTapHandler,
+        imageContentBuilder: imageContentBuilder,
       ),
     );
   }
@@ -100,6 +107,7 @@ class NodeFactory {
         linkHandler: linkHandler,
         emojiImageBuilder: emojiImageBuilder,
         mentionTapHandler: mentionTapHandler,
+        imageContentBuilder: imageContentBuilder,
       ),
     );
   }
@@ -174,6 +182,7 @@ class NodeFactory {
                   linkHandler: linkHandler,
                   emojiImageBuilder: emojiImageBuilder,
                   mentionTapHandler: mentionTapHandler,
+                  imageContentBuilder: imageContentBuilder,
                 ),
               ),
             ],

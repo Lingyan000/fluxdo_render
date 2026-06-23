@@ -1,7 +1,7 @@
 /// 把 `List<InlineNode>` 压平成 Flutter 的 InlineSpan 树。
 ///
 /// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji /
-/// Mention 八种 + 嵌套样式合并。后续阶段会加 ImageRun 等。
+/// Mention / Image 九种 + 嵌套样式合并。后续阶段会加更多 inline 节点。
 ///
 /// 设计:
 /// - 输出 InlineSpan 树而不是 widget list — 让一个段落的所有文字共享一个
@@ -28,6 +28,7 @@ import 'package:flutter/material.dart';
 
 import '../node/inline_node.dart';
 import '../render/emoji_handler.dart';
+import '../render/image_handler.dart';
 import '../render/link_handler.dart';
 import '../render/mention_handler.dart';
 
@@ -53,14 +54,16 @@ class InlineFlattener {
   /// [defaultEmojiImageBuilder](Image.network 兜底)。
   /// [mentionTapHandler]:点击 mention chip 跳用户卡的回调(主项目注入)。
   /// null 时用 [defaultMentionTapHandler](仅 debugPrint)。
-  /// [context]:link/mention 点击 + emoji 字号探测时传给 handler 用;null
-  /// 时 link/mention 不可点 + emoji 尺寸退化为 baseStyle.fontSize 或 14。
+  /// [imageContentBuilder]:内容图片(非 emoji)渲染 builder。null 时用
+  /// [defaultImageContentBuilder](Image.network 兜底)。
+  /// [context]:link/mention 点击 + emoji 字号探测时传给 handler 用。
   FlattenResult flatten(
     List<InlineNode> inlines,
     TextStyle baseStyle, {
     LinkActionHandler? linkHandler,
     EmojiImageBuilder? emojiImageBuilder,
     MentionTapHandler? mentionTapHandler,
+    ImageContentBuilder? imageContentBuilder,
     BuildContext? context,
   }) {
     final recognizers = <GestureRecognizer>[];
@@ -68,6 +71,7 @@ class InlineFlattener {
     final handler = linkHandler ?? defaultLinkHandler;
     final emojiBuilder = emojiImageBuilder ?? defaultEmojiImageBuilder;
     final mentionHandler = mentionTapHandler ?? defaultMentionTapHandler;
+    final imageBuilder = imageContentBuilder ?? defaultImageContentBuilder;
     final emojiBaseSize = baseStyle.fontSize ?? 14;
     for (final node in inlines) {
       children.add(_toSpan(
@@ -75,6 +79,7 @@ class InlineFlattener {
         handler,
         emojiBuilder,
         mentionHandler,
+        imageBuilder,
         emojiBaseSize,
         context,
         recognizers,
@@ -91,6 +96,7 @@ class InlineFlattener {
     LinkActionHandler handler,
     EmojiImageBuilder emojiBuilder,
     MentionTapHandler mentionHandler,
+    ImageContentBuilder imageBuilder,
     double emojiBaseSize,
     BuildContext? context,
     List<GestureRecognizer> recognizers, {
@@ -103,6 +109,7 @@ class InlineFlattener {
           handler,
           emojiBuilder,
           mentionHandler,
+          imageBuilder,
           emojiBaseSize,
           context,
           recognizers,
@@ -116,6 +123,7 @@ class InlineFlattener {
     LinkActionHandler handler,
     EmojiImageBuilder emojiBuilder,
     MentionTapHandler mentionHandler,
+    ImageContentBuilder imageBuilder,
     double emojiBaseSize,
     BuildContext? context,
     List<GestureRecognizer> recognizers, {
@@ -133,6 +141,7 @@ class InlineFlattener {
             handler,
             emojiBuilder,
             mentionHandler,
+            imageBuilder,
             emojiBaseSize,
             context,
             recognizers,
@@ -146,6 +155,7 @@ class InlineFlattener {
             handler,
             emojiBuilder,
             mentionHandler,
+            imageBuilder,
             emojiBaseSize,
             context,
             recognizers,
@@ -162,6 +172,7 @@ class InlineFlattener {
           handler,
           emojiBuilder,
           mentionHandler,
+          imageBuilder,
           emojiBaseSize,
           context,
           recognizers,
@@ -185,6 +196,7 @@ class InlineFlattener {
           emojiBaseSize,
           context,
         ),
+      ImageRun() => _buildImageSpan(node, imageBuilder, context),
     };
   }
 
@@ -194,6 +206,7 @@ class InlineFlattener {
     LinkActionHandler handler,
     EmojiImageBuilder emojiBuilder,
     MentionTapHandler mentionHandler,
+    ImageContentBuilder imageBuilder,
     double emojiBaseSize,
     BuildContext? context,
     List<GestureRecognizer> recognizers,
@@ -223,6 +236,7 @@ class InlineFlattener {
         handler,
         emojiBuilder,
         mentionHandler,
+        imageBuilder,
         emojiBaseSize,
         context,
         recognizers,
@@ -384,6 +398,26 @@ class InlineFlattener {
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// 内容图片渲染:WidgetSpan 嵌入图片,大小完全由 builder 决定。
+  ///
+  /// 跟 EmojiRun 不同:emoji 是 1em / 32dp 固定尺寸,这里不限制 ——
+  /// `<img width=600 height=400>` 应该撑满 600x400,但段宽不够时
+  /// builder 自己处理(主项目通常用 BoxFit.contain + 外层 Stack 截宽)。
+  ///
+  /// 对齐 [PlaceholderAlignment.middle](跟 emoji 一致,避免基线偏移)。
+  WidgetSpan _buildImageSpan(
+    ImageRun image,
+    ImageContentBuilder imageBuilder,
+    BuildContext? context,
+  ) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: Builder(
+        builder: (ctx) => imageBuilder(context ?? ctx, image),
       ),
     );
   }

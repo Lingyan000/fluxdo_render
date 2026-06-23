@@ -116,6 +116,7 @@ void main() {
         InlineCodeRun('c'),
         EmojiRun(name: 'heart', url: 'https://x/heart.png'),
         MentionRun(username: 'alice', href: '/u/alice'),
+        ImageRun(src: 'https://x/foo.png'),
       ];
       final labels = list
           .map(
@@ -128,11 +129,12 @@ void main() {
               InlineCodeRun() => 'inlineCode',
               EmojiRun() => 'emoji',
               MentionRun() => 'mention',
+              ImageRun() => 'image',
             },
           )
           .toList();
       expect(labels, [
-        'text', 'em', 'strong', 'br', 'link', 'inlineCode', 'emoji', 'mention'
+        'text', 'em', 'strong', 'br', 'link', 'inlineCode', 'emoji', 'mention', 'image',
       ]);
     });
   });
@@ -334,6 +336,35 @@ void main() {
     test('toString 含 id', () {
       const hr = HorizontalRuleNode(id: 'b_3');
       expect(hr.toString(), contains('b_3'));
+    });
+  });
+
+  group('ImageRun', () {
+    test('==/hashCode 按 src + alt + width + height', () {
+      const a = ImageRun(src: 'x.png', alt: 'pic', width: 100, height: 50);
+      const b = ImageRun(src: 'x.png', alt: 'pic', width: 100, height: 50);
+      const c = ImageRun(src: 'y.png', alt: 'pic', width: 100, height: 50);
+      const d = ImageRun(src: 'x.png', alt: 'other', width: 100, height: 50);
+      const e = ImageRun(src: 'x.png', alt: 'pic', width: 200, height: 50);
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a == c, isFalse);
+      expect(a == d, isFalse);
+      expect(a == e, isFalse);
+    });
+
+    test('alt 默认空串, width/height 默认 null', () {
+      const i = ImageRun(src: 'x.png');
+      expect(i.alt, '');
+      expect(i.width, isNull);
+      expect(i.height, isNull);
+    });
+
+    test('toString 含 src, 有尺寸时标尺寸', () {
+      const a = ImageRun(src: 'foo.png');
+      expect(a.toString(), contains('foo.png'));
+      const b = ImageRun(src: 'foo.png', width: 100, height: 50);
+      expect(b.toString(), contains('100'));
     });
   });
 }

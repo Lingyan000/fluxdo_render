@@ -271,10 +271,9 @@ class ParagraphParser {
         // 不保留嵌套样式。
         out.add(InlineCodeRun(_textContent(el)));
       case 'img':
-        // 只识别 class="emoji" 的 img — 普通 inline img(图片帖正文)
-        // 走阶段 2 image 节点单独实现。
+        final src = el.attributes['src']?.trim() ?? '';
+        // class="emoji" 走 EmojiRun(行内表情图)
         if (el.classes.contains('emoji')) {
-          final src = el.attributes['src']?.trim() ?? '';
           // alt/title 里去掉首尾 `:`(Discourse 形如 `:heart:`)
           final raw = (el.attributes['title'] ?? el.attributes['alt'] ?? '').trim();
           final name = raw.replaceAll(RegExp(r'^:|:$'), '');
@@ -283,8 +282,13 @@ class ParagraphParser {
             url: src,
             isOnlyEmoji: el.classes.contains('only-emoji'),
           ));
+        } else {
+          // 普通内容图片走 ImageRun(主项目注入 builder)
+          final alt = el.attributes['alt']?.trim() ?? '';
+          final w = double.tryParse(el.attributes['width'] ?? '');
+          final h = double.tryParse(el.attributes['height'] ?? '');
+          out.add(ImageRun(src: src, alt: alt, width: w, height: h));
         }
-        // 非 emoji 的 img 暂时丢弃(阶段 2 加 image 节点)
       default:
         // 未识别 inline:展平子节点
         out.addAll(children);

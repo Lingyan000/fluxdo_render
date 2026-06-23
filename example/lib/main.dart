@@ -384,6 +384,11 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
       if (statusEmoji != null) {
         _writeInline(buf, statusEmoji, indent + 1);
       }
+    case ImageRun(:final src, :final alt, :final width, :final height):
+      buf.writeln(
+        '${pad}ImageRun($src${width == null ? "" : " ${width}x$height"}'
+        '${alt.isEmpty ? "" : " alt=$alt"})',
+      );
   }
 }
 

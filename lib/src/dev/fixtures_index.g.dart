@@ -254,6 +254,56 @@ hr 自带 12 上下 padding,叠加不会塌缩(Column 不折叠 margin)。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''image/inside_link.html''',
+    html: r'''<p>点击查看大图:<a href="https://example.com/lightbox/foo"><img src="https://example.com/upload/thumb.png" alt="thumbnail" width="100" height="100"></a></p>
+''',
+    notes: r'''img 嵌套在 link 内 — 验证 LinkRun.children 含 ImageRun 正常解析。
+注意:WidgetSpan 不带 recognizer,所以图片本身**不可点**(已知限制,
+跟 emoji-in-link 同源,留到阶段 5 自研选区时统一解决)。主项目接入
+通常会在 imageContentBuilder 内自己包 GestureDetector 处理 lightbox。''',
+    source: r'''https://example.com/t/sample/1/img4''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''image/multiple_in_paragraph.html''',
+    html: r'''<p>对比图:<img src="https://example.com/upload/before.png" alt="before" width="120" height="80"> 和 <img src="https://example.com/upload/after.png" alt="after" width="120" height="80"></p>
+''',
+    notes: r'''一段里多张图,验证 WidgetSpan 之间正常排列 + 中间文本不被吞。''',
+    source: r'''https://example.com/t/sample/1/img3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''image/simple.html''',
+    html: r'''<p>看这张截图:<img src="https://example.com/upload/screenshot.png" alt="screenshot"></p>
+''',
+    notes: r'''最基础形态:段落内一张无尺寸 img。验证 ImageRun 解析(width/height
+= null)+ 子包默认 builder 走 fallback placeholder(假 URL 加载失败)。''',
+    source: r'''https://example.com/t/sample/1/img1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''image/standalone_blocks.html''',
+    html: r'''<p>第一张图:</p>
+<p><img src="https://example.com/upload/first.png" alt="first" width="200" height="120"></p>
+<p>第二张图:</p>
+<p><img src="https://example.com/upload/second.png" alt="second" width="200" height="120"></p>
+''',
+    notes: r'''Discourse 通常把图片 cooked 成独立 `<p><img></p>` 块,验证两张图
+各自独立段落。这是图片帖正文最常见的形态。''',
+    source: r'''https://example.com/t/sample/1/img5''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''image/with_dimensions.html''',
+    html: r'''<p>固定尺寸的图:<img src="https://example.com/upload/diagram.png" alt="diagram" width="200" height="120"></p>
+''',
+    notes: r'''带 width/height attribute,验证 parser 把数字 attribute 转 double
+填到 ImageRun.width/height,fallback placeholder 用这个尺寸撑出
+正确的占位框。''',
+    source: r'''https://example.com/t/sample/1/img2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''inline_code/inside_link.html''',
     html: r'''<p>查看 <a href="https://api.flutter.dev/flutter/widgets/RichText-class.html"><code>RichText</code> 文档</a> 了解细节。</p>
 ''',

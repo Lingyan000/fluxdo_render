@@ -47,7 +47,8 @@ enum NodeKind {
   chatTranscript,
   localDate,
   policy,
-  horizontalRule;
+  horizontalRule,
+  image;
 
   /// 与 fixture 目录名一致的字符串(snake_case)。
   String get dirName => switch (this) {
@@ -76,6 +77,7 @@ enum NodeKind {
         NodeKind.localDate => 'local_date',
         NodeKind.policy => 'policy',
         NodeKind.horizontalRule => 'horizontal_rule',
+        NodeKind.image => 'image',
       };
 
   /// 节点的英文显示名,作为 fallback 显示。
@@ -109,6 +111,7 @@ enum NodeKind {
         NodeKind.localDate => 'Local date',
         NodeKind.policy => 'Policy',
         NodeKind.horizontalRule => 'Horizontal rule',
+        NodeKind.image => 'Image',
       };
 
   /// 根据 dirName 反查。未知值返回 null。

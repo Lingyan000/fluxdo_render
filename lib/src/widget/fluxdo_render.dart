@@ -3,16 +3,17 @@ import 'package:flutter/material.dart';
 import '../node/node.dart';
 import '../parser/paragraph_parser.dart';
 import '../render/emoji_handler.dart';
+import '../render/image_handler.dart';
 import '../render/link_handler.dart';
 import '../render/mention_handler.dart';
 import '../render/node_factory.dart';
 
 /// 帖子渲染入口 widget。
 ///
-/// 当前作用域(阶段 1):段落 + 标题 + 行内 em/strong/br/text/link/
-/// inline_code/emoji/mention。其他节点(列表、代码块、引用卡 等)按
-/// docs/node_priority.md 顺序在后续阶段实现。未识别块级会 fallback
-/// 成段落 + textContent。
+/// 当前作用域(阶段 1):段落 + 标题 + 列表 + 引用块 + 分割线 + 行内
+/// em/strong/br/text/link/inline_code/emoji/mention/image。
+/// 其他节点(code_block / quote_card / spoiler 等)按 docs/node_priority.md
+/// 顺序在后续阶段实现。未识别块级会 fallback 成段落 + textContent。
 class FluxdoRender extends StatefulWidget {
   const FluxdoRender({
     super.key,
@@ -22,6 +23,7 @@ class FluxdoRender extends StatefulWidget {
     this.linkHandler,
     this.emojiImageBuilder,
     this.mentionTapHandler,
+    this.imageContentBuilder,
   });
 
   /// Discourse cooked HTML 内容。
@@ -45,6 +47,10 @@ class FluxdoRender extends StatefulWidget {
 
   /// Mention chip 点击跳用户卡 callback —— 主项目注入。
   final MentionTapHandler? mentionTapHandler;
+
+  /// 内容图片 builder —— 主项目注入,走主项目的 discourseImageProvider
+  /// + gallery + lightbox + 长按菜单 等完整体系。
+  final ImageContentBuilder? imageContentBuilder;
 
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
@@ -75,6 +81,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           linkHandler: widget.linkHandler,
           emojiImageBuilder: widget.emojiImageBuilder,
           mentionTapHandler: widget.mentionTapHandler,
+          imageContentBuilder: widget.imageContentBuilder,
         );
     if (_nodes.isEmpty) {
       return const SizedBox.shrink();
