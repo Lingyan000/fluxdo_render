@@ -163,11 +163,15 @@ class ParagraphParser {
                   language: language,
                 ));
               case 'aside':
-                // class="quote" → QuoteCardNode;其他 aside(如 onebox)
-                // 留给后续阶段实现(目前 fallback 到 textContent)
+                // class="quote" → QuoteCardNode
+                // class="onebox" / 含 *-onebox 子类 → OneboxNode
                 if (node.classes.contains('quote')) {
                   out.add(_parseQuoteCard(node, nextId, nextImageIndex));
+                } else if (node.classes.contains('onebox') ||
+                    node.classes.any((c) => c.endsWith('-onebox'))) {
+                  out.add(_parseOnebox(node, nextId));
                 } else {
+                  // 其他 aside:走 fallback textContent
                   final text = node.text;
                   if (text.trim().isNotEmpty) {
                     out.add(ParagraphNode(
@@ -317,6 +321,108 @@ class ParagraphParser {
       topicId: topicId,
       postNumber: postNumber,
       children: children,
+    );
+  }
+
+  /// 解析 `<aside class="onebox">` / `<aside class="*-onebox">` 为 OneboxNode。
+  ///
+  /// 子包只提结构化关键字段 + 保留 rawHtml(给主项目 OneboxBuilder 兜底)。
+  /// kind 识别参考 legacy `onebox_type.dart::detectOneboxType` 的 6 大类
+  /// (不细化到 githubRepo / githubIssue 等 24 种子类型 — 那是 builder 内
+  /// 基于 URL 二次判断的事)。
+  OneboxNode _parseOnebox(dom.Element asideEl, String Function() nextId) {
+    final classes = <String>{};
+    classes.addAll(asideEl.classes);
+    // 嵌套 article / 子 aside 的 class 也算(legacy 同套路)
+    final articleEl = asideEl.querySelector('article');
+    if (articleEl != null) classes.addAll(articleEl.classes);
+
+    OneboxKind kind;
+    if (classes.contains('user-onebox')) {
+      kind = OneboxKind.user;
+    } else if (classes.contains('github-onebox') ||
+        classes.contains('onebox-github') ||
+        classes.any((c) => c.startsWith('github'))) {
+      kind = OneboxKind.github;
+    } else if (classes.contains('twitterstatus') ||
+        classes.contains('twitter-tweet') ||
+        classes.contains('reddit') ||
+        classes.contains('reddit-onebox') ||
+        classes.contains('instagram-onebox') ||
+        classes.contains('instagram') ||
+        classes.contains('threads-onebox') ||
+        classes.contains('tiktok-onebox')) {
+      kind = OneboxKind.social;
+    } else if (classes.contains('youtube-onebox') ||
+        classes.contains('lazyYT') ||
+        classes.contains('vimeo-onebox') ||
+        classes.contains('loom-onebox')) {
+      kind = OneboxKind.video;
+    } else if (classes.contains('stackexchange-onebox') ||
+        classes.contains('stackoverflow-onebox') ||
+        classes.contains('hackernews-onebox') ||
+        classes.contains('ycombinator') ||
+        classes.contains('pastebin-onebox') ||
+        classes.contains('googledocs-onebox') ||
+        classes.contains('pdf-onebox') ||
+        classes.contains('amazon-onebox')) {
+      kind = OneboxKind.tech;
+    } else {
+      kind = OneboxKind.defaultKind;
+    }
+
+    // url:data-onebox-src 优先 → header a / h3 a / h4 a
+    String url = asideEl.attributes['data-onebox-src']?.trim() ?? '';
+    if (url.isEmpty) {
+      final headerA = asideEl.querySelector('header a');
+      url = headerA?.attributes['href']?.trim() ?? '';
+    }
+    if (url.isEmpty) {
+      final h3a = asideEl.querySelector('h3 a');
+      url = h3a?.attributes['href']?.trim() ?? '';
+    }
+    if (url.isEmpty) {
+      final h4a = asideEl.querySelector('h4 a');
+      url = h4a?.attributes['href']?.trim() ?? '';
+    }
+
+    // title:h3 a / h4 a / h3 / h4 text
+    final titleA = asideEl.querySelector('h4 a') ??
+        asideEl.querySelector('h3 a');
+    final title = titleA?.text.trim() ??
+        asideEl.querySelector('h3')?.text.trim() ??
+        asideEl.querySelector('h4')?.text.trim() ??
+        '';
+
+    // description:第一个 p
+    final description = asideEl.querySelector('p')?.text.trim() ?? '';
+
+    // favicon:img.site-icon / img.favicon
+    final iconEl = asideEl.querySelector('img.site-icon') ??
+        asideEl.querySelector('img.favicon');
+    final faviconUrl = iconEl?.attributes['src']?.trim() ?? '';
+
+    // thumbnail:.thumbnail / .aspect-image img
+    final thumbEl = asideEl.querySelector('img.thumbnail') ??
+        asideEl.querySelector('.aspect-image img') ??
+        asideEl.querySelector('.thumbnail');
+    final thumbnailUrl = thumbEl?.attributes['src']?.trim() ?? '';
+
+    // sourceName:.source a / .source
+    final sourceEl = asideEl.querySelector('.source a') ??
+        asideEl.querySelector('.source');
+    final sourceName = sourceEl?.text.trim() ?? '';
+
+    return OneboxNode(
+      id: nextId(),
+      kind: kind,
+      url: url.isEmpty ? null : url,
+      title: title.isEmpty ? null : title,
+      description: description.isEmpty ? null : description,
+      faviconUrl: faviconUrl.isEmpty ? null : faviconUrl,
+      thumbnailUrl: thumbnailUrl.isEmpty ? null : thumbnailUrl,
+      sourceName: sourceName.isEmpty ? null : sourceName,
+      rawHtml: asideEl.outerHtml,
     );
   }
 

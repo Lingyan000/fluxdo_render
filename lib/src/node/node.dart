@@ -392,6 +392,126 @@ class SpoilerBlockNode extends BlockNode {
       'SpoilerBlockNode($id, ${children.length} children)';
 }
 
+/// Onebox 类型 —— 跟 legacy `OneboxType` enum 一致(`docs/node_priority.md`
+/// 阶段 2 第 1 节点)。
+///
+/// 子包**只识别归类**,不实现真渲染:
+/// - 6 大类(github / video / social / tech / user / default)
+/// - 主项目 OneboxBuilder callback 内根据 [kind] dispatch 到具体 builder
+///
+/// 不细化 GitHub 子类型(repo/blob/issue/pr/commit/...)— 主项目 builder
+/// 内基于 url 自己再细分。子包暴露 [OneboxNode.url] 即可。
+enum OneboxKind {
+  /// `class="user-onebox"` — 用户卡(头像 + 名字 + bio)
+  user,
+
+  /// `class="github-onebox" | "onebox-github" | "github*"` —— GitHub 系列
+  github,
+
+  /// twitter / reddit / instagram / threads / tiktok
+  social,
+
+  /// youtube / vimeo / loom
+  video,
+
+  /// stackexchange / hackernews / pastebin / googledocs / pdf / amazon
+  tech,
+
+  /// 通用链接预览卡片(无明确类型识别 / `class="onebox"` 兜底)
+  defaultKind,
+}
+
+/// 链接预览卡片 — `<aside class="onebox">`(Discourse 经典外链卡)。
+///
+/// HTML 形态:Discourse 后端用 onebox gem 抓取目标 URL 元数据,渲染成
+/// 一个 `<aside class="onebox <type>-onebox">` 卡片,典型字段:
+/// - `header > a.source` / `.source a` — 来源(站点名)
+/// - `img.site-icon` / `img.favicon` — 站点图标
+/// - `h3 a` / `h4 a` — 标题
+/// - `p` — 描述
+/// - `img.thumbnail` / `.aspect-image img` — 缩略图
+///
+/// 子包只提结构化关键字段 + 保留 [rawHtml] 兜底。主项目 OneboxBuilder
+/// callback 拿 [kind] dispatch 到 6 种子 builder(legacy 已有完整实现,
+/// 直接调即可,不必移植 4000 行)。
+///
+/// 不传 OneboxBuilder 时子包用通用卡片样式渲染(对齐 legacy
+/// `default_onebox_builder`)。
+@immutable
+class OneboxNode extends BlockNode {
+  const OneboxNode({
+    required super.id,
+    required this.kind,
+    this.url,
+    this.title,
+    this.description,
+    this.faviconUrl,
+    this.thumbnailUrl,
+    this.sourceName,
+    this.rawHtml = '',
+  });
+
+  /// Onebox 类型(给主项目 builder dispatch 用)。
+  final OneboxKind kind;
+
+  /// 卡片对应的真实 URL(`data-onebox-src` 优先,fallback 到 header a /
+  /// h3 a / h4 a 的 href)。null 表示未识别(罕见,容错占位)。
+  final String? url;
+
+  /// 标题(典型来自 `h3 a` / `h4 a` 的 text)。
+  final String? title;
+
+  /// 描述(典型来自 `p` 的 text)。
+  final String? description;
+
+  /// 站点图标(典型来自 `img.site-icon` / `img.favicon` 的 src)。
+  final String? faviconUrl;
+
+  /// 缩略图(典型来自 `img.thumbnail` / `.aspect-image img` 的 src)。
+  final String? thumbnailUrl;
+
+  /// 站点名(典型来自 `.source a` 的 text)。
+  final String? sourceName;
+
+  /// 原始 cooked HTML 片段(`aside.onebox.outerHtml`)。
+  ///
+  /// 给主项目 builder 兜底用:legacy 的 GitHub/video/social 等
+  /// builder 大量依赖 DOM 内部结构(如 `.github-row` / `.author` /
+  /// `.body` 等),结构化字段拿不全,需要 rawHtml 重 parse。
+  /// 不强制使用,主项目 builder 优先用结构化字段。
+  final String rawHtml;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OneboxNode &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          url == other.url &&
+          title == other.title &&
+          description == other.description &&
+          faviconUrl == other.faviconUrl &&
+          thumbnailUrl == other.thumbnailUrl &&
+          sourceName == other.sourceName &&
+          rawHtml == other.rawHtml;
+
+  @override
+  int get hashCode => Object.hash(
+        kind,
+        url,
+        title,
+        description,
+        faviconUrl,
+        thumbnailUrl,
+        sourceName,
+        rawHtml,
+      );
+
+  @override
+  String toString() =>
+      'OneboxNode($id, $kind${url == null ? "" : ", $url"})';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -453,6 +573,9 @@ int countImageRuns(List<BlockNode> nodes) {
       case HorizontalRuleNode():
         break;
       case CodeBlockNode():
+        break;
+      case OneboxNode():
+        // onebox 内部图片(thumbnail / favicon)不计入 ImageRun gallery
         break;
     }
   }

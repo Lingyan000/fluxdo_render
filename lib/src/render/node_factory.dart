@@ -22,6 +22,7 @@ import 'image_handler.dart';
 import 'inline_span_text.dart';
 import 'link_handler.dart';
 import 'mention_handler.dart';
+import 'onebox_handler.dart';
 import 'quote_avatar_handler.dart';
 
 class NodeFactory {
@@ -33,6 +34,7 @@ class NodeFactory {
     this.imageContentBuilder,
     this.codeBlockHighlighter,
     this.quoteAvatarBuilder,
+    this.oneboxBuilder,
     this.totalImagesInPost = 0,
     this.compact = false,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
@@ -63,6 +65,11 @@ class NodeFactory {
   /// CDN 重写)。不传时用 [defaultQuoteAvatarBuilder](首字母 chip)。
   final QuoteAvatarBuilder? quoteAvatarBuilder;
 
+  /// Onebox 卡片 builder,主项目注入(根据 OneboxKind dispatch 到 6 种
+  /// 子 builder:github / video / social / tech / user / default)。
+  /// 返回 null 时子包用内置通用卡片(标题 + 描述 + 缩略图)。
+  final OneboxBuilder? oneboxBuilder;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -90,6 +97,7 @@ class NodeFactory {
       imageContentBuilder: imageContentBuilder,
       codeBlockHighlighter: codeBlockHighlighter,
       quoteAvatarBuilder: quoteAvatarBuilder,
+      oneboxBuilder: oneboxBuilder,
       totalImagesInPost: totalImagesInPost,
       compact: true,
     );
@@ -106,6 +114,7 @@ class NodeFactory {
       CodeBlockNode() => buildCodeBlock(context, node),
       QuoteCardNode() => buildQuoteCard(context, node),
       SpoilerBlockNode() => buildSpoilerBlock(context, node),
+      OneboxNode() => buildOnebox(context, node),
     };
   }
 
@@ -494,9 +503,197 @@ class NodeFactory {
       ),
     );
   }
+
+  /// Onebox 卡片渲染。优先走主项目注入的 [oneboxBuilder](dispatch 到
+  /// 6 种子 builder);返回 null 时 fallback 到子包内置通用卡片(对齐
+  /// legacy `default_onebox_builder`:favicon + 来源 + 标题 + 描述 +
+  /// 缩略图)。
+  Widget buildOnebox(BuildContext context, OneboxNode node) {
+    final custom = oneboxBuilder?.call(context, node);
+    if (custom != null) return custom;
+    return _DefaultOneboxCard(
+      node: node,
+      onTap: () {
+        final url = node.url;
+        if (url != null && url.isNotEmpty && linkHandler != null) {
+          linkHandler!(context, url);
+        }
+      },
+    );
+  }
 }
 
-/// 代码块主体:行号列 + 双向滚动 + 限高 400px。
+/// 子包内置 Onebox 通用卡片(主项目不注入 builder 时的 fallback)。
+///
+/// 视觉对齐 legacy `default_onebox_builder.dart`:
+///   外:Container 灰底 surfaceContainerHighest @ 0.5 + 圆角 8 + outline border
+///   顶:来源行(favicon + sourceName)
+///   主体:标题(titleMedium 加粗) + 描述(bodySmall onSurfaceVariant)
+///     + 右侧缩略图 80x80(若有 thumbnailUrl)
+class _DefaultOneboxCard extends StatelessWidget {
+  const _DefaultOneboxCard({required this.node, required this.onTap});
+  final OneboxNode node;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: scheme.outlineVariant, width: 1),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (node.sourceName != null || node.faviconUrl != null) ...[
+                  _SourceRow(
+                    faviconUrl: node.faviconUrl,
+                    sourceName: node.sourceName,
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                _Body(
+                  title: node.title,
+                  description: node.description,
+                  thumbnailUrl: node.thumbnailUrl,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SourceRow extends StatelessWidget {
+  const _SourceRow({required this.faviconUrl, required this.sourceName});
+  final String? faviconUrl;
+  final String? sourceName;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        if (faviconUrl != null && faviconUrl!.isNotEmpty) ...[
+          // 子包不依赖任何 image provider,fallback 直接 Image.network
+          // 主项目接入 oneboxBuilder 时会走 emojiImageProvider /
+          // discourseImageProvider 体系,这里只是兜底
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: Image.network(
+              faviconUrl!,
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => Icon(
+                Icons.public,
+                size: 14,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+        ],
+        if (sourceName != null && sourceName!.isNotEmpty)
+          Flexible(
+            child: Text(
+              sourceName!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _Body extends StatelessWidget {
+  const _Body({
+    required this.title,
+    required this.description,
+    required this.thumbnailUrl,
+  });
+  final String? title;
+  final String? description;
+  final String? thumbnailUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasThumb = thumbnailUrl != null && thumbnailUrl!.isNotEmpty;
+    final textCol = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (title != null && title!.isNotEmpty) ...[
+          Text(
+            title!,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+        ],
+        if (description != null && description!.isNotEmpty)
+          Text(
+            description!,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+    if (!hasThumb) return textCol;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(child: textCol),
+        const SizedBox(width: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: 80,
+            height: 80,
+            child: Image.network(
+              thumbnailUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Container(
+                color: theme.colorScheme.surfaceContainerHigh,
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  size: 24,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 ///
 /// 设计跟 legacy `_CodeBlockWidget.build` 对齐(简化版,无 mermaid /
 /// 长按选择上下文):

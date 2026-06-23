@@ -565,6 +565,79 @@ size 跟父 chip 字号 * 1.2。''',
     edgeCase: true,
   ),
   FixtureEntry(
+    relativePath: r'''onebox/default_with_thumbnail.html''',
+    html: r'''<aside class="onebox allowlistedgeneric" data-onebox-src="https://example.com/article">
+<header class="source">
+<img src="https://example.com/favicon.ico" class="site-icon" data-dominant-color="3a3a3a" width="32" height="32">
+<a href="https://example.com/article" target="_blank" rel="noopener nofollow ugc">example.com</a>
+</header>
+<article class="onebox-body">
+<div class="aspect-image">
+<img src="https://example.com/thumb.jpg" class="thumbnail" data-dominant-color="888888" width="690" height="345">
+</div>
+<h3><a href="https://example.com/article" target="_blank" rel="noopener nofollow ugc">A Generic Article Title</a></h3>
+<p>This is the article description shown in the onebox preview card,
+providing a few lines of summary so the reader gets context before
+clicking through to the actual page.</p>
+</article>
+</aside>
+''',
+    notes: r'''Discourse 默认 onebox 形态(allowlistedgeneric):header.source 含
+favicon + 站点名,article 含 thumbnail + h3 标题 + p 描述。
+应识别为 OneboxKind.defaultKind。''',
+    source: r'''https://example.com/t/sample/1/onebox1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''onebox/github_pr.html''',
+    html: r'''<aside class="onebox githubpullrequest" data-onebox-src="https://github.com/owner/repo/pull/123">
+<header class="source">
+<img src="https://github.com/favicon.ico" class="site-icon" width="32" height="32">
+<a href="https://github.com/owner/repo/pull/123" target="_blank" rel="noopener nofollow ugc">github.com</a>
+</header>
+<article class="onebox-body">
+<h4><a href="https://github.com/owner/repo/pull/123" target="_blank">Add feature X to handle Y</a></h4>
+<div class="github-row">
+<div class="user">
+<img alt="" src="https://avatars.githubusercontent.com/u/12345" class="thumbnail onebox-avatar-inline" width="20" height="20">
+<a href="https://github.com/somebody" target="_blank">somebody</a>
+</div>
+</div>
+<p>This PR refactors the X module to support Y. Closes #100, fixes the issue
+where users couldn't do Z.</p>
+</article>
+</aside>
+''',
+    notes: r'''GitHub Pull Request onebox(class="onebox githubpullrequest")。
+应识别为 OneboxKind.github。子包通用卡片只显示标题 + 描述 + favicon;
+legacy 完整版含作者头像 / 文件统计等,主项目 oneboxBuilder 可接管。''',
+    source: r'''https://example.com/t/sample/1/onebox2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''onebox/youtube.html''',
+    html: r'''<aside class="onebox youtube-onebox" data-onebox-src="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+<header class="source">
+<img src="https://www.youtube.com/favicon.ico" class="site-icon" width="16" height="16">
+<a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank" rel="noopener nofollow ugc">www.youtube.com</a>
+</header>
+<article class="onebox-body">
+<div class="aspect-image-full-size">
+<img src="https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg" class="thumbnail" data-dominant-color="222222" width="690" height="388">
+</div>
+<h3><a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank">A YouTube Video Title</a></h3>
+<p>Video description provided by Discourse's youtube onebox.</p>
+</article>
+</aside>
+''',
+    notes: r'''YouTube 视频 onebox(class="onebox youtube-onebox")。
+应识别为 OneboxKind.video。子包通用卡片展示标题 + 缩略图;
+legacy 完整版有播放按钮覆盖 + 时长,主项目可在 oneboxBuilder 内
+调 video_onebox_builder。''',
+    source: r'''https://example.com/t/sample/1/onebox3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''paragraph/inline_svg_skip.html''',
     html: r'''<p>含 <svg class="fa d-icon d-icon-far-image svg-icon" aria-hidden="true"><use href="#far-image"></use></svg> 图标的段落,svg 应该完全跳过,不留任何文字噪音。</p>
 ''',

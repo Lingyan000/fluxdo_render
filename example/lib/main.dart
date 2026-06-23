@@ -363,6 +363,8 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       for (final child in node.children) {
         _writeNode(buf, child, indent + 1);
       }
+    case OneboxNode():
+      buf.writeln('$pad$node');
   }
 }
 

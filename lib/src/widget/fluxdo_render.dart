@@ -8,6 +8,7 @@ import '../render/image_handler.dart';
 import '../render/link_handler.dart';
 import '../render/mention_handler.dart';
 import '../render/node_factory.dart';
+import '../render/onebox_handler.dart';
 import '../render/quote_avatar_handler.dart';
 
 /// 帖子渲染入口 widget。
@@ -28,6 +29,7 @@ class FluxdoRender extends StatefulWidget {
     this.imageContentBuilder,
     this.codeBlockHighlighter,
     this.quoteAvatarBuilder,
+    this.oneboxBuilder,
   });
 
   /// Discourse cooked HTML 内容。
@@ -63,6 +65,11 @@ class FluxdoRender extends StatefulWidget {
   /// 引用卡头像 builder —— 主项目注入,走 SmartAvatar(鉴权 + CDN 重写)。
   /// 不传则首字母 chip。
   final QuoteAvatarBuilder? quoteAvatarBuilder;
+
+  /// Onebox 卡片 builder —— 主项目注入,根据 OneboxKind dispatch 到 6 种
+  /// 子 builder(github / video / social / tech / user / default)。
+  /// 返回 null 时子包用内置通用卡片(标题 + 描述 + 缩略图)。
+  final OneboxBuilder? oneboxBuilder;
 
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
@@ -102,6 +109,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           imageContentBuilder: widget.imageContentBuilder,
           codeBlockHighlighter: widget.codeBlockHighlighter,
           quoteAvatarBuilder: widget.quoteAvatarBuilder,
+          oneboxBuilder: widget.oneboxBuilder,
           totalImagesInPost: _totalImagesInPost,
         );
     if (_nodes.isEmpty) {
