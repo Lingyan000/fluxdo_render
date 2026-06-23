@@ -147,12 +147,18 @@ class InlineFlattener {
         : (TapGestureRecognizer()..onTap = () => handler(ctx, href));
     if (recognizer != null) recognizers.add(recognizer);
 
+    // 样式对齐 legacy(DiscourseHtmlContentWidget customStylesBuilder):
+    //   `{color: theme.colorScheme.primary, text-decoration: none}`
+    // 没有下划线,只用主题主色区分。
+    final linkColor =
+        ctx == null ? null : Theme.of(ctx).colorScheme.primary;
+
     // Flutter `TextSpan.recognizer` 不会从父 span 传播到 child:
     // hit test 只对 span 本身的 `text` 字段生效。所以 link 子树里的
     // 所有叶子 span(TextRun / InlineCodeRun / LineBreakRun)都得把
     // 同一个 recognizer 挂上,才能在任意位置 tap 都触发 onTap。
     return TextSpan(
-      style: _linkStyleHint,
+      style: TextStyle(color: linkColor),
       // 父 span 没有 text,recognizer 设了也不响应;但 children 里的
       // 叶子会带同一个 recognizer
       children: _build(
@@ -165,17 +171,19 @@ class InlineFlattener {
     );
   }
 
-  // 链接默认样式 — 颜色由调用方在 baseStyle 上 merge(主项目可用 Theme 注入)
-  static const _linkStyleHint = TextStyle(
-    decoration: TextDecoration.underline,
-  );
-
-  /// 行内代码渲染:monospace + 灰底。
+  /// 行内代码渲染:monospace + 较小字号 + 主题适配灰色字。
   ///
-  /// 当前实现走 TextStyle.background(矩形纯填充),没有圆角和外 padding。
-  /// 主项目 legacy 渲染依赖 [InlineCodePainter](独立 CustomPainter +
-  /// TextPainter rect 探测),实现圆角 + 跨行 RRect 合并。等阶段 5 自研
-  /// 选区 + 自研 paint 时同步上,届时 InlineCodeRun 不需要变,渲染层换。
+  /// 样式对齐 legacy `inline_decorator_common.dart::getInlineCodeStyles`:
+  ///   font-family: FiraCode, monospace
+  ///   font-size: 0.85em
+  ///   color: dark=#b0b0b0 / light=#666666
+  ///   background-color: transparent(legacy 用独立 CustomPainter 画灰底圆角)
+  ///
+  /// **TODO(阶段 5)**:legacy 的 InlineCodePainter 用 CustomPainter +
+  /// TextPainter rect 探测,实现灰底**圆角** + **跨行 RRect 合并** +
+  /// 行内 padding。我现在用 `TextStyle.background` 走纯矩形 fill,
+  /// 跨行会出现两个独立矩形、没圆角、贴字。等阶段 5 自研选区 + 自研
+  /// paint 时同步上,届时 InlineCodeRun 数据结构不变,只换渲染层。
   TextSpan _buildInlineCodeSpan(
     String text,
     BuildContext? context, {
@@ -190,13 +198,17 @@ class InlineFlattener {
       text: text,
       recognizer: inheritedRecognizer,
       style: TextStyle(
-        fontFamily: _monospaceFont,
-        fontFamilyFallback: const ['Menlo', 'Courier'],
+        fontFamily: 'FiraCode',
+        fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
+        fontSize: _inlineCodeFontSize, // baseStyle 14 → 11.9
+        color: isDark ? const Color(0xFFB0B0B0) : const Color(0xFF666666),
         background: bg,
       ),
     );
   }
 
-  // 桌面端用系统 monospace,跨平台 fallback 在 fontFamilyFallback
-  static const _monospaceFont = 'monospace';
+  // 0.85em:相对于父 baseStyle.fontSize。当前实现是绝对值预设,正确做法
+  // 是 inherit 父 fontSize 再 * 0.85,留待阶段 5 调整(届时 baseStyle 体系
+  // 整理)。14 * 0.85 = 11.9。
+  static const _inlineCodeFontSize = 11.9;
 }

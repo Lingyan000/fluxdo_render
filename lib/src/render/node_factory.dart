@@ -40,11 +40,14 @@ class NodeFactory {
   /// 段落渲染 — InlineSpanText 自动管 GestureRecognizer 生命周期。
   ///
   /// 子类可 override 实现段落级别的定制(如调字号、加 margin)。
+  ///
+  /// margin 对齐 legacy(fwfh `_tagP`):`1em 0`(上下各一个 em)。
   Widget buildParagraph(BuildContext context, ParagraphNode node) {
     final theme = Theme.of(context);
     final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
+    final em = baseStyle.fontSize ?? 14;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: em),
       child: InlineSpanText(
         inlines: node.inlines,
         baseStyle: baseStyle,

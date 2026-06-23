@@ -129,13 +129,35 @@ void main() {
       expect(linkSpan.recognizer, isNull);
     });
 
-    test('link span 自带下划线样式 hint', () {
+    testWidgets('link span 走主题主色,无下划线(对齐 legacy 样式)', (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox();
+        }),
+      ));
+      final result = flattener.flatten(
+        [const LinkRun(href: 'https://example.com', children: [TextRun('x')])],
+        baseStyle,
+        context: ctx,
+      );
+      final linkSpan = result.span.children![0] as TextSpan;
+      // legacy: {color: theme.primary, text-decoration: none}
+      expect(linkSpan.style?.color, Theme.of(ctx).colorScheme.primary);
+      expect(linkSpan.style?.decoration, null);
+      for (final r in result.recognizers) {
+        r.dispose();
+      }
+    });
+
+    test('无 context 时 link 字色 fallback 为 null(由 baseStyle 决定)', () {
       final result = flattener.flatten(
         [const LinkRun(href: 'https://example.com', children: [TextRun('x')])],
         baseStyle,
       );
       final linkSpan = result.span.children![0] as TextSpan;
-      expect(linkSpan.style?.decoration, TextDecoration.underline);
+      expect(linkSpan.style?.color, isNull);
     });
 
     test('link 内嵌 strong 保留嵌套样式', () {
@@ -216,24 +238,32 @@ void main() {
   });
 
   group('InlineCodeRun', () {
-    test('产出 monospace + background 的 TextSpan', () {
+    test('产出 FiraCode + 0.85em 字号 + 灰色字 + 背景(对齐 legacy)', () {
       final result = flattener.flatten(
         [const InlineCodeRun('git status')],
         baseStyle,
       );
       final span = result.span.children![0] as TextSpan;
       expect(span.text, 'git status');
-      expect(span.style?.fontFamily, 'monospace');
-      expect(span.style?.fontFamilyFallback, ['Menlo', 'Courier']);
+      // legacy: font-family: FiraCode, monospace
+      expect(span.style?.fontFamily, 'FiraCode');
+      expect(span.style?.fontFamilyFallback, ['monospace', 'Menlo', 'Courier']);
+      // legacy: font-size: 0.85em → 14 * 0.85 ≈ 11.9
+      expect(span.style?.fontSize, closeTo(11.9, 0.01));
+      // legacy: color: #666666 (light)
+      expect(
+        span.style?.color?.toARGB32(),
+        const Color(0xFF666666).toARGB32(),
+      );
+      // 灰底:阶段 5 前用 TextStyle.background 占位(legacy 用 CustomPainter)
       expect(span.style?.background, isNotNull);
-      // 默认无 context → 走 light 灰底
       expect(
         span.style?.background?.color.toARGB32(),
         const Color(0xFFE8E8E8).toARGB32(),
       );
     });
 
-    testWidgets('dark 主题用深灰底', (tester) async {
+    testWidgets('dark 主题用深灰底 + 浅灰字', (tester) async {
       late BuildContext capturedContext;
       await tester.pumpWidget(
         MaterialApp(
@@ -252,6 +282,11 @@ void main() {
         context: capturedContext,
       );
       final span = result.span.children![0] as TextSpan;
+      // legacy: color: #b0b0b0 (dark)
+      expect(
+        span.style?.color?.toARGB32(),
+        const Color(0xFFB0B0B0).toARGB32(),
+      );
       expect(
         span.style?.background?.color.toARGB32(),
         const Color(0xFF3A3A3A).toARGB32(),
