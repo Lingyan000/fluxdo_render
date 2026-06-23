@@ -362,6 +362,36 @@ class QuoteCardNode extends BlockNode {
       '${children.length} children)';
 }
 
+/// 块级 spoiler — `<div class="spoiler">`,默认遮蔽,点击展开。
+///
+/// 视觉(子包简化版,无粒子动画):
+///   未揭示:灰底框 + "点击显示剧透" 提示
+///   揭示后:正常渲染 children
+///
+/// 状态由 NodeFactory 内的 StatefulWidget 管。阶段 5 自研选区时再
+/// 加粒子动画。
+@immutable
+class SpoilerBlockNode extends BlockNode {
+  const SpoilerBlockNode({required super.id, required this.children});
+
+  /// 被遮蔽的块级子节点(可嵌套 paragraph / list / blockquote 等)。
+  final List<BlockNode> children;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SpoilerBlockNode &&
+          runtimeType == other.runtimeType &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hashAll(children);
+
+  @override
+  String toString() =>
+      'SpoilerBlockNode($id, ${children.length} children)';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -378,6 +408,8 @@ int countImageRuns(List<BlockNode> nodes) {
         case StrongRun(:final children):
           scanInlines(children);
         case LinkRun(:final children):
+          scanInlines(children);
+        case SpoilerRun(:final children):
           scanInlines(children);
         case TextRun():
         case LineBreakRun():
@@ -411,6 +443,10 @@ int countImageRuns(List<BlockNode> nodes) {
           scanBlock(c);
         }
       case QuoteCardNode(:final children):
+        for (final c in children) {
+          scanBlock(c);
+        }
+      case SpoilerBlockNode(:final children):
         for (final c in children) {
           scanBlock(c);
         }

@@ -725,4 +725,50 @@ charlie:
     source: r'''https://example.com/t/sample/1/qc2''',
     edgeCase: false,
   ),
+  FixtureEntry(
+    relativePath: r'''spoiler/block_simple.html''',
+    html: r'''<div class="spoiler">
+<p>这是一段块级剧透内容。</p>
+<p>包含两段,默认遮蔽,点击展开。</p>
+</div>
+''',
+    notes: r'''块级 div.spoiler,默认显示 "剧透内容,点击显示" 占位,点击后
+展开为两段段落。再点收回。''',
+    source: r'''https://example.com/t/sample/1/sp2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''spoiler/block_with_rich_content.html''',
+    html: r'''<div class="spoiler">
+<p>块级剧透,内部含列表和代码:</p>
+<ul>
+<li>项 1</li>
+<li>项 2:<code>flutter run</code></li>
+</ul>
+<p>结束。</p>
+</div>
+''',
+    notes: r'''块级 spoiler 含 p + ul + code 等混合内容,验证 SpoilerBlockNode.children
+是 BlockNode 序列(走 _parseBlocks 递归);揭示后内嵌内容完整展示。''',
+    source: r'''https://example.com/t/sample/1/sp4''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''spoiler/inline_simple.html''',
+    html: r'''<p>答案是 <span class="spoiler">42</span>,你猜对了吗?</p>
+''',
+    notes: r'''最基础形态:span.spoiler 行内剧透。默认遮蔽为黑色块,点击展开
+显示 "42"。''',
+    source: r'''https://example.com/t/sample/1/sp1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''spoiler/inline_with_nested.html''',
+    html: r'''<p>含 <span class="spoiler">关键 <strong>剧情</strong></span> 和 <span class="spoiler"><a href="https://example.com">线索链接</a></span> 的句子。</p>
+''',
+    notes: r'''行内 spoiler 含嵌套样式(strong)和 link。验证 SpoilerRun.children
+可以承载任意 inline 节点;揭示后嵌套样式 + 链接全部生效(link 可点)。''',
+    source: r'''https://example.com/t/sample/1/sp3''',
+    edgeCase: true,
+  ),
 ];

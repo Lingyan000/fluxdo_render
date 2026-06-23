@@ -1,8 +1,8 @@
 /// 行内节点 sealed family。
 ///
 /// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji /
-/// Mention / Image
-/// 后续会扩展更多行内节点(spoiler 等)。
+/// Mention / Image / Spoiler
+/// 后续会扩展更多行内节点。
 
 library;
 
@@ -317,4 +317,38 @@ class ImageRun extends InlineNode {
   String toString() =>
       'ImageRun(#$indexInPost $src'
       '${width == null ? "" : ", ${width}x$height"})';
+}
+
+/// `<span class="spoiler">` 行内剧透,默认遮蔽,点击展开。
+///
+/// Discourse cooked 形态:
+/// ```html
+/// 答案是 <span class="spoiler">42</span>。
+/// ```
+///
+/// 渲染策略(子包简化版,无粒子动画):
+/// - 未揭示:用 `colorScheme.onSurface` 同色覆盖文字(看起来是个色块)
+/// - 揭示后:正常显示子节点
+/// - 状态由 NodeFactory 内的 StatefulWidget 管,**不跨同份 cookedHtml 同步**
+///
+/// 阶段 5 自研选区时再加粒子动画(legacy 用 SpoilerParticleSystem + Ticker)。
+@immutable
+class SpoilerRun extends InlineNode {
+  const SpoilerRun({required this.children});
+
+  /// 被遮蔽的行内子节点(可嵌套样式 / link / inline_code 等)。
+  final List<InlineNode> children;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SpoilerRun &&
+          runtimeType == other.runtimeType &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hashAll(children);
+
+  @override
+  String toString() => 'SpoilerRun(${children.length} children)';
 }

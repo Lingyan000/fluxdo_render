@@ -358,6 +358,11 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       for (final child in node.children) {
         _writeNode(buf, child, indent + 1);
       }
+    case SpoilerBlockNode():
+      buf.writeln('$pad$node');
+      for (final child in node.children) {
+        _writeNode(buf, child, indent + 1);
+      }
   }
 }
 
@@ -397,6 +402,11 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
         '${pad}ImageRun($src${width == null ? "" : " ${width}x$height"}'
         '${alt.isEmpty ? "" : " alt=$alt"})',
       );
+    case SpoilerRun(:final children):
+      buf.writeln('${pad}SpoilerRun');
+      for (final c in children) {
+        _writeInline(buf, c, indent + 1);
+      }
   }
 }
 

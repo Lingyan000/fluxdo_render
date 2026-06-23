@@ -156,6 +156,13 @@ class ParagraphParser {
                     ));
                   }
                 }
+              case 'div' when node.classes.contains('spoiler') ||
+                    node.classes.contains('spoiled'):
+                // 块级 spoiler:div.spoiler / div.spoiled
+                out.add(SpoilerBlockNode(
+                  id: nextId(),
+                  children: _parseBlocks(node.nodes, nextId, nextImageIndex),
+                ));
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——
@@ -396,6 +403,15 @@ class ParagraphParser {
             indexInPost: nextImageIndex(),
           ));
         }
+      case 'span':
+        // span.spoiler / span.spoiled → SpoilerRun;
+        // 其他 span(如 .discourse-local-date / .click-count)留后续阶段,
+        // 当前展平
+        if (el.classes.contains('spoiler') || el.classes.contains('spoiled')) {
+          out.add(SpoilerRun(children: List.unmodifiable(children)));
+        } else {
+          out.addAll(children);
+        }
       default:
         // 未识别 inline:展平子节点
         out.addAll(children);
@@ -421,7 +437,7 @@ class ParagraphParser {
   }
 
   /// 已支持的 inline 标签集合。
-  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a', 'code', 'img'};
+  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a', 'code', 'img', 'span'};
 
   bool _isInlineTag(String tag) => _inlineTags.contains(tag);
 

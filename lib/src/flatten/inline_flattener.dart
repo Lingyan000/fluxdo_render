@@ -212,6 +212,17 @@ class InlineFlattener {
           totalImagesInPost,
           context,
         ),
+      SpoilerRun(:final children) => _buildSpoilerSpan(
+          children,
+          handler,
+          emojiBuilder,
+          mentionHandler,
+          imageBuilder,
+          emojiBaseSize,
+          totalImagesInPost,
+          context,
+          recognizers,
+        ),
     };
   }
 
@@ -440,6 +451,97 @@ class InlineFlattener {
       child: Builder(
         builder: (ctx) =>
             imageBuilder(context ?? ctx, image, totalImagesInPost),
+      ),
+    );
+  }
+
+  /// 行内 spoiler 渲染:WidgetSpan + _SpoilerInlineWidget。
+  ///
+  /// 未揭示时显示同色色块(看起来一片黑/灰),点击展开后内部子节点
+  /// 走 InlineFlattener 重新 flatten 渲染。
+  ///
+  /// 注意:flatten 期间无法用 const InlineFlattener() 套子节点(因为
+  /// 需要透传 handlers),所以 spoiler 子树用 Text.rich + _build 再展平,
+  /// recognizer 仍累计到外层 recognizers 列表里(由 InlineSpanText 统一
+  /// dispose)。
+  WidgetSpan _buildSpoilerSpan(
+    List<InlineNode> children,
+    LinkActionHandler handler,
+    EmojiImageBuilder emojiBuilder,
+    MentionTapHandler mentionHandler,
+    ImageContentBuilder imageBuilder,
+    double emojiBaseSize,
+    int totalImagesInPost,
+    BuildContext? context,
+    List<GestureRecognizer> recognizers,
+  ) {
+    // 子节点提前 flatten 成 InlineSpan list,避免 _SpoilerInlineWidget
+    // 内部还要依赖 InlineFlattener
+    final spans = _build(
+      children,
+      handler,
+      emojiBuilder,
+      mentionHandler,
+      imageBuilder,
+      emojiBaseSize,
+      totalImagesInPost,
+      context,
+      recognizers,
+    );
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: _SpoilerInlineWidget(spans: spans),
+    );
+  }
+}
+
+/// 行内 spoiler 揭示交互 widget。
+class _SpoilerInlineWidget extends StatefulWidget {
+  const _SpoilerInlineWidget({required this.spans});
+  final List<InlineSpan> spans;
+
+  @override
+  State<_SpoilerInlineWidget> createState() => _SpoilerInlineWidgetState();
+}
+
+class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget> {
+  bool _revealed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final richText = Text.rich(TextSpan(children: widget.spans));
+    if (_revealed) {
+      // 揭示后给一个浅底点击痕迹(legacy 揭示后仍可点击隐藏)
+      return GestureDetector(
+        onTap: () => setState(() => _revealed = false),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(3),
+          ),
+          child: richText,
+        ),
+      );
+    }
+    // 遮蔽态:文字本身 + 上方覆盖同色块。用 Stack + IgnorePointer 让 tap
+    // 落到 GestureDetector 上,文本不参与选区(选区在阶段 5 自研)
+    return GestureDetector(
+      onTap: () => setState(() => _revealed = true),
+      child: Stack(
+        children: [
+          // 用 visibility:hidden(Opacity 0.0)占好布局,让色块尺寸自动撑开
+          Opacity(opacity: 0.0, child: richText),
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                color: scheme.onSurface,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

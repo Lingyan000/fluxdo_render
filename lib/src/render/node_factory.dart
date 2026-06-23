@@ -79,6 +79,7 @@ class NodeFactory {
       HorizontalRuleNode() => buildHorizontalRule(context, node),
       CodeBlockNode() => buildCodeBlock(context, node),
       QuoteCardNode() => buildQuoteCard(context, node),
+      SpoilerBlockNode() => buildSpoilerBlock(context, node),
     };
   }
 
@@ -427,6 +428,96 @@ class NodeFactory {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  /// 块级 spoiler 渲染 — `<div class="spoiler">`。
+  ///
+  /// 视觉(子包简化版,无粒子动画):
+  ///   未揭示:灰底 + 中心 "点击显示剧透" + 锁图标
+  ///   揭示后:子节点正常渲染,左边 4px primary 竖条提示"已揭示"
+  ///
+  /// 状态由 _SpoilerBlockWidget 内部管。
+  Widget buildSpoilerBlock(BuildContext context, SpoilerBlockNode node) {
+    return _SpoilerBlockWidget(
+      // 通过 factory 自身递归 build 子节点,避免再造一份 factory
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final c in node.children) build(context, c),
+        ],
+      ),
+    );
+  }
+}
+
+/// 块级 spoiler 揭示交互 widget。
+class _SpoilerBlockWidget extends StatefulWidget {
+  const _SpoilerBlockWidget({required this.child});
+  final Widget child;
+
+  @override
+  State<_SpoilerBlockWidget> createState() => _SpoilerBlockWidgetState();
+}
+
+class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget> {
+  bool _revealed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (_revealed) {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
+          border: Border(
+            left: BorderSide(color: scheme.primary, width: 4),
+          ),
+          borderRadius: const BorderRadius.only(
+            topRight: Radius.circular(4),
+            bottomRight: Radius.circular(4),
+          ),
+        ),
+        child: GestureDetector(
+          onTap: () => setState(() => _revealed = false),
+          child: widget.child,
+        ),
+      );
+    }
+    return GestureDetector(
+      onTap: () => setState(() => _revealed = true),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: scheme.outlineVariant,
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.visibility_off_outlined,
+              size: 16,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '剧透内容,点击显示',
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

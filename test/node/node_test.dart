@@ -104,6 +104,7 @@ void main() {
         HorizontalRuleNode() => 'hr',
         CodeBlockNode() => 'code',
         QuoteCardNode() => 'quoteCard',
+        SpoilerBlockNode() => 'spoiler',
       };
       expect(label, 'paragraph');
     });
@@ -119,6 +120,7 @@ void main() {
         EmojiRun(name: 'heart', url: 'https://x/heart.png'),
         MentionRun(username: 'alice', href: '/u/alice'),
         ImageRun(src: 'https://x/foo.png'),
+        SpoilerRun(children: [TextRun('s')]),
       ];
       final labels = list
           .map(
@@ -132,11 +134,12 @@ void main() {
               EmojiRun() => 'emoji',
               MentionRun() => 'mention',
               ImageRun() => 'image',
+              SpoilerRun() => 'spoiler',
             },
           )
           .toList();
       expect(labels, [
-        'text', 'em', 'strong', 'br', 'link', 'inlineCode', 'emoji', 'mention', 'image',
+        'text', 'em', 'strong', 'br', 'link', 'inlineCode', 'emoji', 'mention', 'image', 'spoiler',
       ]);
     });
   });
@@ -439,6 +442,49 @@ void main() {
       );
       expect(b.toString(), contains('t=999'));
       expect(b.toString(), contains('p=3'));
+    });
+  });
+
+  group('SpoilerRun', () {
+    test('==/hashCode 按 children', () {
+      const a = SpoilerRun(children: [TextRun('x')]);
+      const b = SpoilerRun(children: [TextRun('x')]);
+      const c = SpoilerRun(children: [TextRun('y')]);
+      expect(a, b);
+      expect(a == c, isFalse);
+    });
+
+    test('children 可嵌套样式 / link / inline_code', () {
+      const s = SpoilerRun(children: [
+        TextRun('前 '),
+        StrongRun(children: [TextRun('粗')]),
+        LinkRun(href: '/x', children: [TextRun('link')]),
+      ]);
+      expect(s.children, hasLength(3));
+    });
+  });
+
+  group('SpoilerBlockNode', () {
+    test('==/hashCode 按 children(id 不参与)', () {
+      const a = SpoilerBlockNode(id: 'b_0', children: [
+        ParagraphNode(id: 'b_1', inlines: [TextRun('x')]),
+      ]);
+      const b = SpoilerBlockNode(id: 'b_99', children: [
+        ParagraphNode(id: 'b_42', inlines: [TextRun('x')]),
+      ]);
+      expect(a, b);
+      const c = SpoilerBlockNode(id: 'b_0', children: [
+        ParagraphNode(id: 'b_1', inlines: [TextRun('y')]),
+      ]);
+      expect(a == c, isFalse);
+    });
+
+    test('toString 含 id + 子数', () {
+      const s = SpoilerBlockNode(id: 'b_3', children: [
+        ParagraphNode(id: 'b_4', inlines: []),
+      ]);
+      expect(s.toString(), contains('b_3'));
+      expect(s.toString(), contains('1 children'));
     });
   });
 }
