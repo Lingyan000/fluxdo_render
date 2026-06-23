@@ -117,11 +117,14 @@ class NodeFactory {
   /// 避免 "1." 比 "10." 窄导致对齐错位。
   ///
   /// 嵌套子列表用 `ListItem.children` 持有,渲染时递归 buildList。
+  /// **嵌套层(depth > 0)跳过 outer vertical padding**:CSS 相邻 margin
+  /// 折叠取大,Flutter Column padding 累加 —— 不跳过会出现 8(嵌套上)
+  /// + 4(父 li 下)的额外空白,视觉上像多了一行。
   Widget buildList(BuildContext context, ListNode node) {
     final theme = Theme.of(context);
     final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: node.depth == 0 ? 8 : 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -146,8 +149,10 @@ class NodeFactory {
           : null,
     );
     final markerText = list.ordered ? '${index + 1}.' : '•'; // bullet
+    final hasChildren = item.children != null;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 4, 0, 4),
+      // 有嵌套子 list 时取消底部 padding,避免 inline 行和子 list 之间空一截
+      padding: EdgeInsets.fromLTRB(20, 4, 0, hasChildren ? 0 : 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -172,7 +177,7 @@ class NodeFactory {
             ],
           ),
           // 嵌套子 list 递归渲染
-          if (item.children != null)
+          if (hasChildren)
             for (final sub in item.children!) buildList(context, sub),
         ],
       ),
