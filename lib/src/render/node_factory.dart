@@ -47,6 +47,7 @@ class NodeFactory {
     return switch (node) {
       ParagraphNode() => buildParagraph(context, node),
       HeadingNode() => buildHeading(context, node),
+      ListNode() => buildList(context, node),
     };
   }
 
@@ -106,4 +107,75 @@ class NodeFactory {
 
   // CSS heading margin(em 倍数,top/bottom 各一份)
   static const _headingMargin = [0.67, 0.83, 1.0, 1.33, 1.67, 2.33];
+
+  /// 列表渲染 — `<ul>` / `<ol>`,可递归嵌套子 list。
+  ///
+  /// 样式对齐 legacy(DiscourseHtmlContentWidget customStylesBuilder):
+  ///   ul/ol: padding-left 20, margin 上下 8
+  ///   li:    margin 上下 4, line-height 1.5
+  /// 有序列表 marker 用 `FontFeature.tabularFigures`(等宽数字)
+  /// 避免 "1." 比 "10." 窄导致对齐错位。
+  ///
+  /// 嵌套子列表用 `ListItem.children` 持有,渲染时递归 buildList。
+  Widget buildList(BuildContext context, ListNode node) {
+    final theme = Theme.of(context);
+    final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < node.items.length; i++)
+            _buildListItem(context, node, i, baseStyle),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildListItem(
+    BuildContext context,
+    ListNode list,
+    int index,
+    TextStyle baseStyle,
+  ) {
+    final item = list.items[index];
+    final markerStyle = baseStyle.copyWith(
+      height: 1.5,
+      fontFeatures: list.ordered
+          ? const [FontFeature.tabularFigures()]
+          : null,
+    );
+    final markerText = list.ordered ? '${index + 1}.' : '•'; // bullet
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 0, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // marker 宽度按"两位数字 + 点"预算,确保 9. 10. 对齐
+              SizedBox(
+                width: list.ordered ? 24 : 16,
+                child: Text(markerText, style: markerStyle),
+              ),
+              Expanded(
+                child: InlineSpanText(
+                  inlines: item.inlines,
+                  baseStyle: baseStyle.copyWith(height: 1.5),
+                  flattener: _inlineFlattener,
+                  linkHandler: linkHandler,
+                  emojiImageBuilder: emojiImageBuilder,
+                  mentionTapHandler: mentionTapHandler,
+                ),
+              ),
+            ],
+          ),
+          // 嵌套子 list 递归渲染
+          if (item.children != null)
+            for (final sub in item.children!) buildList(context, sub),
+        ],
+      ),
+    );
+  }
 }

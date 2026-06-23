@@ -201,6 +201,89 @@ WidgetSpan 渲染 + 1em 字号(跟 baseStyle 一致)。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''list/nested_ul_ol.html''',
+    html: r'''<ul>
+<li>外层第一项
+<ul>
+<li>嵌套 A</li>
+<li>嵌套 B</li>
+</ul>
+</li>
+<li>外层第二项
+<ol>
+<li>嵌套有序 1</li>
+<li>嵌套有序 2</li>
+</ol>
+</li>
+</ul>
+''',
+    notes: r'''嵌套混合(外层 ul 含 li 内 ul 和 li 内 ol)。验证 parser 递归 +
+ListItem.children + depth 递增 + renderer 递归 buildList。''',
+    source: r'''https://example.com/t/sample/1/list4''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''list/ol_simple.html''',
+    html: r'''<ol>
+<li>第一步:打开终端</li>
+<li>第二步:运行命令</li>
+<li>第三步:查看结果</li>
+</ol>
+''',
+    notes: r'''最基础有序列表(ol + 3 li)。验证数字 marker (1. 2. 3.) +
+ordered = true。''',
+    source: r'''https://example.com/t/sample/1/list2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''list/ol_two_digit.html''',
+    html: r'''<ol>
+<li>第一项</li>
+<li>第二项</li>
+<li>第三项</li>
+<li>第四项</li>
+<li>第五项</li>
+<li>第六项</li>
+<li>第七项</li>
+<li>第八项</li>
+<li>第九项</li>
+<li>第十项</li>
+</ol>
+''',
+    notes: r'''10 项有序列表,验证 "9." 和 "10." 数字 marker 对齐(FontFeature
+tabularFigures 等宽数字)。如果没启用等宽特性,9 比 10 窄,文本
+起始位置会左移。''',
+    source: r'''https://example.com/t/sample/1/list5''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''list/ul_simple.html''',
+    html: r'''<ul>
+<li>苹果</li>
+<li>香蕉</li>
+<li>橙子</li>
+</ul>
+''',
+    notes: r'''最基础无序列表(ul + 3 li 纯文本)。验证 ListNode/ListItem 解析 +
+bullet marker (•) + padding-left 20。''',
+    source: r'''https://example.com/t/sample/1/list1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''list/with_inline_mix.html''',
+    html: r'''<ul>
+<li>第一项 含 <strong>粗体</strong> 和 <a href="https://example.com">链接</a></li>
+<li>第二项 含 <code>inline code</code> 和 <em>斜体</em></li>
+<li>第三项 含 <img src="https://example.com/images/emoji/twitter/heart.png" alt=":heart:" class="emoji" title=":heart:"> emoji</li>
+</ul>
+''',
+    notes: r'''list 项内含 inline 混排:strong + link + code + em + emoji。
+验证 InlineSpanText 在 list item 内正常复用,所有 inline 节点
+都能在 li 内正确渲染(包括 LinkRun recognizer + EmojiRun WidgetSpan)。''',
+    source: r'''https://example.com/t/sample/1/list3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''mention/group_mention.html''',
     html: r'''<p>问题反馈给 <a class="mention" href="/u/team_support">@team_support</a> 组,而不是个人。</p>
 ''',

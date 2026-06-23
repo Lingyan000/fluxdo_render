@@ -1,11 +1,12 @@
 /// HTML cooked → `List<BlockNode>` 解析器(阶段 1 范围)。
 ///
 /// 当前作用域:
-/// - 块级:`<p>` / `<h1>` - `<h6>`(其他块级标签 fallback 成 ParagraphNode + textContent)
+/// - 块级:`<p>` / `<h1>` - `<h6>` / `<ul>` / `<ol>`(其他块级标签
+///   fallback 成 ParagraphNode + textContent)
 /// - 行内:文本 / `<em>` / `<i>` / `<strong>` / `<b>` / `<br>` /
 ///   `<a href>` / `<code>` / `<img class="emoji">`
 ///
-/// 后续阶段会扩展 list / blockquote / code_block / 等。
+/// 后续阶段会扩展 blockquote / code_block / 等。
 
 library;
 
@@ -36,7 +37,10 @@ class ParagraphParser {
     final out = <BlockNode>[];
     final pendingInlines = <InlineNode>[];
 
-    String nextId() => 'b_${out.length}';
+    // 全局 id counter — 嵌套块级(如 list 内 list)也用这个分配,
+    // 保证一次 parse 内的 BlockNode id 全局唯一。
+    var idCounter = 0;
+    String nextId() => 'b_${idCounter++}';
 
     void flushInlines() {
       if (pendingInlines.isEmpty) return;
@@ -78,6 +82,13 @@ class ParagraphParser {
                   level: level,
                   inlines: List.unmodifiable(inlines),
                 ));
+              case 'ul' || 'ol':
+                out.add(_parseList(
+                  node,
+                  ordered: tag == 'ol',
+                  depth: 0,
+                  nextId: nextId,
+                ));
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——
@@ -103,6 +114,48 @@ class ParagraphParser {
 
     flushInlines();
     return List.unmodifiable(out);
+  }
+
+  /// 把 `<ul>` / `<ol>` 解析成 ListNode,递归处理嵌套子 list。
+  ListNode _parseList(
+    dom.Element listEl, {
+    required bool ordered,
+    required int depth,
+    required String Function() nextId,
+  }) {
+    final items = <ListItem>[];
+    for (final child in listEl.nodes) {
+      if (child is! dom.Element) continue;
+      if (child.localName?.toLowerCase() != 'li') continue;
+
+      final inlines = <InlineNode>[];
+      final subLists = <ListNode>[];
+      for (final liChild in child.nodes) {
+        if (liChild is dom.Element) {
+          final liTag = liChild.localName?.toLowerCase() ?? '';
+          if (liTag == 'ul' || liTag == 'ol') {
+            subLists.add(_parseList(
+              liChild,
+              ordered: liTag == 'ol',
+              depth: depth + 1,
+              nextId: nextId,
+            ));
+            continue;
+          }
+        }
+        _collectInlineFromAnyNode(liChild, inlines);
+      }
+      items.add(ListItem(
+        inlines: List.unmodifiable(inlines),
+        children: subLists.isEmpty ? null : List.unmodifiable(subLists),
+      ));
+    }
+    return ListNode(
+      id: nextId(),
+      ordered: ordered,
+      depth: depth,
+      items: List.unmodifiable(items),
+    );
   }
 
   /// 把一个 inline element 转成 InlineNode 加入 out。

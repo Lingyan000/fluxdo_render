@@ -95,9 +95,11 @@ void main() {
     test('BlockNode switch 必须覆盖所有 case', () {
       // 这是个编译期检查 — 如果新增 BlockNode 子类没在 switch 里,
       // analyzer 会报 non-exhaustive,这条用例只是 runtime 烟雾测试。
-      const p = ParagraphNode(id: 'b_0', inlines: []);
+      const BlockNode p = ParagraphNode(id: 'b_0', inlines: []);
       final label = switch (p) {
         ParagraphNode() => 'paragraph',
+        HeadingNode() => 'heading',
+        ListNode() => 'list',
       };
       expect(label, 'paragraph');
     });
@@ -211,6 +213,63 @@ void main() {
         statusEmoji: EmojiRun(name: 'fire', url: 'x.png'),
       );
       expect(b.toString(), contains('emoji'));
+    });
+  });
+
+  group('ListNode', () {
+    test('==/hashCode 按 ordered + depth + items', () {
+      const a = ListNode(
+        id: 'b_0',
+        ordered: false,
+        items: [
+          ListItem(inlines: [TextRun('x')]),
+        ],
+      );
+      const b = ListNode(
+        id: 'b_99',
+        ordered: false,
+        items: [
+          ListItem(inlines: [TextRun('x')]),
+        ],
+      );
+      // id 不参与 ==
+      expect(a, b);
+      const c = ListNode(
+        id: 'b_0',
+        ordered: true,
+        items: [ListItem(inlines: [TextRun('x')])],
+      );
+      expect(a == c, isFalse);
+    });
+
+    test('depth 默认 0', () {
+      const l = ListNode(id: 'b_0', ordered: false, items: []);
+      expect(l.depth, 0);
+    });
+
+    test('ListItem.children 嵌套子列表正常 ==', () {
+      const sub = ListNode(
+        id: 'b_1',
+        ordered: false,
+        depth: 1,
+        items: [ListItem(inlines: [TextRun('nested')])],
+      );
+      const a = ListItem(
+        inlines: [TextRun('outer')],
+        children: [sub],
+      );
+      const b = ListItem(
+        inlines: [TextRun('outer')],
+        children: [sub],
+      );
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('叶子项 children = null,toString 不带 sub-lists', () {
+      const i = ListItem(inlines: [TextRun('x')]);
+      expect(i.children, isNull);
+      expect(i.toString(), isNot(contains('sub-lists')));
     });
   });
 }

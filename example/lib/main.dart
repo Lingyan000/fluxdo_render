@@ -328,6 +328,21 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       for (final inline in node.inlines) {
         _writeInline(buf, inline, indent + 1);
       }
+    case ListNode():
+      buf.writeln('$pad$node');
+      for (int i = 0; i < node.items.length; i++) {
+        final item = node.items[i];
+        buf.writeln('$pad  [$i] ${item.inlines.length} inlines'
+            '${item.children == null ? "" : ", ${item.children!.length} children"}');
+        for (final inline in item.inlines) {
+          _writeInline(buf, inline, indent + 2);
+        }
+        if (item.children != null) {
+          for (final sub in item.children!) {
+            _writeNode(buf, sub, indent + 2);
+          }
+        }
+      }
   }
 }
 
