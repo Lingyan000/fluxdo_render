@@ -262,6 +262,7 @@ class _FixtureDetailState extends State<_FixtureDetail> {
                   SnackBar(content: Text('mention tapped: @$username ($href)')),
                 );
               },
+              imageContentBuilder: _galleryImageBuilder,
             ),
           ),
         ),
@@ -458,3 +459,67 @@ const _emojiUnicode = <String, String>{
   'tada': '\u{1F389}',
   'star': '⭐',
 };
+
+/// Gallery 内置 image builder。
+///
+/// fixture 全用假 URL(`example.com/upload/...`),Image.network 必然失败 ——
+/// 这里直接画一个纯绘制 placeholder(渐变色块 + 图标 + alt 文本),
+/// 不发任何网络请求,看着也比 broken-image 像样。
+///
+/// 主项目接入时会换成 discourseImageProvider + Hero + 长按菜单。
+Widget _galleryImageBuilder(BuildContext context, ImageRun image) {
+  final scheme = Theme.of(context).colorScheme;
+  final width = image.width ?? 160;
+  final height = image.height ?? 100;
+  return Container(
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          scheme.primaryContainer,
+          scheme.tertiaryContainer,
+        ],
+      ),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(
+        color: scheme.outline.withValues(alpha: 0.3),
+      ),
+    ),
+    padding: const EdgeInsets.all(6),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.image_outlined,
+          size: 24,
+          color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
+        ),
+        if (height >= 60) ...[
+          const SizedBox(height: 4),
+          Text(
+            image.alt.isEmpty ? 'image' : image.alt,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10,
+              color: scheme.onPrimaryContainer.withValues(alpha: 0.8),
+            ),
+          ),
+        ],
+        if (height >= 80) ...[
+          Text(
+            '${width.toInt()}×${height.toInt()}',
+            style: TextStyle(
+              fontSize: 9,
+              color: scheme.onPrimaryContainer.withValues(alpha: 0.6),
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
