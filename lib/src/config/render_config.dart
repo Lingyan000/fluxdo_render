@@ -78,33 +78,37 @@ enum NodeKind {
         NodeKind.horizontalRule => 'horizontal_rule',
       };
 
-  /// 中文标签(给设置页 UI 用)。
+  /// 节点的英文显示名,作为 fallback 显示。
+  ///
+  /// 调用方(主项目)需要做本地化时,**不要直接用这个字段**,而是
+  /// 用 `NodeKind.name`(如 `'paragraph'`)作为 l10n key 查表。
+  /// 子包不应承载用户面文本。
   String get label => switch (this) {
-        NodeKind.paragraph => '段落',
-        NodeKind.heading => '标题',
-        NodeKind.list => '列表',
-        NodeKind.codeBlock => '代码块',
-        NodeKind.quoteCard => '引用卡片',
-        NodeKind.spoiler => '剧透',
-        NodeKind.details => '折叠详情',
-        NodeKind.onebox => '链接卡片',
-        NodeKind.table => '表格',
-        NodeKind.poll => '投票',
-        NodeKind.math => '公式',
-        NodeKind.iframe => '嵌入框',
-        NodeKind.imageGrid => '图片网格',
-        NodeKind.lazyVideo => '懒加载视频',
-        NodeKind.footnote => '脚注',
-        NodeKind.mention => '@提及',
-        NodeKind.emoji => '表情',
-        NodeKind.lightbox => '画廊',
-        NodeKind.inlineCode => '行内代码',
-        NodeKind.blockquote => '引用块',
+        NodeKind.paragraph => 'Paragraph',
+        NodeKind.heading => 'Heading',
+        NodeKind.list => 'List',
+        NodeKind.codeBlock => 'Code block',
+        NodeKind.quoteCard => 'Quote card',
+        NodeKind.spoiler => 'Spoiler',
+        NodeKind.details => 'Details',
+        NodeKind.onebox => 'Onebox',
+        NodeKind.table => 'Table',
+        NodeKind.poll => 'Poll',
+        NodeKind.math => 'Math',
+        NodeKind.iframe => 'Iframe',
+        NodeKind.imageGrid => 'Image grid',
+        NodeKind.lazyVideo => 'Lazy video',
+        NodeKind.footnote => 'Footnote',
+        NodeKind.mention => 'Mention',
+        NodeKind.emoji => 'Emoji',
+        NodeKind.lightbox => 'Lightbox',
+        NodeKind.inlineCode => 'Inline code',
+        NodeKind.blockquote => 'Blockquote',
         NodeKind.callout => 'Callout',
-        NodeKind.chatTranscript => '聊天记录',
-        NodeKind.localDate => '本地时间',
-        NodeKind.policy => '协议块',
-        NodeKind.horizontalRule => '分割线',
+        NodeKind.chatTranscript => 'Chat transcript',
+        NodeKind.localDate => 'Local date',
+        NodeKind.policy => 'Policy',
+        NodeKind.horizontalRule => 'Horizontal rule',
       };
 
   /// 根据 dirName 反查。未知值返回 null。
@@ -128,10 +132,14 @@ enum RenderEngine {
   /// dogfood 期使用,production 不应出现。
   both;
 
+  /// 引擎的英文显示名,作为 fallback。
+  ///
+  /// 同 [NodeKind.label]:调用方做本地化时应用 `RenderEngine.name`
+  /// 作为 l10n key 查表。
   String get label => switch (this) {
-        RenderEngine.legacy => '旧引擎',
-        RenderEngine.newImpl => '新引擎',
-        RenderEngine.both => '对照',
+        RenderEngine.legacy => 'Legacy',
+        RenderEngine.newImpl => 'New',
+        RenderEngine.both => 'Both (overlay)',
       };
 
   /// 把 RenderEngine 映射到 DualRenderMode。
