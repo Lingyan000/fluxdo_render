@@ -116,6 +116,7 @@ class NodeFactory {
       SpoilerBlockNode() => buildSpoilerBlock(context, node),
       OneboxNode() => buildOnebox(context, node),
       DetailsNode() => buildDetails(context, node),
+      CalloutNode() => buildCallout(context, node),
     };
   }
 
@@ -542,6 +543,89 @@ class NodeFactory {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final c in node.children) childFactory.build(context, c),
+        ],
+      ),
+    );
+  }
+
+  /// Obsidian Callout 渲染 — `<blockquote>[!type]+title</blockquote>`。
+  ///
+  /// 视觉对齐 legacy `callout_builder.dart`:
+  ///   margin 上下 8 + 主色 @ 10% 背景 + 左 4px 主色竖条 + 右上右下圆角 4
+  ///   头:Row(icon 18 + 标题 titleSmall(主色)+ 可折叠箭头)
+  ///   体:Padding(12, 8, 12, 12) + DefaultTextStyle(onSurfaceVariant + 1.5)
+  ///   可折叠:头部 InkWell + heightFactor 200ms easeIn + 箭头 0→0.5 turns
+  ///
+  /// 简化:不支持 titleHtml(legacy 几乎都是纯文本标题);[CalloutKind.unknown]
+  /// 时用 typeRaw 首字母大写作为默认标题(对齐 legacy 兜底分支)。
+  Widget buildCallout(BuildContext context, CalloutNode node) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final config = _calloutConfigFor(node.kind, node.typeRaw, scheme);
+    // 内容是否为空(空时不渲染 body,且头部不留 8px 底 padding)
+    final hasBody = node.children.isNotEmpty;
+    final foldable = node.foldable;
+
+    final titleText = node.title?.isNotEmpty == true
+        ? node.title!
+        : config.defaultTitle;
+    final titleStyle = theme.textTheme.titleSmall?.copyWith(
+      fontWeight: FontWeight.w500,
+      color: config.color,
+    );
+
+    Widget bodyWidget = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      child: DefaultTextStyle.merge(
+        style: TextStyle(
+          color: scheme.onSurfaceVariant,
+          height: 1.5,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final c in node.children) _compactCopy().build(context, c),
+          ],
+        ),
+      ),
+    );
+
+    if (foldable != null && hasBody) {
+      return _FoldableCalloutWidget(
+        config: config,
+        titleText: titleText,
+        titleStyle: titleStyle,
+        body: bodyWidget,
+        initiallyExpanded: foldable,
+      );
+    }
+
+    // 不可折叠 / 无内容形态
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: config.color.withValues(alpha: 0.1),
+        border: Border(
+          left: BorderSide(color: config.color, width: 4),
+        ),
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(4),
+          bottomRight: Radius.circular(4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(12, 8, 12, hasBody ? 0 : 8),
+            child: _CalloutTitleRow(
+              config: config,
+              titleText: titleText,
+              titleStyle: titleStyle,
+              foldable: false,
+            ),
+          ),
+          if (hasBody) bodyWidget,
         ],
       ),
     );
@@ -1171,6 +1255,287 @@ class _DetailsWidgetState extends State<_DetailsWidget>
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Callout 视觉配置 — 子包内置版本(13 大类 + unknown 兜底)。
+///
+/// 对齐 legacy `callout_config.dart::getCalloutConfig`,但:
+/// - 不依赖 `app_icons`(子包零外部依赖原则),改用 Material `Icons.*`
+/// - color 直接用 Material 命名色(与 legacy 同)
+class _CalloutConfig {
+  const _CalloutConfig({
+    required this.color,
+    required this.icon,
+    required this.defaultTitle,
+  });
+  final Color color;
+  final IconData icon;
+  final String defaultTitle;
+}
+
+_CalloutConfig _calloutConfigFor(
+  CalloutKind kind,
+  String typeRaw,
+  ColorScheme scheme,
+) {
+  switch (kind) {
+    case CalloutKind.note:
+      return const _CalloutConfig(
+        color: Colors.blue,
+        icon: Icons.edit_note_rounded,
+        defaultTitle: 'Note',
+      );
+    case CalloutKind.summary:
+      return const _CalloutConfig(
+        color: Colors.cyan,
+        icon: Icons.subject_rounded,
+        defaultTitle: 'Summary',
+      );
+    case CalloutKind.info:
+      return const _CalloutConfig(
+        color: Colors.blue,
+        icon: Icons.info_rounded,
+        defaultTitle: 'Info',
+      );
+    case CalloutKind.todo:
+      return const _CalloutConfig(
+        color: Colors.blue,
+        icon: Icons.check_circle_rounded,
+        defaultTitle: 'Todo',
+      );
+    case CalloutKind.tip:
+      return const _CalloutConfig(
+        color: Colors.teal,
+        icon: Icons.tips_and_updates_rounded,
+        defaultTitle: 'Tip',
+      );
+    case CalloutKind.success:
+      return const _CalloutConfig(
+        color: Colors.green,
+        icon: Icons.check_circle_rounded,
+        defaultTitle: 'Success',
+      );
+    case CalloutKind.question:
+      return const _CalloutConfig(
+        color: Colors.orange,
+        icon: Icons.help_rounded,
+        defaultTitle: 'Question',
+      );
+    case CalloutKind.warning:
+      return const _CalloutConfig(
+        color: Colors.orange,
+        icon: Icons.warning_amber_rounded,
+        defaultTitle: 'Warning',
+      );
+    case CalloutKind.failure:
+      return const _CalloutConfig(
+        color: Colors.red,
+        icon: Icons.close_rounded,
+        defaultTitle: 'Failure',
+      );
+    case CalloutKind.danger:
+      return const _CalloutConfig(
+        color: Colors.red,
+        icon: Icons.dangerous_rounded,
+        defaultTitle: 'Danger',
+      );
+    case CalloutKind.bug:
+      return const _CalloutConfig(
+        color: Colors.red,
+        icon: Icons.bug_report_rounded,
+        defaultTitle: 'Bug',
+      );
+    case CalloutKind.example:
+      return const _CalloutConfig(
+        color: Colors.purple,
+        icon: Icons.list_rounded,
+        defaultTitle: 'Example',
+      );
+    case CalloutKind.quote:
+      return const _CalloutConfig(
+        color: Colors.grey,
+        icon: Icons.format_quote_rounded,
+        defaultTitle: 'Quote',
+      );
+    case CalloutKind.unknown:
+      // 未知类型:typeRaw 首字母大写 + 灰色 + 引号图标
+      final defaultTitle = typeRaw.isEmpty
+          ? 'Note'
+          : '${typeRaw[0].toUpperCase()}${typeRaw.substring(1)}';
+      return _CalloutConfig(
+        color: Colors.grey,
+        icon: Icons.format_quote_rounded,
+        defaultTitle: defaultTitle,
+      );
+  }
+}
+
+/// Callout 标题行:icon + 标题 + 可选展开箭头 placeholder。
+///
+/// `foldable=true` 时由父 _FoldableCalloutWidget 替换为带旋转动画的箭头;
+/// 这里只画静态版给"不可折叠"形态用。
+class _CalloutTitleRow extends StatelessWidget {
+  const _CalloutTitleRow({
+    required this.config,
+    required this.titleText,
+    required this.titleStyle,
+    required this.foldable,
+  });
+
+  final _CalloutConfig config;
+  final String titleText;
+  final TextStyle? titleStyle;
+
+  /// 是否需要画展开箭头占位(不可折叠时 false,这里就不画)。
+  /// 注意:可折叠形态有自己的 _FoldableCalloutWidget,这里 foldable=false。
+  final bool foldable;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(config.icon, size: 18, color: config.color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(titleText, style: titleStyle),
+        ),
+        if (foldable)
+          Icon(
+            Icons.expand_more_rounded,
+            size: 18,
+            color: config.color.withValues(alpha: 0.7),
+          ),
+      ],
+    );
+  }
+}
+
+/// 可折叠 Callout 交互 widget(对齐 legacy `FoldableCallout`)。
+///
+/// 头部 InkWell + 200ms easeIn:
+/// - 箭头 RotationTransition 0 → 0.5 turns(对齐 legacy 行为)
+/// - 内容 heightFactor 0 → 1(底部 padding 包含在 body 内)
+///
+/// 与 _DetailsWidget 不同点:
+/// - 用 callout config 色块包外层(legacy 同)
+/// - 内容用 ClipRect + Align 折叠,初始 _controller.value 按 initiallyExpanded
+class _FoldableCalloutWidget extends StatefulWidget {
+  const _FoldableCalloutWidget({
+    required this.config,
+    required this.titleText,
+    required this.titleStyle,
+    required this.body,
+    required this.initiallyExpanded,
+  });
+
+  final _CalloutConfig config;
+  final String titleText;
+  final TextStyle? titleStyle;
+  final Widget body;
+  final bool initiallyExpanded;
+
+  @override
+  State<_FoldableCalloutWidget> createState() => _FoldableCalloutWidgetState();
+}
+
+class _FoldableCalloutWidgetState extends State<_FoldableCalloutWidget>
+    with SingleTickerProviderStateMixin {
+  late bool _expanded;
+  late AnimationController _controller;
+  late Animation<double> _iconTurns;
+  late Animation<double> _heightFactor;
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.initiallyExpanded;
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _iconTurns = Tween<double>(begin: 0.0, end: 0.5).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
+    );
+    _heightFactor = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeIn,
+    );
+    if (_expanded) _controller.value = 1.0;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() {
+      _expanded = !_expanded;
+      if (_expanded) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final config = widget.config;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: config.color.withValues(alpha: 0.1),
+        border: Border(
+          left: BorderSide(color: config.color, width: 4),
+        ),
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(4),
+          bottomRight: Radius.circular(4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              child: Row(
+                children: [
+                  Icon(config.icon, size: 18, color: config.color),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(widget.titleText, style: widget.titleStyle),
+                  ),
+                  RotationTransition(
+                    turns: _iconTurns,
+                    child: Icon(
+                      Icons.expand_more_rounded,
+                      size: 18,
+                      color: config.color.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          ClipRect(
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) => Align(
+                alignment: Alignment.topLeft,
+                heightFactor: _heightFactor.value,
+                child: child,
+              ),
+              child: widget.body,
+            ),
+          ),
+        ],
       ),
     );
   }

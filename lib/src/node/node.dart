@@ -512,6 +512,163 @@ class OneboxNode extends BlockNode {
       'OneboxNode($id, $kind${url == null ? "" : ", $url"})';
 }
 
+/// Obsidian Callout 类型 — 对齐 legacy `callout_config.dart::getCalloutConfig`
+/// 13 大类。
+///
+/// Discourse 在 `<blockquote>` 内首段以 `[!type]` 起头表示 callout(Obsidian
+/// 语法),渲染成带图标的彩色卡片。子包只识别归类 + 暴露字段;具体颜色 /
+/// 图标在 NodeFactory.buildCallout 内按 kind 派发(对齐 legacy)。
+///
+/// `unknown` = legacy 里走 "未知类型 → 灰色 + 首字母大写" 兜底分支。
+enum CalloutKind {
+  note,
+  summary,
+  info,
+  todo,
+  tip,
+  success,
+  question,
+  warning,
+  failure,
+  danger,
+  bug,
+  example,
+  quote,
+  unknown;
+
+  /// 解析 type 关键字到 enum(对齐 legacy 别名)。
+  ///
+  /// 未识别返回 [unknown](保留原始 typeRaw,渲染层做首字母大写标题)。
+  static CalloutKind fromType(String type) {
+    switch (type) {
+      case 'note':
+        return CalloutKind.note;
+      case 'abstract':
+      case 'summary':
+      case 'tldr':
+        return CalloutKind.summary;
+      case 'info':
+        return CalloutKind.info;
+      case 'todo':
+        return CalloutKind.todo;
+      case 'tip':
+      case 'hint':
+      case 'important':
+        return CalloutKind.tip;
+      case 'success':
+      case 'check':
+      case 'done':
+        return CalloutKind.success;
+      case 'question':
+      case 'help':
+      case 'faq':
+        return CalloutKind.question;
+      case 'warning':
+      case 'caution':
+      case 'attention':
+        return CalloutKind.warning;
+      case 'failure':
+      case 'fail':
+      case 'missing':
+        return CalloutKind.failure;
+      case 'danger':
+      case 'error':
+        return CalloutKind.danger;
+      case 'bug':
+        return CalloutKind.bug;
+      case 'example':
+        return CalloutKind.example;
+      case 'quote':
+      case 'cite':
+        return CalloutKind.quote;
+      default:
+        return CalloutKind.unknown;
+    }
+  }
+}
+
+/// Obsidian Callout — `<blockquote><p>[!type](+|-)?\s*title<br>...</p>...</blockquote>`。
+///
+/// HTML 形态(简化):
+/// ```html
+/// <blockquote>
+///   <p>[!note]+ 提示标题<br>提示正文第一行</p>
+///   <p>提示正文第二段</p>
+/// </blockquote>
+/// ```
+///
+/// 标记规则:
+/// - `[!type]` — 不可折叠(`foldable=null`)
+/// - `[!type]+` — 可折叠,默认展开(`foldable=true`)
+/// - `[!type]-` — 可折叠,默认折叠(`foldable=false`)
+/// - `[!type]` 后空格 + 自定义标题(可空,空时用 kind 默认标题)
+///
+/// 视觉对齐 legacy `callout_builder.dart`:
+///   margin 上下 8;callout 主色背景 @ 10% + 左 4px 主色竖条 + 右上右下圆角 4
+///   头部:Row(icon 18px + 标题 + 可折叠箭头)
+///   内容:Padding(12, 8, 12, 12) + DefaultTextStyle(onSurfaceVariant + 1.5)
+///   可折叠:头部点击切换 + heightFactor 200ms easeInOut + 箭头旋转 0→0.5 turns
+///
+/// **简化**:
+/// - 不持原始 cooked html;首段 callout 标记行在 parser 阶段就被剥掉,
+///   children 已是"正文 BlockNode"。
+/// - title 只持纯文本(legacy 支持 titleHtml 渲染样式,简化忽略 ——
+///   实际几乎所有 callout 标题都是纯文本)。
+@immutable
+class CalloutNode extends BlockNode {
+  const CalloutNode({
+    required super.id,
+    required this.kind,
+    required this.typeRaw,
+    this.title,
+    this.foldable,
+    this.children = const [],
+  });
+
+  /// 识别后的类型;[CalloutKind.unknown] 时用 [typeRaw] 做首字母大写默认标题。
+  final CalloutKind kind;
+
+  /// 原始 type 字符串(已 lowercase),保留给 [CalloutKind.unknown] 兜底
+  /// 显示用("[!xyz]" → typeRaw="xyz",默认标题渲染成 "Xyz")。
+  final String typeRaw;
+
+  /// 自定义标题(`[!type] 这里的标题`),空时 NodeFactory 用 kind 默认值。
+  final String? title;
+
+  /// 折叠形态:`null` = 不可折叠;`true` = 可折叠 + 默认展开;
+  /// `false` = 可折叠 + 默认折叠。
+  final bool? foldable;
+
+  /// 正文 BlockNode(parser 已把首段 callout 标记行剥掉)。
+  final List<BlockNode> children;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CalloutNode &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          typeRaw == other.typeRaw &&
+          title == other.title &&
+          foldable == other.foldable &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hash(
+        kind,
+        typeRaw,
+        title,
+        foldable,
+        Object.hashAll(children),
+      );
+
+  @override
+  String toString() =>
+      'CalloutNode($id, $kind${title == null ? "" : "/\"$title\""}'
+      '${foldable == null ? "" : ", foldable=$foldable"}, '
+      '${children.length} children)';
+}
+
 /// 折叠块 — `<details><summary>标题</summary>内容</details>`。
 ///
 /// 视觉对齐 legacy `details_builder.dart`:
@@ -632,6 +789,10 @@ int countImageRuns(List<BlockNode> nodes) {
         // onebox 内部图片(thumbnail / favicon)不计入 ImageRun gallery
         break;
       case DetailsNode(:final children):
+        for (final c in children) {
+          scanBlock(c);
+        }
+      case CalloutNode(:final children):
         for (final c in children) {
           scanBlock(c);
         }

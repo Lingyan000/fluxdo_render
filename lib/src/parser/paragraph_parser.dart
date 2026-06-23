@@ -129,11 +129,17 @@ class ParagraphParser {
                   nextImageIndex: nextImageIndex,
                 ));
               case 'blockquote':
-                // blockquote 是块级容器,递归处理内部 BlockNode
-                out.add(BlockquoteNode(
-                  id: nextId(),
-                  children: _parseBlocks(node.nodes, nextId, nextImageIndex),
-                ));
+                // blockquote 是块级容器,先尝试识别 Obsidian Callout 形态
+                // (首段以 [!type] 起头),否则普通 BlockquoteNode 递归。
+                final callout = _tryParseCallout(node, nextId, nextImageIndex);
+                if (callout != null) {
+                  out.add(callout);
+                } else {
+                  out.add(BlockquoteNode(
+                    id: nextId(),
+                    children: _parseBlocks(node.nodes, nextId, nextImageIndex),
+                  ));
+                }
               case 'hr':
                 // hr.footnotes-sep:legacy 隐藏(脚注体系的分隔)。
                 // 其他 hr 才走 HorizontalRuleNode。
@@ -457,6 +463,109 @@ class ParagraphParser {
       summary: summary,
       children: children,
       initiallyOpen: detailsEl.attributes.containsKey('open'),
+    );
+  }
+
+  /// 尝试把 `<blockquote>` 识别为 Obsidian Callout(`[!type](+|-)?`)。
+  ///
+  /// 命中条件:第一个直接子 `<p>` 的 textContent 首行(`<br>` 分割前)
+  /// 匹配 `^\[!([^\]]+)\]([+-])?\s*(.*)`。匹配失败返回 null,由外层
+  /// 回落到普通 BlockquoteNode。
+  ///
+  /// 命中后的处理:
+  /// - kind:`CalloutKind.fromType(type.toLowerCase())`
+  /// - foldable:`+ → true`,`- → false`,否则 null
+  /// - title:首行剥掉 `[!type](+|-)?\s*` 后的剩余文本(空时 null)
+  /// - children:
+  ///   - 首段 `<br>` 后的剩余 inline → 一个新 ParagraphNode(若非空)
+  ///   - 首段之后的所有兄弟节点 → 递归 _parseBlocks
+  CalloutNode? _tryParseCallout(
+    dom.Element blockquoteEl,
+    String Function() nextId,
+    int Function() nextImageIndex,
+  ) {
+    // 第一个直接子 <p>(不递归嵌套 blockquote 内的 p)
+    dom.Element? firstP;
+    var firstPIndex = -1;
+    for (var i = 0; i < blockquoteEl.children.length; i++) {
+      final c = blockquoteEl.children[i];
+      if (c.localName?.toLowerCase() == 'p') {
+        firstP = c;
+        firstPIndex = i;
+        break;
+      }
+    }
+    if (firstP == null) return null;
+
+    // 取首段 textContent,只看第一行(<br> 之前)做 callout 标记识别
+    final firstParaHtml = firstP.innerHtml;
+    final brMatch = RegExp(r'<br\s*/?>', caseSensitive: false)
+        .firstMatch(firstParaHtml);
+    final beforeBr = brMatch == null
+        ? firstParaHtml
+        : firstParaHtml.substring(0, brMatch.start);
+    final firstLineText = beforeBr.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+
+    final match =
+        RegExp(r'^\[!([^\]]+)\]([+-])?\s*(.*)').firstMatch(firstLineText);
+    if (match == null) return null;
+
+    final typeRaw = match.group(1)!.trim().toLowerCase();
+    final foldMarker = match.group(2);
+    final titleRaw = match.group(3)?.trim();
+    final bool? foldable = switch (foldMarker) {
+      '+' => true,
+      '-' => false,
+      _ => null,
+    };
+
+    // 收集首段 <br> 之后的剩余 inline(若有)→ 单独一个 ParagraphNode
+    final childNodes = <dom.Node>[];
+    if (brMatch != null) {
+      final afterBrHtml = firstParaHtml.substring(brMatch.end);
+      if (afterBrHtml.trim().isNotEmpty) {
+        // 用 fragment parse 让它产生跟原 DOM 一致的节点
+        final frag = html_parser.parseFragment(afterBrHtml);
+        childNodes.addAll(frag.nodes);
+      }
+    }
+
+    // 首段之后的所有兄弟节点都加进 children DOM 流
+    // (用 nodes 而非 children,以保留文本节点和其他 inline)
+    final allNodes = blockquoteEl.nodes;
+    // 找到首段在 nodes 中的位置(children 用的是 element-only 索引,
+    // 这里需要 nodes 索引)
+    var firstPNodeIndex = -1;
+    var skipped = 0;
+    for (var i = 0; i < allNodes.length; i++) {
+      final n = allNodes[i];
+      if (n is dom.Element && n.localName?.toLowerCase() == 'p') {
+        if (skipped == firstPIndex) {
+          firstPNodeIndex = i;
+          break;
+        }
+        skipped++;
+      }
+    }
+    if (firstPNodeIndex >= 0) {
+      for (var i = firstPNodeIndex + 1; i < allNodes.length; i++) {
+        childNodes.add(allNodes[i]);
+      }
+    }
+
+    // 把首段剩余 inline + 后续节点 一起递归解析成 BlockNode
+    // (剩余 inline 会被 _parseBlocks 收成 pendingInlines → ParagraphNode)
+    final children = childNodes.isEmpty
+        ? const <BlockNode>[]
+        : _parseBlocks(childNodes, nextId, nextImageIndex);
+
+    return CalloutNode(
+      id: nextId(),
+      kind: CalloutKind.fromType(typeRaw),
+      typeRaw: typeRaw,
+      title: (titleRaw == null || titleRaw.isEmpty) ? null : titleRaw,
+      foldable: foldable,
+      children: children,
     );
   }
 

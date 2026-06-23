@@ -107,6 +107,7 @@ void main() {
         SpoilerBlockNode() => 'spoiler',
         OneboxNode() => 'onebox',
         DetailsNode() => 'details',
+        CalloutNode() => 'callout',
       };
       expect(label, 'paragraph');
     });
