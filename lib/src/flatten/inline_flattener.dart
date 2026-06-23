@@ -68,10 +68,18 @@ class InlineFlattener {
     List<InlineNode> nodes,
     LinkActionHandler handler,
     BuildContext? context,
-    List<GestureRecognizer> recognizers,
-  ) {
+    List<GestureRecognizer> recognizers, {
+    GestureRecognizer? inheritedRecognizer,
+  }) {
     return [
-      for (final node in nodes) _toSpan(node, handler, context, recognizers),
+      for (final node in nodes)
+        _toSpan(
+          node,
+          handler,
+          context,
+          recognizers,
+          inheritedRecognizer: inheritedRecognizer,
+        ),
     ];
   }
 
@@ -79,19 +87,38 @@ class InlineFlattener {
     InlineNode node,
     LinkActionHandler handler,
     BuildContext? context,
-    List<GestureRecognizer> recognizers,
-  ) {
+    List<GestureRecognizer> recognizers, {
+    GestureRecognizer? inheritedRecognizer,
+  }) {
     return switch (node) {
-      TextRun(:final text) => TextSpan(text: text),
+      TextRun(:final text) => TextSpan(
+          text: text,
+          recognizer: inheritedRecognizer,
+        ),
       EmRun(:final children) => TextSpan(
           style: const TextStyle(fontStyle: FontStyle.italic),
-          children: _build(children, handler, context, recognizers),
+          children: _build(
+            children,
+            handler,
+            context,
+            recognizers,
+            inheritedRecognizer: inheritedRecognizer,
+          ),
         ),
       StrongRun(:final children) => TextSpan(
           style: const TextStyle(fontWeight: FontWeight.bold),
-          children: _build(children, handler, context, recognizers),
+          children: _build(
+            children,
+            handler,
+            context,
+            recognizers,
+            inheritedRecognizer: inheritedRecognizer,
+          ),
         ),
-      LineBreakRun() => const TextSpan(text: '\n'),
+      LineBreakRun() => TextSpan(
+          text: '\n',
+          recognizer: inheritedRecognizer,
+        ),
       LinkRun(:final href, :final children) => _buildLinkSpan(
           href,
           children,
@@ -99,7 +126,11 @@ class InlineFlattener {
           context,
           recognizers,
         ),
-      InlineCodeRun(:final text) => _buildInlineCodeSpan(text, context),
+      InlineCodeRun(:final text) => _buildInlineCodeSpan(
+          text,
+          context,
+          inheritedRecognizer: inheritedRecognizer,
+        ),
     };
   }
 
@@ -116,12 +147,21 @@ class InlineFlattener {
         : (TapGestureRecognizer()..onTap = () => handler(ctx, href));
     if (recognizer != null) recognizers.add(recognizer);
 
+    // Flutter `TextSpan.recognizer` 不会从父 span 传播到 child:
+    // hit test 只对 span 本身的 `text` 字段生效。所以 link 子树里的
+    // 所有叶子 span(TextRun / InlineCodeRun / LineBreakRun)都得把
+    // 同一个 recognizer 挂上,才能在任意位置 tap 都触发 onTap。
     return TextSpan(
-      // 链接视觉:跟随 Theme 的 colorScheme.primary,加下划线
-      // 实际颜色由调用方在 baseStyle 上方决定;这里只给 link semantics
       style: _linkStyleHint,
-      recognizer: recognizer,
-      children: _build(children, handler, context, recognizers),
+      // 父 span 没有 text,recognizer 设了也不响应;但 children 里的
+      // 叶子会带同一个 recognizer
+      children: _build(
+        children,
+        handler,
+        context,
+        recognizers,
+        inheritedRecognizer: recognizer,
+      ),
     );
   }
 
@@ -136,7 +176,11 @@ class InlineFlattener {
   /// 主项目 legacy 渲染依赖 [InlineCodePainter](独立 CustomPainter +
   /// TextPainter rect 探测),实现圆角 + 跨行 RRect 合并。等阶段 5 自研
   /// 选区 + 自研 paint 时同步上,届时 InlineCodeRun 不需要变,渲染层换。
-  TextSpan _buildInlineCodeSpan(String text, BuildContext? context) {
+  TextSpan _buildInlineCodeSpan(
+    String text,
+    BuildContext? context, {
+    GestureRecognizer? inheritedRecognizer,
+  }) {
     final isDark = context != null &&
         Theme.of(context).brightness == Brightness.dark;
     final bg = Paint()
@@ -144,6 +188,7 @@ class InlineFlattener {
       ..color = isDark ? const Color(0xFF3A3A3A) : const Color(0xFFE8E8E8);
     return TextSpan(
       text: text,
+      recognizer: inheritedRecognizer,
       style: TextStyle(
         fontFamily: _monospaceFont,
         fontFamilyFallback: const ['Menlo', 'Courier'],

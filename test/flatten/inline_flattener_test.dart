@@ -156,6 +156,63 @@ void main() {
       final strong = linkSpan.children![1] as TextSpan;
       expect(strong.style?.fontWeight, FontWeight.bold);
     });
+
+    testWidgets('recognizer 透传到所有叶子 span(回归: Flutter recognizer 不 bubble)',
+        (tester) async {
+      // Flutter `TextSpan.recognizer` 不会从父 span 传播到 children;
+      // 必须挂到每个叶子 span(有 text 字段的那个),tap 才能响应。
+      late BuildContext ctx;
+      await tester.pumpWidget(Builder(builder: (c) {
+        ctx = c;
+        return const SizedBox();
+      }));
+
+      final result = flattener.flatten(
+        [
+          const LinkRun(
+            href: 'https://x.com',
+            children: [
+              TextRun('前 '),
+              StrongRun(children: [TextRun('粗')]),
+              InlineCodeRun('code'),
+            ],
+          ),
+        ],
+        baseStyle,
+        context: ctx,
+        linkHandler: (_, _) {},
+      );
+
+      // 收集所有叶子 TextSpan 的 recognizer
+      final leafRecognizers = <GestureRecognizer?>[];
+      void walk(InlineSpan s) {
+        if (s is TextSpan) {
+          if (s.text != null) {
+            leafRecognizers.add(s.recognizer);
+          }
+          if (s.children != null) {
+            for (final c in s.children!) {
+              walk(c);
+            }
+          }
+        }
+      }
+      walk(result.span);
+
+      // 三个叶子(TextRun / StrongRun 内的 TextRun / InlineCodeRun)
+      // 都必须挂同一个 recognizer
+      expect(leafRecognizers, hasLength(3));
+      expect(leafRecognizers.every((r) => r != null), isTrue);
+      expect(
+        leafRecognizers.toSet(),
+        hasLength(1),
+        reason: '一个 LinkRun 应该所有叶子共享同一个 recognizer 实例',
+      );
+
+      for (final r in result.recognizers) {
+        r.dispose();
+      }
+    });
   });
 
   group('InlineCodeRun', () {
