@@ -11,4 +11,8 @@ library;
 
 export 'src/config/render_config.dart';
 export 'src/dual/dual_render_widget.dart';
+export 'src/flatten/inline_flattener.dart';
+export 'src/node/node.dart';
+export 'src/parser/paragraph_parser.dart';
+export 'src/render/node_factory.dart';
 export 'src/widget/fluxdo_render.dart';
