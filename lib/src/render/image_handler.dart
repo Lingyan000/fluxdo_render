@@ -4,15 +4,29 @@
 /// CDN 重写等(主项目侧有 `discourseImageProvider` + `galleryInfo` + Hero
 /// 路由 + 长按菜单 等完整体系),通过这个 typedef 注入。
 ///
+/// **画廊 / Hero 怎么接**:
+/// - `image.indexInPost`:当前图在 post 内的 0-based 序号(parser 分配)
+/// - [totalImagesInPost]:当前 post 共多少张图(FluxdoRender 算好后传)
+///
+/// 主项目用这俩做确定性 Hero tag + 全屏 viewer 索引,无需自己在
+/// builder 内累加索引或猜次序。
+///
 /// 调用方:
 /// ```dart
 /// FluxdoRender(
 ///   cookedHtml: ...,
-///   imageContentBuilder: (context, image) {
-///     return Image(
-///       image: discourseImageProvider(rewriteCdn(image.src)),
-///       width: image.width,
-///       height: image.height,
+///   imageContentBuilder: (context, image, totalImagesInPost) {
+///     final heroTag = 'post_${post.id}_img_${image.indexInPost}';
+///     return LazyImage(
+///       imageProvider: discourseImageProvider(rewriteCdn(image.src)),
+///       width: image.width, height: image.height,
+///       heroTag: heroTag,
+///       onTap: () => DiscourseImageUtils.openViewer(
+///         context: context,
+///         images: post.allImageUrls,
+///         currentIndex: image.indexInPost,
+///         heroTag: heroTag,
+///       ),
 ///     );
 ///   },
 /// );
@@ -25,9 +39,14 @@ import 'package:flutter/material.dart';
 import '../node/inline_node.dart';
 
 /// 内容图片 builder。
+///
+/// - [image]:含 src / alt / width / height / **indexInPost**(parser 分配)
+/// - [totalImagesInPost]:当前 post 共有多少张内容图,主项目用来构造
+///   gallery viewer(`currentIndex`、`totalCount` 等)
 typedef ImageContentBuilder = Widget Function(
   BuildContext context,
   ImageRun image,
+  int totalImagesInPost,
 );
 
 /// 默认 image builder —— Image.network + broken-image fallback。
@@ -37,6 +56,7 @@ typedef ImageContentBuilder = Widget Function(
 Widget defaultImageContentBuilder(
   BuildContext context,
   ImageRun image,
+  int totalImagesInPost,
 ) {
   if (image.src.isEmpty) {
     return _placeholder(context, image);

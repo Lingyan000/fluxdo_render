@@ -225,3 +225,62 @@ class HorizontalRuleNode extends BlockNode {
   @override
   String toString() => 'HorizontalRuleNode($id)';
 }
+
+/// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
+///
+/// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
+/// ImageContentBuilder,主项目用这个数构造 gallery viewer 的 totalCount。
+int countImageRuns(List<BlockNode> nodes) {
+  var count = 0;
+  void scanInlines(List<InlineNode> inlines) {
+    for (final n in inlines) {
+      switch (n) {
+        case ImageRun():
+          count++;
+        case EmRun(:final children):
+          scanInlines(children);
+        case StrongRun(:final children):
+          scanInlines(children);
+        case LinkRun(:final children):
+          scanInlines(children);
+        case TextRun():
+        case LineBreakRun():
+        case InlineCodeRun():
+        case EmojiRun():
+        case MentionRun():
+          // 这些 inline 节点不会含 ImageRun(MentionRun 的 statusEmoji 是
+          // EmojiRun 不是 ImageRun)
+          break;
+      }
+    }
+  }
+
+  void scanBlock(BlockNode b) {
+    switch (b) {
+      case ParagraphNode(:final inlines):
+        scanInlines(inlines);
+      case HeadingNode(:final inlines):
+        scanInlines(inlines);
+      case ListNode(:final items):
+        for (final item in items) {
+          scanInlines(item.inlines);
+          if (item.children != null) {
+            for (final sub in item.children!) {
+              scanBlock(sub);
+            }
+          }
+        }
+      case BlockquoteNode(:final children):
+        for (final c in children) {
+          scanBlock(c);
+        }
+      case HorizontalRuleNode():
+        break;
+    }
+  }
+
+  for (final b in nodes) {
+    scanBlock(b);
+  }
+  return count;
+}

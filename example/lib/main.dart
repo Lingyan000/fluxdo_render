@@ -463,63 +463,173 @@ const _emojiUnicode = <String, String>{
 /// Gallery 内置 image builder。
 ///
 /// fixture 全用假 URL(`example.com/upload/...`),Image.network 必然失败 ——
-/// 这里直接画一个纯绘制 placeholder(渐变色块 + 图标 + alt 文本),
+/// 这里直接画一个纯绘制 placeholder(渐变色块 + 图标 + alt 文本 + 标号),
 /// 不发任何网络请求,看着也比 broken-image 像样。
 ///
-/// 主项目接入时会换成 discourseImageProvider + Hero + 长按菜单。
-Widget _galleryImageBuilder(BuildContext context, ImageRun image) {
+/// **演示 tap → 大图 + Hero 动画**:点击 placeholder 推一个全屏 Route,
+/// Hero tag 用 `'gallery_img_${image.indexInPost}'`(主项目接入时会用
+/// `'post_${post.id}_img_${image.indexInPost}'` 避免不同 post 冲突)。
+///
+/// 主项目接入时会换成 discourseImageProvider + LazyImage + 长按菜单 +
+/// 真正的 DiscourseImageUtils.openViewer。
+Widget _galleryImageBuilder(
+  BuildContext context,
+  ImageRun image,
+  int totalImagesInPost,
+) {
+  final heroTag = 'gallery_img_${image.indexInPost}';
   final scheme = Theme.of(context).colorScheme;
   final width = image.width ?? 160;
   final height = image.height ?? 100;
-  return Container(
-    width: width,
-    height: height,
-    decoration: BoxDecoration(
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          scheme.primaryContainer,
-          scheme.tertiaryContainer,
-        ],
-      ),
-      borderRadius: BorderRadius.circular(6),
-      border: Border.all(
-        color: scheme.outline.withValues(alpha: 0.3),
-      ),
-    ),
-    padding: const EdgeInsets.all(6),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Icon(
-          Icons.image_outlined,
-          size: 24,
-          color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
+  return GestureDetector(
+    onTap: () {
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (ctx) => _GalleryImageViewerPage(
+          image: image,
+          heroTag: heroTag,
+          totalImagesInPost: totalImagesInPost,
         ),
-        if (height >= 60) ...[
-          const SizedBox(height: 4),
-          Text(
-            image.alt.isEmpty ? 'image' : image.alt,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 10,
-              color: scheme.onPrimaryContainer.withValues(alpha: 0.8),
-            ),
+      ));
+    },
+    child: Hero(
+      tag: heroTag,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primaryContainer,
+              scheme.tertiaryContainer,
+            ],
           ),
-        ],
-        if (height >= 80) ...[
-          Text(
-            '${width.toInt()}×${height.toInt()}',
-            style: TextStyle(
-              fontSize: 9,
-              color: scheme.onPrimaryContainer.withValues(alpha: 0.6),
-            ),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: scheme.outline.withValues(alpha: 0.3),
           ),
-        ],
-      ],
+        ),
+        padding: const EdgeInsets.all(6),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.image_outlined,
+              size: 24,
+              color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
+            ),
+            if (height >= 60) ...[
+              const SizedBox(height: 4),
+              Text(
+                image.alt.isEmpty ? 'image' : image.alt,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: scheme.onPrimaryContainer.withValues(alpha: 0.8),
+                ),
+              ),
+            ],
+            if (height >= 80) ...[
+              Text(
+                '#${image.indexInPost + 1}/$totalImagesInPost · '
+                '${width.toInt()}×${height.toInt()}',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: scheme.onPrimaryContainer.withValues(alpha: 0.6),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     ),
   );
+}
+
+/// Gallery 全屏 image viewer page —— 演示 Hero 动画 + 大图查看。
+///
+/// 主项目接入时这一层被 DiscourseImageUtils.openViewer 接管(支持滑动
+/// 切图 / 缩放 / 下载 / 分享 等)。
+class _GalleryImageViewerPage extends StatelessWidget {
+  const _GalleryImageViewerPage({
+    required this.image,
+    required this.heroTag,
+    required this.totalImagesInPost,
+  });
+
+  final ImageRun image;
+  final String heroTag;
+  final int totalImagesInPost;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black54,
+        foregroundColor: Colors.white,
+        title: Text('image #${image.indexInPost + 1} / $totalImagesInPost'),
+      ),
+      body: Center(
+        child: Hero(
+          tag: heroTag,
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            height: MediaQuery.of(context).size.height * 0.6,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  scheme.primaryContainer,
+                  scheme.tertiaryContainer,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.image_outlined,
+                  size: 96,
+                  color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  image.alt.isEmpty ? '(no alt)' : image.alt,
+                  style: TextStyle(
+                    fontSize: 20,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'src: ${image.src}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
+                  ),
+                ),
+                Text(
+                  '${(image.width ?? 0).toInt()} × '
+                  '${(image.height ?? 0).toInt()}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -25,6 +25,7 @@ class InlineSpanText extends StatefulWidget {
     this.emojiImageBuilder,
     this.mentionTapHandler,
     this.imageContentBuilder,
+    this.totalImagesInPost = 0,
     this.textAlign,
   });
 
@@ -35,6 +36,7 @@ class InlineSpanText extends StatefulWidget {
   final EmojiImageBuilder? emojiImageBuilder;
   final MentionTapHandler? mentionTapHandler;
   final ImageContentBuilder? imageContentBuilder;
+  final int totalImagesInPost;
   final TextAlign? textAlign;
 
   @override
@@ -70,6 +72,7 @@ class _InlineSpanTextState extends State<InlineSpanText> {
       emojiImageBuilder: widget.emojiImageBuilder,
       mentionTapHandler: widget.mentionTapHandler,
       imageContentBuilder: widget.imageContentBuilder,
+      totalImagesInPost: widget.totalImagesInPost,
       context: context,
     );
     _recognizers = result.recognizers;

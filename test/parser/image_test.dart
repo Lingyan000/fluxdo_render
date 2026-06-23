@@ -69,5 +69,64 @@ void main() {
       expect((p.inlines[0] as ImageRun).width, isNull);
       expect((p.inlines[0] as ImageRun).height, isNull);
     });
+
+    test('indexInPost 按出现顺序 0,1,2 递增', () {
+      final result = parser.parse(
+        '<p><img src="a.png"></p>'
+        '<p>中间段</p>'
+        '<p><img src="b.png"> 和 <img src="c.png"></p>',
+      );
+      final imgs = <ImageRun>[];
+      for (final n in result.whereType<ParagraphNode>()) {
+        imgs.addAll(n.inlines.whereType<ImageRun>());
+      }
+      expect(imgs, hasLength(3));
+      expect(imgs[0].indexInPost, 0);
+      expect(imgs[1].indexInPost, 1);
+      expect(imgs[2].indexInPost, 2);
+    });
+
+    test('indexInPost 跨 blockquote / list 嵌套全局连续', () {
+      final result = parser.parse(
+        '<p><img src="a.png"></p>'
+        '<blockquote><p><img src="b.png"></p></blockquote>'
+        '<ul><li><img src="c.png"></li></ul>',
+      );
+      final imgs = <ImageRun>[];
+      void scan(BlockNode b) {
+        switch (b) {
+          case ParagraphNode(:final inlines):
+            imgs.addAll(inlines.whereType<ImageRun>());
+          case BlockquoteNode(:final children):
+            for (final c in children) {
+              scan(c);
+            }
+          case ListNode(:final items):
+            for (final i in items) {
+              imgs.addAll(i.inlines.whereType<ImageRun>());
+            }
+          case _:
+            break;
+        }
+      }
+      result.forEach(scan);
+      expect(imgs.map((e) => e.indexInPost), [0, 1, 2]);
+    });
+
+    test('emoji img 不参与 indexInPost 计数', () {
+      final result = parser.parse(
+        '<p>'
+        '<img src="e1.png" class="emoji" alt=":heart:">'
+        '<img src="a.png">'
+        '<img src="e2.png" class="emoji" alt=":fire:">'
+        '<img src="b.png">'
+        '</p>',
+      );
+      final p = result[0] as ParagraphNode;
+      final imgs = p.inlines.whereType<ImageRun>().toList();
+      expect(imgs, hasLength(2));
+      expect(imgs[0].indexInPost, 0);
+      expect(imgs[1].indexInPost, 1);
+    });
   });
 }

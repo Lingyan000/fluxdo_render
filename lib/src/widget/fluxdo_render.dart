@@ -58,11 +58,12 @@ class FluxdoRender extends StatefulWidget {
 
 class _FluxdoRenderState extends State<FluxdoRender> {
   late List<BlockNode> _nodes;
+  late int _totalImagesInPost;
 
   @override
   void initState() {
     super.initState();
-    _nodes = widget.parser.parse(widget.cookedHtml);
+    _reparse();
   }
 
   @override
@@ -70,8 +71,13 @@ class _FluxdoRenderState extends State<FluxdoRender> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.cookedHtml != widget.cookedHtml ||
         oldWidget.parser != widget.parser) {
-      _nodes = widget.parser.parse(widget.cookedHtml);
+      _reparse();
     }
+  }
+
+  void _reparse() {
+    _nodes = widget.parser.parse(widget.cookedHtml);
+    _totalImagesInPost = countImageRuns(_nodes);
   }
 
   @override
@@ -82,6 +88,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           emojiImageBuilder: widget.emojiImageBuilder,
           mentionTapHandler: widget.mentionTapHandler,
           imageContentBuilder: widget.imageContentBuilder,
+          totalImagesInPost: _totalImagesInPost,
         );
     if (_nodes.isEmpty) {
       return const SizedBox.shrink();

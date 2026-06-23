@@ -40,7 +40,12 @@ class ParagraphParser {
     var idCounter = 0;
     String nextId() => 'b_${idCounter++}';
 
-    return _parseBlocks(fragment.nodes, nextId);
+    // 全局 image index counter,按 image 出现顺序自增分配 indexInPost。
+    // 给主项目算 Hero tag / gallery viewer 索引用。
+    var imageIndexCounter = 0;
+    int nextImageIndex() => imageIndexCounter++;
+
+    return _parseBlocks(fragment.nodes, nextId, nextImageIndex);
   }
 
   /// 把一组 DOM 节点解析成 BlockNode 序列。
@@ -53,6 +58,7 @@ class ParagraphParser {
   List<BlockNode> _parseBlocks(
     Iterable<dom.Node> nodes,
     String Function() nextId,
+    int Function() nextImageIndex,
   ) {
     final out = <BlockNode>[];
     final pendingInlines = <InlineNode>[];
@@ -72,7 +78,7 @@ class ParagraphParser {
           final tag = node.localName?.toLowerCase() ?? '';
           if (_isInlineTag(tag)) {
             // inline 元素 → 累积到 pending
-            _collectInline(node, pendingInlines);
+            _collectInline(node, pendingInlines, nextImageIndex);
           } else {
             flushInlines();
             // 块级
@@ -80,7 +86,7 @@ class ParagraphParser {
               case 'p':
                 final inlines = <InlineNode>[];
                 for (final child in node.nodes) {
-                  _collectInlineFromAnyNode(child, inlines);
+                  _collectInlineFromAnyNode(child, inlines, nextImageIndex);
                 }
                 out.add(ParagraphNode(
                   id: nextId(),
@@ -90,7 +96,7 @@ class ParagraphParser {
                 final level = int.parse(tag.substring(1));
                 final inlines = <InlineNode>[];
                 for (final child in node.nodes) {
-                  _collectInlineFromAnyNode(child, inlines);
+                  _collectInlineFromAnyNode(child, inlines, nextImageIndex);
                 }
                 out.add(HeadingNode(
                   id: nextId(),
@@ -103,12 +109,13 @@ class ParagraphParser {
                   ordered: tag == 'ol',
                   depth: 0,
                   nextId: nextId,
+                  nextImageIndex: nextImageIndex,
                 ));
               case 'blockquote':
                 // blockquote 是块级容器,递归处理内部 BlockNode
                 out.add(BlockquoteNode(
                   id: nextId(),
-                  children: _parseBlocks(node.nodes, nextId),
+                  children: _parseBlocks(node.nodes, nextId, nextImageIndex),
                 ));
               case 'hr':
                 out.add(HorizontalRuleNode(id: nextId()));
@@ -145,6 +152,7 @@ class ParagraphParser {
     required bool ordered,
     required int depth,
     required String Function() nextId,
+    required int Function() nextImageIndex,
   }) {
     final items = <ListItem>[];
     for (final child in listEl.nodes) {
@@ -162,6 +170,7 @@ class ParagraphParser {
               ordered: liTag == 'ol',
               depth: depth + 1,
               nextId: nextId,
+              nextImageIndex: nextImageIndex,
             ));
             continue;
           }
@@ -170,7 +179,7 @@ class ParagraphParser {
         // 自动加的,在浏览器里不显示;不跳过会让 InlineSpanText 多渲染
         // 一行 `\n`,跟下面的子 list 之间空一截)
         if (liChild is dom.Text && liChild.text.trim().isEmpty) continue;
-        _collectInlineFromAnyNode(liChild, inlines);
+        _collectInlineFromAnyNode(liChild, inlines, nextImageIndex);
       }
       // 把首尾 TextRun 的 leading/trailing whitespace(`\n`、缩进 space)
       // 去掉,但保留中间 inline 之间的空格(`"x <em>y</em> z"` 里两端空格
@@ -220,11 +229,15 @@ class ParagraphParser {
   }
 
   /// 把一个 inline element 转成 InlineNode 加入 out。
-  void _collectInline(dom.Element el, List<InlineNode> out) {
+  void _collectInline(
+    dom.Element el,
+    List<InlineNode> out,
+    int Function() nextImageIndex,
+  ) {
     final tag = el.localName?.toLowerCase() ?? '';
     final children = <InlineNode>[];
     for (final child in el.nodes) {
-      _collectInlineFromAnyNode(child, children);
+      _collectInlineFromAnyNode(child, children, nextImageIndex);
     }
     switch (tag) {
       case 'em' || 'i':
@@ -287,7 +300,13 @@ class ParagraphParser {
           final alt = el.attributes['alt']?.trim() ?? '';
           final w = double.tryParse(el.attributes['width'] ?? '');
           final h = double.tryParse(el.attributes['height'] ?? '');
-          out.add(ImageRun(src: src, alt: alt, width: w, height: h));
+          out.add(ImageRun(
+            src: src,
+            alt: alt,
+            width: w,
+            height: h,
+            indexInPost: nextImageIndex(),
+          ));
         }
       default:
         // 未识别 inline:展平子节点
@@ -296,7 +315,11 @@ class ParagraphParser {
   }
 
   /// 把任意 DOM 节点(文本 / inline element / 不该出现的块级)转成 InlineNode。
-  void _collectInlineFromAnyNode(dom.Node node, List<InlineNode> out) {
+  void _collectInlineFromAnyNode(
+    dom.Node node,
+    List<InlineNode> out,
+    int Function() nextImageIndex,
+  ) {
     switch (node) {
       case dom.Text():
         final text = node.text;
@@ -304,7 +327,7 @@ class ParagraphParser {
           out.add(TextRun(text));
         }
       case dom.Element():
-        _collectInline(node, out);
+        _collectInline(node, out, nextImageIndex);
       // 其他节点忽略
     }
   }

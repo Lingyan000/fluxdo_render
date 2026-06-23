@@ -28,6 +28,7 @@ class NodeFactory {
     this.emojiImageBuilder,
     this.mentionTapHandler,
     this.imageContentBuilder,
+    this.totalImagesInPost = 0,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
 
   final InlineFlattener _inlineFlattener;
@@ -47,6 +48,13 @@ class NodeFactory {
   /// 内容图片(非 emoji)builder,主项目注入。
   /// 不传时用 [defaultImageContentBuilder](Image.network + broken-image 占位)。
   final ImageContentBuilder? imageContentBuilder;
+
+  /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
+  /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
+  ///
+  /// 调用方手动构造 NodeFactory(给 user card / AI 分享卡 等场景)时,
+  /// 若不需要 image 路由,保持默认 0 即可。
+  final int totalImagesInPost;
 
   /// 入口 dispatch — sealed class exhaustive switch。
   Widget build(BuildContext context, BlockNode node) {
@@ -78,6 +86,7 @@ class NodeFactory {
         emojiImageBuilder: emojiImageBuilder,
         mentionTapHandler: mentionTapHandler,
         imageContentBuilder: imageContentBuilder,
+        totalImagesInPost: totalImagesInPost,
       ),
     );
   }
@@ -108,6 +117,7 @@ class NodeFactory {
         emojiImageBuilder: emojiImageBuilder,
         mentionTapHandler: mentionTapHandler,
         imageContentBuilder: imageContentBuilder,
+        totalImagesInPost: totalImagesInPost,
       ),
     );
   }
@@ -183,6 +193,7 @@ class NodeFactory {
                   emojiImageBuilder: emojiImageBuilder,
                   mentionTapHandler: mentionTapHandler,
                   imageContentBuilder: imageContentBuilder,
+                  totalImagesInPost: totalImagesInPost,
                 ),
               ),
             ],

@@ -264,6 +264,11 @@ class MentionRun extends InlineNode {
 ///
 /// **不持 ImageProvider**:子包不依赖任何具体 image loading 实现,
 /// 只把 raw src 字符串原值暴露给 builder,主项目自己解析 + 重写 CDN。
+///
+/// [indexInPost]:parser 在一次 parse 内按 image 出现顺序自增分配
+/// (0, 1, 2, ...),给主项目算 Hero tag / gallery index 用。同一个
+/// `<img src>` 在不同 post 内的 indexInPost 不同;**节点 == 比较时
+/// 也参与**(防止重排时主项目误以为是同一张图)。
 @immutable
 class ImageRun extends InlineNode {
   const ImageRun({
@@ -271,6 +276,7 @@ class ImageRun extends InlineNode {
     this.alt = '',
     this.width,
     this.height,
+    this.indexInPost = 0,
   });
 
   /// 完整图片 URL(parser 不做任何重写;含 upload:// 短链时由主项目解析)。
@@ -285,6 +291,14 @@ class ImageRun extends InlineNode {
   /// HTML attribute 里的 height(px),null 表示由 builder 决定。
   final double? height;
 
+  /// 在当前 post 内的 0-based 顺序索引。parser 分配。
+  ///
+  /// 主项目接入示意:
+  /// ```dart
+  /// final heroTag = 'post_${post.id}_img_${image.indexInPost}';
+  /// ```
+  final int indexInPost;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -293,12 +307,14 @@ class ImageRun extends InlineNode {
           src == other.src &&
           alt == other.alt &&
           width == other.width &&
-          height == other.height;
+          height == other.height &&
+          indexInPost == other.indexInPost;
 
   @override
-  int get hashCode => Object.hash(src, alt, width, height);
+  int get hashCode => Object.hash(src, alt, width, height, indexInPost);
 
   @override
   String toString() =>
-      'ImageRun($src${width == null ? "" : ", ${width}x$height"})';
+      'ImageRun(#$indexInPost $src'
+      '${width == null ? "" : ", ${width}x$height"})';
 }

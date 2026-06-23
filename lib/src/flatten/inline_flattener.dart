@@ -56,6 +56,8 @@ class InlineFlattener {
   /// null 时用 [defaultMentionTapHandler](仅 debugPrint)。
   /// [imageContentBuilder]:内容图片(非 emoji)渲染 builder。null 时用
   /// [defaultImageContentBuilder](Image.network 兜底)。
+  /// [totalImagesInPost]:当前 post 内 ImageRun 总数,透传给 imageBuilder
+  /// 用作 gallery viewer 的 totalCount(主项目 Hero / 大图浏览用)。
   /// [context]:link/mention 点击 + emoji 字号探测时传给 handler 用。
   FlattenResult flatten(
     List<InlineNode> inlines,
@@ -64,6 +66,7 @@ class InlineFlattener {
     EmojiImageBuilder? emojiImageBuilder,
     MentionTapHandler? mentionTapHandler,
     ImageContentBuilder? imageContentBuilder,
+    int totalImagesInPost = 0,
     BuildContext? context,
   }) {
     final recognizers = <GestureRecognizer>[];
@@ -81,6 +84,7 @@ class InlineFlattener {
         mentionHandler,
         imageBuilder,
         emojiBaseSize,
+        totalImagesInPost,
         context,
         recognizers,
       ));
@@ -98,6 +102,7 @@ class InlineFlattener {
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
     double emojiBaseSize,
+    int totalImagesInPost,
     BuildContext? context,
     List<GestureRecognizer> recognizers, {
     GestureRecognizer? inheritedRecognizer,
@@ -111,6 +116,7 @@ class InlineFlattener {
           mentionHandler,
           imageBuilder,
           emojiBaseSize,
+          totalImagesInPost,
           context,
           recognizers,
           inheritedRecognizer: inheritedRecognizer,
@@ -125,6 +131,7 @@ class InlineFlattener {
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
     double emojiBaseSize,
+    int totalImagesInPost,
     BuildContext? context,
     List<GestureRecognizer> recognizers, {
     GestureRecognizer? inheritedRecognizer,
@@ -143,6 +150,7 @@ class InlineFlattener {
             mentionHandler,
             imageBuilder,
             emojiBaseSize,
+            totalImagesInPost,
             context,
             recognizers,
             inheritedRecognizer: inheritedRecognizer,
@@ -157,6 +165,7 @@ class InlineFlattener {
             mentionHandler,
             imageBuilder,
             emojiBaseSize,
+            totalImagesInPost,
             context,
             recognizers,
             inheritedRecognizer: inheritedRecognizer,
@@ -174,6 +183,7 @@ class InlineFlattener {
           mentionHandler,
           imageBuilder,
           emojiBaseSize,
+          totalImagesInPost,
           context,
           recognizers,
         ),
@@ -196,7 +206,12 @@ class InlineFlattener {
           emojiBaseSize,
           context,
         ),
-      ImageRun() => _buildImageSpan(node, imageBuilder, context),
+      ImageRun() => _buildImageSpan(
+          node,
+          imageBuilder,
+          totalImagesInPost,
+          context,
+        ),
     };
   }
 
@@ -208,6 +223,7 @@ class InlineFlattener {
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
     double emojiBaseSize,
+    int totalImagesInPost,
     BuildContext? context,
     List<GestureRecognizer> recognizers,
   ) {
@@ -238,6 +254,7 @@ class InlineFlattener {
         mentionHandler,
         imageBuilder,
         emojiBaseSize,
+        totalImagesInPost,
         context,
         recognizers,
         inheritedRecognizer: recognizer,
@@ -409,15 +426,20 @@ class InlineFlattener {
   /// builder 自己处理(主项目通常用 BoxFit.contain + 外层 Stack 截宽)。
   ///
   /// 对齐 [PlaceholderAlignment.middle](跟 emoji 一致,避免基线偏移)。
+  ///
+  /// [totalImagesInPost] 透传给 builder,主项目用它构造 gallery viewer 的
+  /// totalCount(配合 [ImageRun.indexInPost] 算 Hero tag + currentIndex)。
   WidgetSpan _buildImageSpan(
     ImageRun image,
     ImageContentBuilder imageBuilder,
+    int totalImagesInPost,
     BuildContext? context,
   ) {
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: Builder(
-        builder: (ctx) => imageBuilder(context ?? ctx, image),
+        builder: (ctx) =>
+            imageBuilder(context ?? ctx, image, totalImagesInPost),
       ),
     );
   }
