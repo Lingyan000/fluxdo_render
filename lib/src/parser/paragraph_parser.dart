@@ -80,6 +80,15 @@ class ParagraphParser {
           // markdown 段间格式残留(浏览器里因为 block 之间已有 margin 而
           // 几乎不可见),不能让它单起一行 ParagraphNode 占额外高度。
           if (tag == 'br' && pendingInlines.isEmpty) continue;
+          // div.lightbox-wrapper 当 inline 流:cooked 里多张图常常是连续
+          // 的 `<div class="lightbox-wrapper">` 块,如果各产独立 ParagraphNode,
+          // 段间累加 1em+1em margin,两张图之间空一大截。改让它进 pending,
+          // 跟相邻 image 合并到同一 ParagraphNode。
+          if (tag == 'div' && node.classes.contains('lightbox-wrapper')) {
+            final imgRun = _imageRunFromLightboxWrapper(node, nextImageIndex);
+            if (imgRun != null) pendingInlines.add(imgRun);
+            continue;
+          }
           if (_isInlineTag(tag)) {
             // inline 元素 → 累积到 pending
             _collectInline(node, pendingInlines, nextImageIndex);
@@ -174,46 +183,9 @@ class ParagraphParser {
                   id: nextId(),
                   children: _parseBlocks(node.nodes, nextId, nextImageIndex),
                 ));
-              case 'div' when node.classes.contains('lightbox-wrapper'):
-                // Discourse cooked 把 lightbox 图包成:
-                //   <div class="lightbox-wrapper">
-                //     <a class="lightbox" href="原图URL">
-                //       <img src="缩略图URL" alt="..." width=... height=...>
-                //       <div class="meta">...filename + 尺寸 + svg icons</div>
-                //     </a>
-                //   </div>
-                //
-                // 注意:虽然 cooked 里这个 div 通常被 markdown 写在 `<p>` 内,
-                // 但 HTML5 spec 不允许 p 含 div,package:html parse 时会自动
-                // 闭合 p,所以这个 div 实际是顶层 block 出现的。
-                //
-                // 处理:产 ParagraphNode(含 1 个 ImageRun with lightboxUrl),
-                // .meta 子树纯展示,不进 textContent 当文字渲染。
-                final img = node.querySelector('a.lightbox > img') ??
-                    node.querySelector('img');
-                if (img != null) {
-                  final aEl = node.querySelector('a.lightbox');
-                  final lightboxUrl = aEl?.attributes['href']?.trim();
-                  final src = img.attributes['src']?.trim() ?? '';
-                  final alt = img.attributes['alt']?.trim() ?? '';
-                  final w = double.tryParse(img.attributes['width'] ?? '');
-                  final h = double.tryParse(img.attributes['height'] ?? '');
-                  out.add(ParagraphNode(
-                    id: nextId(),
-                    inlines: List.unmodifiable([
-                      ImageRun(
-                        src: src,
-                        alt: alt,
-                        width: w,
-                        height: h,
-                        indexInPost: nextImageIndex(),
-                        lightboxUrl: (lightboxUrl ?? '').isEmpty
-                            ? null
-                            : lightboxUrl,
-                      ),
-                    ]),
-                  ));
-                }
+              // 注意:div.lightbox-wrapper 在块级 switch 之前已被截获
+              // 走 pendingInlines 流(不会到达这里),目的是让连续多张
+              // lightbox 图合并到同一 ParagraphNode,消除 1em+1em 段间距。
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——
@@ -376,6 +348,40 @@ class ParagraphParser {
         inlines[inlines.length - 1] = TextRun(trimmed);
       }
     }
+  }
+
+  /// 从 `<div class="lightbox-wrapper">` 元素提取 ImageRun。
+  ///
+  /// 结构:
+  ///   <div class="lightbox-wrapper">
+  ///     <a class="lightbox" href="原图URL">
+  ///       <img src="缩略图URL" alt="..." width=... height=...>
+  ///       <div class="meta">...filename + 尺寸 + svg icons</div>
+  ///     </a>
+  ///   </div>
+  ///
+  /// 找不到内嵌 img 时返回 null(调用方应跳过)。
+  ImageRun? _imageRunFromLightboxWrapper(
+    dom.Element wrapperEl,
+    int Function() nextImageIndex,
+  ) {
+    final img = wrapperEl.querySelector('a.lightbox > img') ??
+        wrapperEl.querySelector('img');
+    if (img == null) return null;
+    final aEl = wrapperEl.querySelector('a.lightbox');
+    final lightboxUrl = aEl?.attributes['href']?.trim();
+    final src = img.attributes['src']?.trim() ?? '';
+    final alt = img.attributes['alt']?.trim() ?? '';
+    final w = double.tryParse(img.attributes['width'] ?? '');
+    final h = double.tryParse(img.attributes['height'] ?? '');
+    return ImageRun(
+      src: src,
+      alt: alt,
+      width: w,
+      height: h,
+      indexInPost: nextImageIndex(),
+      lightboxUrl: (lightboxUrl ?? '').isEmpty ? null : lightboxUrl,
+    );
   }
 
   /// 把一个 inline element 转成 InlineNode 加入 out。

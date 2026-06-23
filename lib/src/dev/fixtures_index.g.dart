@@ -315,6 +315,20 @@ hr 自带 12 上下 padding,叠加不会塌缩(Column 不折叠 margin)。''',
     edgeCase: true,
   ),
   FixtureEntry(
+    relativePath: r'''image/lightbox_consecutive.html''',
+    html: r'''<p><strong>段落 1。</strong></p>
+<p><div class="lightbox-wrapper"><a class="lightbox" href="https://cdn.example.com/original/img1.png" title="img1"><img src="https://cdn.example.com/optimized/img1_690x52.png" alt="img1" width="690" height="52"><div class="meta"><svg class="d-icon"><use href="#far-image"></use></svg><span class="filename">img1</span><span class="informations">1686×128 15.7 KB</span></div></a></div><br>
+<div class="lightbox-wrapper"><a class="lightbox" href="https://cdn.example.com/original/img2.png" title="img2"><img src="https://cdn.example.com/optimized/img2_509x500.png" alt="img2" width="509" height="500"><div class="meta"><svg class="d-icon"><use href="#far-image"></use></svg><span class="filename">img2</span><span class="informations">832×816 54.4 KB</span></div></a></div></p>
+<p><strong>段落 2,两图之后。</strong></p>
+''',
+    notes: r'''两张连续 lightbox-wrapper(中间 <br> 分隔)。重要回归 case:
+不能让两张图各产 ParagraphNode,否则 1em+1em margin 堆出大空隙。
+parser 改:lightbox 走 pendingInlines 流,两张图 + LineBreakRun 合并
+到同一 ParagraphNode,自然垂直排列且段间距正常。''',
+    source: r'''https://example.com/t/sample/1/img7''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
     relativePath: r'''image/lightbox_wrapper.html''',
     html: r'''<p><strong>段落 1。</strong></p>
 <p><div class="lightbox-wrapper"><a class="lightbox" href="https://cdn.example.com/original/4X/d/1/e/abcdef.png" data-download-href="/uploads/short-url/xyz.png?dl=1" title="d5112e737a71778e6de420459be91f92" rel="noopener nofollow ugc"><img src="https://cdn.example.com/optimized/4X/d/1/e/abcdef_2_690x52.png" alt="d5112e737a71778e6de420459be91f92" data-base62-sha1="xyz" width="690" height="52"><div class="meta"><svg class="fa d-icon d-icon-far-image svg-icon" aria-hidden="true"><use href="#far-image"></use></svg><span class="filename">d5112e737a71778e6de420459be91f92</span><span class="informations">1686×128 15.7 KB</span><svg class="fa d-icon d-icon-discourse-expand svg-icon" aria-hidden="true"><use href="#discourse-expand"></use></svg></div></a></div></p>

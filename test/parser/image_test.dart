@@ -122,6 +122,35 @@ void main() {
       expect(result.whereType<ImageRun>(), isEmpty);
     });
 
+    test('连续两张 lightbox-wrapper(中间 br)合并到同一 ParagraphNode', () {
+      // 真实 cooked 形态:Discourse markdown 渲染多图时
+      //   <p><div class="lightbox-wrapper">img1</div><br>
+      //      <div class="lightbox-wrapper">img2</div></p>
+      // 如果两张图各产独立 ParagraphNode,1em+1em 段间距堆出大空隙。
+      // 正确行为:合并到一个 ParagraphNode + LineBreakRun 分隔。
+      final result = parser.parse(
+        '<p><strong>前</strong></p>'
+        '<p><div class="lightbox-wrapper">'
+        '<a class="lightbox" href="https://x/full1.png">'
+        '<img src="https://x/thumb1.png" alt="i1" width="100" height="50">'
+        '</a></div><br>'
+        '<div class="lightbox-wrapper">'
+        '<a class="lightbox" href="https://x/full2.png">'
+        '<img src="https://x/thumb2.png" alt="i2" width="100" height="50">'
+        '</a></div></p>'
+        '<p><strong>后</strong></p>',
+      );
+      // 期望 3 个 BlockNode:前段 / 图1+br+图2 / 后段
+      expect(result, hasLength(3));
+      final imagesParagraph = result[1] as ParagraphNode;
+      final imgs = imagesParagraph.inlines.whereType<ImageRun>().toList();
+      expect(imgs, hasLength(2));
+      expect(imgs[0].lightboxUrl, 'https://x/full1.png');
+      expect(imgs[1].lightboxUrl, 'https://x/full2.png');
+      // 期望两张图之间至少有 1 个 LineBreakRun(原 cooked <br>)
+      expect(imagesParagraph.inlines.whereType<LineBreakRun>(), isNotEmpty);
+    });
+
     test('indexInPost 按出现顺序 0,1,2 递增', () {
       final result = parser.parse(
         '<p><img src="a.png"></p>'
