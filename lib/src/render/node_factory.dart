@@ -117,6 +117,7 @@ class NodeFactory {
       OneboxNode() => buildOnebox(context, node),
       DetailsNode() => buildDetails(context, node),
       CalloutNode() => buildCallout(context, node),
+      ImageGridNode() => buildImageGrid(context, node),
     };
   }
 
@@ -629,6 +630,113 @@ class NodeFactory {
           ),
           if (hasBody) bodyWidget,
         ],
+      ),
+    );
+  }
+
+  /// 图片网格渲染 — `<div class="d-image-grid">`(对齐 legacy
+  /// `image_grid_builder.dart`)。
+  ///
+  /// 视觉:
+  ///   外:Padding vertical 8
+  ///   主体:LayoutBuilder + Wrap(spacing 6, runSpacing 6)
+  ///     列宽 = (avail - (cols-1)*6) / cols
+  ///     瓦片高 = 宽 * (h/w) clamp 80..300;无尺寸时 = 宽 * 0.75
+  ///   瓦片:ClipRRect 圆角 4 + 走 imageContentBuilder(主项目同款渲染)
+  ///
+  /// **carousel 模式 fallback**:子包不实现真 carousel(legacy 含分页 /
+  /// 计数器 / 预加载 / 手势 — 量大且依赖 visibility_detector)。降级为
+  /// 单列大图垂直叠。主项目可通过自定义 NodeFactory 子类 override 实现。
+  ///
+  /// **lazy load**:子包不依赖 visibility_detector,瓦片不做 lazy load。
+  /// 主项目 imageContentBuilder 内自管 LazyImage(主项目已实现)。
+  Widget buildImageGrid(BuildContext context, ImageGridNode node) {
+    if (node.images.isEmpty) return const SizedBox.shrink();
+    final builder = imageContentBuilder ?? defaultImageContentBuilder;
+    // carousel 降级:单列 + 大图
+    if (node.mode == ImageGridMode.carousel) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final img in node.images)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: builder(context, img, totalImagesInPost),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const spacing = 6.0;
+          final cols = node.columns.clamp(1, 6);
+          final avail = constraints.maxWidth;
+          final colWidth = (avail - (cols - 1) * spacing) / cols;
+          return Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: [
+              for (final img in node.images)
+                _GridTile(
+                  image: img,
+                  columnWidth: colWidth,
+                  imageContentBuilder: builder,
+                  totalImagesInPost: totalImagesInPost,
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 网格中的单张图片瓦片 — 按 columnWidth 算高 + ClipRRect 圆角 + 内部
+/// 走 imageContentBuilder。
+class _GridTile extends StatelessWidget {
+  const _GridTile({
+    required this.image,
+    required this.columnWidth,
+    required this.imageContentBuilder,
+    required this.totalImagesInPost,
+  });
+
+  final ImageRun image;
+  final double columnWidth;
+  final ImageContentBuilder imageContentBuilder;
+  final int totalImagesInPost;
+
+  @override
+  Widget build(BuildContext context) {
+    // 算瓦片高:有宽高比时 colWidth * (h/w) clamp 80..300,否则 colWidth * 0.75
+    double tileHeight;
+    final w = image.width;
+    final h = image.height;
+    if (w != null && h != null && w > 0) {
+      tileHeight = (columnWidth * (h / w)).clamp(80.0, 300.0);
+    } else {
+      tileHeight = columnWidth * 0.75;
+    }
+    return SizedBox(
+      width: columnWidth,
+      height: tileHeight,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        // FittedBox + cover:让 imageContentBuilder 产生的 widget(主项目
+        // LazyImage 等)按 cover 填满瓦片,跟 legacy `BoxFit.cover` 一致。
+        child: FittedBox(
+          fit: BoxFit.cover,
+          clipBehavior: Clip.hardEdge,
+          child: imageContentBuilder(context, image, totalImagesInPost),
+        ),
       ),
     );
   }

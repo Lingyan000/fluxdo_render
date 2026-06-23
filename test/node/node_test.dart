@@ -108,6 +108,7 @@ void main() {
         OneboxNode() => 'onebox',
         DetailsNode() => 'details',
         CalloutNode() => 'callout',
+        ImageGridNode() => 'imageGrid',
       };
       expect(label, 'paragraph');
     });

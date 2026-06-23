@@ -723,6 +723,82 @@ class DetailsNode extends BlockNode {
       '${initiallyOpen ? ", open" : ""})';
 }
 
+/// 图片网格的展示形态。
+///
+/// 对齐 legacy:`<div class="d-image-grid" data-mode="carousel">` 走 carousel
+/// 模式(横向滑动 + 分页指示),其他走 grid 模式(`data-columns` 列网格)。
+enum ImageGridMode {
+  /// 默认网格(`data-columns` 列,Wrap 布局)。
+  grid,
+
+  /// 横向轮播(`data-mode="carousel"` 或 class 含 `d-image-grid--carousel`)。
+  /// 子包 fallback 渲染:不做真 carousel,降级为单列大图(legacy 的
+  /// carousel 含分页 / 计数器 / 预加载,主项目可通过自定义 builder 注入)。
+  carousel,
+}
+
+/// 图片网格 — `<div class="d-image-grid">`(Discourse 多图布局)。
+///
+/// HTML 形态:
+/// ```html
+/// <div class="d-image-grid" data-columns="3" data-mode="grid">
+///   <div class="lightbox-wrapper">
+///     <a class="lightbox" href="原图URL"><img src="缩略" width="..." height="..."></a>
+///   </div>
+///   <!-- 也可能直接是裸 <img>,跟 lightbox-wrapper 混排 -->
+/// </div>
+/// ```
+///
+/// 视觉对齐 legacy `image_grid_builder.dart`:
+///   外:Padding vertical 8
+///   主体:LayoutBuilder + Wrap(spacing 6, runSpacing 6)
+///     列宽 = (avail - (cols-1)*6) / cols,瓦片高 = 宽 * (h/w) clamp 80..300
+///     无尺寸时高 = 宽 * 0.75
+///   瓦片:ClipRRect 圆角 4 + 走 imageContentBuilder
+///
+/// **简化**:
+/// - 子包不依赖 visibility_detector,瓦片不做 lazy load(主项目可在
+///   imageContentBuilder 内自管 lazy load)
+/// - carousel 模式 fallback 为单列大图(主项目可注入 imageContentBuilder
+///   或额外 builder 实现真 carousel)
+///
+/// images 内部是 [ImageRun] 列表 — 每个 ImageRun 已含 `lightboxUrl` /
+/// `indexInPost`,渲染时复用现有图片路径(`imageContentBuilder`)。
+@immutable
+class ImageGridNode extends BlockNode {
+  const ImageGridNode({
+    required super.id,
+    required this.images,
+    this.columns = 2,
+    this.mode = ImageGridMode.grid,
+  });
+
+  /// 网格内的图片列表(每张已是带 lightboxUrl 的 ImageRun)。
+  final List<ImageRun> images;
+
+  /// `data-columns` 列数,默认 2(与 legacy 一致)。
+  final int columns;
+
+  /// 展示形态(grid / carousel)。
+  final ImageGridMode mode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImageGridNode &&
+          runtimeType == other.runtimeType &&
+          columns == other.columns &&
+          mode == other.mode &&
+          listEquals(images, other.images);
+
+  @override
+  int get hashCode => Object.hash(columns, mode, Object.hashAll(images));
+
+  @override
+  String toString() =>
+      'ImageGridNode($id, ${images.length} images, cols=$columns, $mode)';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -796,6 +872,10 @@ int countImageRuns(List<BlockNode> nodes) {
         for (final c in children) {
           scanBlock(c);
         }
+      case ImageGridNode(:final images):
+        // 网格内 ImageRun 直接计数(它们也是有效的 post 图片,跟 gallery
+        // viewer 协作)
+        count += images.length;
     }
   }
 

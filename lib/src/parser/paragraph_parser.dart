@@ -80,6 +80,13 @@ class ParagraphParser {
           // markdown 段间格式残留(浏览器里因为 block 之间已有 margin 而
           // 几乎不可见),不能让它单起一行 ParagraphNode 占额外高度。
           if (tag == 'br' && pendingInlines.isEmpty) continue;
+          // div.d-image-grid:多图网格(Discourse 原生 image-grid 组件)。
+          // 优先于 lightbox-wrapper 检测,因为 grid 内可能含多个 lightbox-wrapper。
+          if (tag == 'div' && node.classes.contains('d-image-grid')) {
+            flushInlines();
+            out.add(_parseImageGrid(node, nextId, nextImageIndex));
+            continue;
+          }
           // div.lightbox-wrapper 当 inline 流:cooked 里多张图常常是连续
           // 的 `<div class="lightbox-wrapper">` 块,如果各产独立 ParagraphNode,
           // 段间累加 1em+1em margin,两张图之间空一大截。改让它进 pending,
@@ -631,6 +638,90 @@ class ParagraphParser {
       indexInPost: nextImageIndex(),
       lightboxUrl: (lightboxUrl ?? '').isEmpty ? null : lightboxUrl,
     );
+  }
+
+  /// 解析 `<div class="d-image-grid">` 为 ImageGridNode。
+  ///
+  /// 形态:
+  /// ```html
+  /// <div class="d-image-grid" data-columns="3" data-mode="grid">
+  ///   <div class="lightbox-wrapper">
+  ///     <a class="lightbox" href="原图"><img src="缩略" width=.. height=..></a>
+  ///   </div>
+  ///   <img src="..." />  <!-- 也可能直接是裸 img -->
+  /// </div>
+  /// ```
+  ///
+  /// 处理:
+  /// - `data-columns`:int 解析,默认 2(legacy 默认值)
+  /// - `data-mode="carousel"` 或 class 含 `d-image-grid--carousel` →
+  ///   [ImageGridMode.carousel],否则 [ImageGridMode.grid]
+  /// - 收集所有后代 `<img>`,但跳过 emoji / avatar / thumbnail / yt 缩略图
+  ///   (legacy `extractGridImages` 同套路 — 这些是 UI 占位非内容图)
+  /// - lightbox-wrapper 包裹的 img → 复用 `_imageRunFromLightboxWrapper`
+  ///   提取 lightboxUrl;裸 img → 直接 ImageRun(无 lightboxUrl)
+  ImageGridNode _parseImageGrid(
+    dom.Element gridEl,
+    String Function() nextId,
+    int Function() nextImageIndex,
+  ) {
+    final cols = int.tryParse(gridEl.attributes['data-columns'] ?? '') ?? 2;
+    final mode = (gridEl.attributes['data-mode'] == 'carousel' ||
+            gridEl.classes.contains('d-image-grid--carousel'))
+        ? ImageGridMode.carousel
+        : ImageGridMode.grid;
+
+    final images = <ImageRun>[];
+    // 已被 lightbox-wrapper 收过的 img,后续直接 img 遍历时要跳过去重
+    final consumedImgs = <dom.Element>{};
+
+    // 先扫 lightbox-wrapper(优先它们,这样能拿到 lightboxUrl)
+    for (final wrapper in gridEl.querySelectorAll('div.lightbox-wrapper')) {
+      final innerImg = wrapper.querySelector('a.lightbox > img') ??
+          wrapper.querySelector('img');
+      if (innerImg == null) continue;
+      if (_isSkipImage(innerImg)) continue;
+      final run = _imageRunFromLightboxWrapper(wrapper, nextImageIndex);
+      if (run != null) {
+        images.add(run);
+        consumedImgs.add(innerImg);
+      }
+    }
+
+    // 再扫剩余裸 img(不在已消费集合内)
+    for (final img in gridEl.querySelectorAll('img')) {
+      if (consumedImgs.contains(img)) continue;
+      if (_isSkipImage(img)) continue;
+      final src = img.attributes['src']?.trim() ?? '';
+      if (src.isEmpty) continue;
+      final alt = img.attributes['alt']?.trim() ?? '';
+      final w = double.tryParse(img.attributes['width'] ?? '');
+      final h = double.tryParse(img.attributes['height'] ?? '');
+      images.add(ImageRun(
+        src: src,
+        alt: alt,
+        width: w,
+        height: h,
+        indexInPost: nextImageIndex(),
+      ));
+    }
+
+    return ImageGridNode(
+      id: nextId(),
+      images: List.unmodifiable(images),
+      columns: cols,
+      mode: mode,
+    );
+  }
+
+  /// d-image-grid 内应跳过的图(emoji / 头像 / 缩略 / yt 占位等 UI 元素)。
+  /// 对齐 legacy `extractGridImages` 的 skip list。
+  bool _isSkipImage(dom.Element img) {
+    final classes = img.classes;
+    return classes.contains('emoji') ||
+        classes.contains('avatar') ||
+        classes.contains('thumbnail') ||
+        classes.contains('ytp-thumbnail-image');
   }
 
   /// 把一个 inline element 转成 InlineNode 加入 out。
