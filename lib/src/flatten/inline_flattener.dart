@@ -1,7 +1,7 @@
 /// 把 `List<InlineNode>` 压平成 Flutter 的 InlineSpan 树。
 ///
-/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji
-/// 七种 + 嵌套样式合并。后续阶段会加 MentionRun / ImageRun 等。
+/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji /
+/// Mention 八种 + 嵌套样式合并。后续阶段会加 ImageRun 等。
 ///
 /// 设计:
 /// - 输出 InlineSpan 树而不是 widget list — 让一个段落的所有文字共享一个
@@ -29,6 +29,7 @@ import 'package:flutter/material.dart';
 import '../node/inline_node.dart';
 import '../render/emoji_handler.dart';
 import '../render/link_handler.dart';
+import '../render/mention_handler.dart';
 
 /// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers。
 class FlattenResult {
@@ -50,25 +51,30 @@ class InlineFlattener {
   /// [defaultLinkHandler](仅 debugPrint)。
   /// [emojiImageBuilder]:emoji 图片渲染 builder(主项目注入)。null 时用
   /// [defaultEmojiImageBuilder](Image.network 兜底)。
-  /// [context]:link 点击 / emoji 字号探测时传给 handler 用;null 时
-  /// link 不可点 + emoji 尺寸退化为 baseStyle.fontSize 或 14。
+  /// [mentionTapHandler]:点击 mention chip 跳用户卡的回调(主项目注入)。
+  /// null 时用 [defaultMentionTapHandler](仅 debugPrint)。
+  /// [context]:link/mention 点击 + emoji 字号探测时传给 handler 用;null
+  /// 时 link/mention 不可点 + emoji 尺寸退化为 baseStyle.fontSize 或 14。
   FlattenResult flatten(
     List<InlineNode> inlines,
     TextStyle baseStyle, {
     LinkActionHandler? linkHandler,
     EmojiImageBuilder? emojiImageBuilder,
+    MentionTapHandler? mentionTapHandler,
     BuildContext? context,
   }) {
     final recognizers = <GestureRecognizer>[];
     final children = <InlineSpan>[];
     final handler = linkHandler ?? defaultLinkHandler;
     final emojiBuilder = emojiImageBuilder ?? defaultEmojiImageBuilder;
+    final mentionHandler = mentionTapHandler ?? defaultMentionTapHandler;
     final emojiBaseSize = baseStyle.fontSize ?? 14;
     for (final node in inlines) {
       children.add(_toSpan(
         node,
         handler,
         emojiBuilder,
+        mentionHandler,
         emojiBaseSize,
         context,
         recognizers,
@@ -84,6 +90,7 @@ class InlineFlattener {
     List<InlineNode> nodes,
     LinkActionHandler handler,
     EmojiImageBuilder emojiBuilder,
+    MentionTapHandler mentionHandler,
     double emojiBaseSize,
     BuildContext? context,
     List<GestureRecognizer> recognizers, {
@@ -95,6 +102,7 @@ class InlineFlattener {
           node,
           handler,
           emojiBuilder,
+          mentionHandler,
           emojiBaseSize,
           context,
           recognizers,
@@ -107,6 +115,7 @@ class InlineFlattener {
     InlineNode node,
     LinkActionHandler handler,
     EmojiImageBuilder emojiBuilder,
+    MentionTapHandler mentionHandler,
     double emojiBaseSize,
     BuildContext? context,
     List<GestureRecognizer> recognizers, {
@@ -123,6 +132,7 @@ class InlineFlattener {
             children,
             handler,
             emojiBuilder,
+            mentionHandler,
             emojiBaseSize,
             context,
             recognizers,
@@ -135,6 +145,7 @@ class InlineFlattener {
             children,
             handler,
             emojiBuilder,
+            mentionHandler,
             emojiBaseSize,
             context,
             recognizers,
@@ -150,6 +161,7 @@ class InlineFlattener {
           children,
           handler,
           emojiBuilder,
+          mentionHandler,
           emojiBaseSize,
           context,
           recognizers,
@@ -166,6 +178,13 @@ class InlineFlattener {
           context,
           inheritedRecognizer: inheritedRecognizer,
         ),
+      MentionRun() => _buildMentionSpan(
+          node,
+          emojiBuilder,
+          mentionHandler,
+          emojiBaseSize,
+          context,
+        ),
     };
   }
 
@@ -174,6 +193,7 @@ class InlineFlattener {
     List<InlineNode> children,
     LinkActionHandler handler,
     EmojiImageBuilder emojiBuilder,
+    MentionTapHandler mentionHandler,
     double emojiBaseSize,
     BuildContext? context,
     List<GestureRecognizer> recognizers,
@@ -202,6 +222,7 @@ class InlineFlattener {
         children,
         handler,
         emojiBuilder,
+        mentionHandler,
         emojiBaseSize,
         context,
         recognizers,
@@ -294,6 +315,74 @@ class InlineFlattener {
       child: Builder(
         builder: (ctx) {
           return emojiBuilder(context ?? ctx, emoji, size);
+        },
+      ),
+    );
+  }
+
+  /// Mention 渲染:chip 样式(灰底圆角 + primary 字 + 0.82em),
+  /// 可选状态 emoji 跟在用户名右侧。点击跳用户卡(MentionTapHandler 注入)。
+  ///
+  /// 样式对齐 legacy `mention_builder.dart::buildMention`:
+  ///   font-size: baseStyle.fontSize * 0.82
+  ///   padding: horizontal 6, vertical 1
+  ///   border-radius: 10
+  ///   color: theme.colorScheme.primary
+  ///   background: ColorScheme.surfaceContainerHigh(派生升级,legacy 是 hex)
+  ///   status emoji: 字号 * 1.2 跟在用户名右
+  ///
+  /// 用 WidgetSpan 而非 TextSpan 因为是个有内部 padding/border 的整体
+  /// chip,不参与文字 baseline 对齐(legacy 同样走 InlineCustomWidget)。
+  WidgetSpan _buildMentionSpan(
+    MentionRun mention,
+    EmojiImageBuilder emojiBuilder,
+    MentionTapHandler mentionHandler,
+    double emojiBaseSize,
+    BuildContext? context,
+  ) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: Builder(
+        builder: (ctx) {
+          final effectiveCtx = context ?? ctx;
+          final scheme = Theme.of(effectiveCtx).colorScheme;
+          final fontSize = emojiBaseSize * 0.82;
+          final statusEmojiSize = fontSize * 1.2;
+          return GestureDetector(
+            onTap: () => mentionHandler(
+              effectiveCtx,
+              mention.username,
+              mention.href,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '@${mention.username}',
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontSize: fontSize,
+                      height: 1.0,
+                    ),
+                  ),
+                  if (mention.statusEmoji != null) ...[
+                    const SizedBox(width: 2),
+                    emojiBuilder(
+                      effectiveCtx,
+                      mention.statusEmoji!,
+                      statusEmojiSize,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
         },
       ),
     );

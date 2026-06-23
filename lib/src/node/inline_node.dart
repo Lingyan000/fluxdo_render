@@ -1,7 +1,7 @@
 /// 行内节点 sealed family。
 ///
-/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji
-/// 后续会扩展 MentionRun / ImageRun 等。
+/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji / Mention
+/// 后续会扩展 ImageRun 等。
 
 library;
 
@@ -201,4 +201,49 @@ class EmojiRun extends InlineNode {
   @override
   String toString() =>
       'EmojiRun($name${isOnlyEmoji ? ", only" : ""}, $url)';
+}
+
+/// `<a class="mention" href="/u/username">@username</a>` 用户提及。
+///
+/// 跟 LinkRun 是**平级 sibling**(parser 看到 a.mention 时优先产 MentionRun,
+/// 不产 LinkRun)—— 因为 mention 的视觉/交互完全独立于普通链接:
+/// chip 样式(灰底圆角)+ 跳用户卡(不是 launchUrl)。
+///
+/// 状态 emoji([statusEmoji])是 Discourse 注入到 mention link 内的
+/// `<img class="emoji mention-status">`(显示用户在线/状态),parser
+/// 把它从 a 子树里挑出来填到这个字段。**渲染时 emoji 在 username 右侧**。
+///
+/// tap 路由由主项目通过 [MentionTapHandler] 注入。
+@immutable
+class MentionRun extends InlineNode {
+  const MentionRun({
+    required this.username,
+    required this.href,
+    this.statusEmoji,
+  });
+
+  /// 去掉 `@` 前缀的纯用户名,如 `alice`。
+  final String username;
+
+  /// a 标签的 href 原值,如 `/u/alice`(parser 不做 URL 重写)。
+  final String href;
+
+  /// 用户状态 emoji(可选)。
+  final EmojiRun? statusEmoji;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MentionRun &&
+          runtimeType == other.runtimeType &&
+          username == other.username &&
+          href == other.href &&
+          statusEmoji == other.statusEmoji;
+
+  @override
+  int get hashCode => Object.hash(username, href, statusEmoji);
+
+  @override
+  String toString() =>
+      'MentionRun(@$username, $href${statusEmoji == null ? "" : ", emoji"})';
 }

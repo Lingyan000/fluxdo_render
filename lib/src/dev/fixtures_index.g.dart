@@ -201,6 +201,55 @@ WidgetSpan 渲染 + 1em 字号(跟 baseStyle 一致)。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''mention/group_mention.html''',
+    html: r'''<p>问题反馈给 <a class="mention" href="/u/team_support">@team_support</a> 组,而不是个人。</p>
+''',
+    notes: r'''group mention(`@team_support`)用法跟单人 mention 完全一致,
+主项目用户卡跳转时按 username 自动区分 user / group。这条 fixture
+确保 parser 不对 username 形态(下划线 / 短横线)做特殊处理。''',
+    source: r'''https://example.com/t/sample/1/mention4''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''mention/multiple.html''',
+    html: r'''<p>多人 <a class="mention" href="/u/alice">@alice</a> <a class="mention" href="/u/bob">@bob</a> <a class="mention" href="/u/charlie">@charlie</a> 同时参与。</p>
+''',
+    notes: r'''一段里多个 mention 紧邻,验证 chip 之间不互相错位 + 字间距合理。''',
+    source: r'''https://example.com/t/sample/1/mention2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''mention/non_mention_user_link.html''',
+    html: r'''<p>普通用户链接 <a href="/u/bob">@bob</a> 没有 class=mention,应该走普通 LinkRun。这种形态由主项目 mentionedUsers 列表识别后追加 class,parser 阶段不该主动猜。</p>
+''',
+    notes: r'''反例:`<a href="/u/bob">@bob</a>` 没有 class="mention",应该解析为
+普通 LinkRun(不带 chip 样式)。验证 parser 只在 class=mention 时
+走 MentionRun 分支,主项目若想识别为 mention,应在 cooked HTML
+预处理阶段加 class(legacy 是这么做的)。''',
+    source: r'''https://example.com/t/sample/1/mention5''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''mention/simple.html''',
+    html: r'''<p>欢迎 <a class="mention" href="/u/alice">@alice</a> 加入。</p>
+''',
+    notes: r'''最基础形态:段落内一个 @alice mention。验证 MentionRun 解析 +
+chip 样式渲染(灰底圆角 + primary 字 + 0.82em)。''',
+    source: r'''https://example.com/t/sample/1/mention1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''mention/with_status_emoji.html''',
+    html: r'''<p>状态用户 <a class="mention" href="/u/alice">@alice<img src="https://example.com/images/emoji/twitter/fire.png?v=12" class="emoji mention-status" alt=":fire:" title=":fire:" style="width:14px;height:14px;vertical-align:middle;margin-left:2px"></a> 在线。</p>
+''',
+    notes: r'''含状态 emoji 的 mention(Discourse 主项目通过 _preprocessHtml 注入
+`<img class="emoji mention-status">`,parser 把它从 a 子树挑出来
+填到 MentionRun.statusEmoji)。验证 chip 内 emoji 在用户名右侧 +
+size 跟父 chip 字号 * 1.2。''',
+    source: r'''https://example.com/t/sample/1/mention3''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
     relativePath: r'''paragraph/link_empty_href.html''',
     html: r'''<p>这是 <a href="">空 href 的 a 标签</a>,应该退化为普通文本。</p>
 <p>这是 <a>无 href 的 a 标签</a>,同样退化。</p>

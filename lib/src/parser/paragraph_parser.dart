@@ -124,6 +124,30 @@ class ParagraphParser {
         if (href.isEmpty) {
           // 空 href:fallback 为纯样式(展平子节点,不可点)
           out.addAll(children);
+        } else if (el.classes.contains('mention')) {
+          // class="mention" 优先识别为 MentionRun,跳用户卡;
+          // 内部可能含 <img class="emoji mention-status"> 状态 emoji,
+          // 把它从展平的 children 里挑出来,纯文本拼回 username
+          EmojiRun? statusEmoji;
+          final textBuf = StringBuffer();
+          for (final c in children) {
+            switch (c) {
+              case TextRun(:final text):
+                textBuf.write(text);
+              case EmojiRun():
+                statusEmoji ??= c;
+              case _:
+                // mention 内不期望其他 inline 节点;真出现就丢弃
+                break;
+            }
+          }
+          // username 去掉 @ 前缀
+          final username = textBuf.toString().trim().replaceFirst(RegExp(r'^@'), '');
+          out.add(MentionRun(
+            username: username,
+            href: href,
+            statusEmoji: statusEmoji,
+          ));
         } else {
           out.add(LinkRun(href: href, children: List.unmodifiable(children)));
         }

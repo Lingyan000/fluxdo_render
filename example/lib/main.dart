@@ -257,6 +257,11 @@ class _FixtureDetailState extends State<_FixtureDetail> {
                 );
               },
               emojiImageBuilder: _galleryEmojiBuilder,
+              mentionTapHandler: (ctx, username, href) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(content: Text('mention tapped: @$username ($href)')),
+                );
+              },
             ),
           ),
         ),
@@ -352,6 +357,11 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
       buf.writeln('${pad}InlineCodeRun(${text.length} chars): $text');
     case EmojiRun(:final name, :final url, :final isOnlyEmoji):
       buf.writeln('${pad}EmojiRun(:$name:${isOnlyEmoji ? " only" : ""}) $url');
+    case MentionRun(:final username, :final href, :final statusEmoji):
+      buf.writeln('${pad}MentionRun(@$username -> $href)');
+      if (statusEmoji != null) {
+        _writeInline(buf, statusEmoji, indent + 1);
+      }
   }
 }
 

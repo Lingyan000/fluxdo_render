@@ -111,6 +111,7 @@ void main() {
         LinkRun(href: 'https://example.com', children: [TextRun('x')]),
         InlineCodeRun('c'),
         EmojiRun(name: 'heart', url: 'https://x/heart.png'),
+        MentionRun(username: 'alice', href: '/u/alice'),
       ];
       final labels = list
           .map(
@@ -122,10 +123,13 @@ void main() {
               LinkRun() => 'link',
               InlineCodeRun() => 'inlineCode',
               EmojiRun() => 'emoji',
+              MentionRun() => 'mention',
             },
           )
           .toList();
-      expect(labels, ['text', 'em', 'strong', 'br', 'link', 'inlineCode', 'emoji']);
+      expect(labels, [
+        'text', 'em', 'strong', 'br', 'link', 'inlineCode', 'emoji', 'mention'
+      ]);
     });
   });
 
@@ -173,6 +177,40 @@ void main() {
       expect(a.toString(), isNot(contains('only')));
       const b = EmojiRun(name: 'tada', url: 'y.png', isOnlyEmoji: true);
       expect(b.toString(), contains('only'));
+    });
+  });
+
+  group('MentionRun', () {
+    test('==/hashCode 按 username + href + statusEmoji 比较', () {
+      const a = MentionRun(username: 'alice', href: '/u/alice');
+      const b = MentionRun(username: 'alice', href: '/u/alice');
+      const c = MentionRun(username: 'bob', href: '/u/bob');
+      const d = MentionRun(
+        username: 'alice',
+        href: '/u/alice',
+        statusEmoji: EmojiRun(name: 'fire', url: 'x.png'),
+      );
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a == c, isFalse);
+      expect(a == d, isFalse);
+    });
+
+    test('statusEmoji 默认 null', () {
+      const m = MentionRun(username: 'alice', href: '/u/alice');
+      expect(m.statusEmoji, isNull);
+    });
+
+    test('toString 含 @username + href, 有 emoji 时标 emoji', () {
+      const a = MentionRun(username: 'alice', href: '/u/alice');
+      expect(a.toString(), allOf(contains('@alice'), contains('/u/alice')));
+      expect(a.toString(), isNot(contains('emoji')));
+      const b = MentionRun(
+        username: 'bob',
+        href: '/u/bob',
+        statusEmoji: EmojiRun(name: 'fire', url: 'x.png'),
+      );
+      expect(b.toString(), contains('emoji'));
     });
   });
 }

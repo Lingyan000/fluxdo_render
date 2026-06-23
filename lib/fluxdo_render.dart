@@ -19,5 +19,6 @@ export 'src/parser/paragraph_parser.dart';
 export 'src/render/emoji_handler.dart';
 export 'src/render/inline_span_text.dart';
 export 'src/render/link_handler.dart';
+export 'src/render/mention_handler.dart';
 export 'src/render/node_factory.dart';
 export 'src/widget/fluxdo_render.dart';

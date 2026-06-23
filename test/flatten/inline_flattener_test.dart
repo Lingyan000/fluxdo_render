@@ -395,4 +395,101 @@ void main() {
       expect(span, isA<WidgetSpan>());
     });
   });
+
+  group('MentionRun', () {
+    testWidgets('产出 WidgetSpan chip,tap 触发 handler 带 username + href',
+        (tester) async {
+      String? tappedUser;
+      String? tappedHref;
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Builder(builder: (c) {
+            ctx = c;
+            final result = flattener.flatten(
+              [const MentionRun(username: 'alice', href: '/u/alice')],
+              baseStyle,
+              context: c,
+              mentionTapHandler: (_, user, href) {
+                tappedUser = user;
+                tappedHref = href;
+              },
+            );
+            return Text.rich(result.span);
+          }),
+        ),
+      ));
+      // 找 chip 内的 GestureDetector,直接 tap
+      final gd = find.byType(GestureDetector);
+      expect(gd, findsWidgets);
+      await tester.tap(gd.first);
+      await tester.pump();
+      expect(tappedUser, 'alice');
+      expect(tappedHref, '/u/alice');
+      // 用 ctx 以防 unused var 警告
+      expect(ctx.mounted, isTrue);
+    });
+
+    testWidgets('chip 字色 = colorScheme.primary, 底色 = surfaceContainerHigh',
+        (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (c) {
+          ctx = c;
+          return Text.rich(flattener.flatten(
+            [const MentionRun(username: 'alice', href: '/u/alice')],
+            baseStyle,
+            context: c,
+          ).span);
+        }),
+      ));
+      final scheme = Theme.of(ctx).colorScheme;
+      // 找 chip 内的 Text 拿样式
+      final textWidget = tester.widget<Text>(
+        find.descendant(of: find.byType(Container), matching: find.byType(Text)),
+      );
+      expect(textWidget.data, '@alice');
+      expect(textWidget.style?.color, scheme.primary);
+      expect(textWidget.style?.fontSize, closeTo(14 * 0.82, 0.01));
+    });
+
+    testWidgets('statusEmoji 渲染到 username 右侧', (tester) async {
+      int builderCallCount = 0;
+      EmojiRun? receivedEmoji;
+      double? receivedSize;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (c) {
+          return Text.rich(flattener.flatten(
+            [
+              const MentionRun(
+                username: 'alice',
+                href: '/u/alice',
+                statusEmoji: EmojiRun(name: 'fire', url: 'x.png'),
+              ),
+            ],
+            baseStyle,
+            context: c,
+            emojiImageBuilder: (_, e, size) {
+              builderCallCount++;
+              receivedEmoji = e;
+              receivedSize = size;
+              return const SizedBox();
+            },
+          ).span);
+        }),
+      ));
+      expect(builderCallCount, 1);
+      expect(receivedEmoji?.name, 'fire');
+      // status emoji size = fontSize * 1.2 = 14 * 0.82 * 1.2 ≈ 13.78
+      expect(receivedSize, closeTo(14 * 0.82 * 1.2, 0.01));
+    });
+
+    test('无 handler 时走 defaultMentionTapHandler(不抛)', () {
+      final result = flattener.flatten(
+        [const MentionRun(username: 'a', href: '/u/a')],
+        baseStyle,
+      );
+      expect(result.span.children![0], isA<WidgetSpan>());
+    });
+  });
 }

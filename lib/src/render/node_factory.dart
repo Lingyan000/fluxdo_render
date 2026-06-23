@@ -18,12 +18,14 @@ import '../node/node.dart';
 import 'emoji_handler.dart';
 import 'inline_span_text.dart';
 import 'link_handler.dart';
+import 'mention_handler.dart';
 
 class NodeFactory {
   NodeFactory({
     InlineFlattener? inlineFlattener,
     this.linkHandler,
     this.emojiImageBuilder,
+    this.mentionTapHandler,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
 
   final InlineFlattener _inlineFlattener;
@@ -35,6 +37,10 @@ class NodeFactory {
   /// Emoji 图片 builder,主项目注入。
   /// 不传时用 [defaultEmojiImageBuilder](Image.network 兜底,无缓存池)。
   final EmojiImageBuilder? emojiImageBuilder;
+
+  /// Mention chip 点击跳用户卡 callback,主项目注入。
+  /// 不传时用 [defaultMentionTapHandler](仅 debugPrint)。
+  final MentionTapHandler? mentionTapHandler;
 
   /// 入口 dispatch — sealed class exhaustive switch。
   Widget build(BuildContext context, BlockNode node) {
@@ -61,6 +67,7 @@ class NodeFactory {
         flattener: _inlineFlattener,
         linkHandler: linkHandler,
         emojiImageBuilder: emojiImageBuilder,
+        mentionTapHandler: mentionTapHandler,
       ),
     );
   }
@@ -89,6 +96,7 @@ class NodeFactory {
         flattener: _inlineFlattener,
         linkHandler: linkHandler,
         emojiImageBuilder: emojiImageBuilder,
+        mentionTapHandler: mentionTapHandler,
       ),
     );
   }
