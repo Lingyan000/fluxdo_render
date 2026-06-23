@@ -366,11 +366,13 @@ class NodeFactory {
             height: 1,
             color: scheme.outlineVariant.withValues(alpha: 0.3),
           ),
-          // 主体:横向滚动 + highlighter widget
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.all(12),
-            child: highlighter(context, node.code, node.language),
+          // 主体:横向滚动 + highlighter widget。
+          // 限高 400px 避免长代码撑爆 ListView(legacy 同套路);
+          // 含行号列(legacy 同套路),保持基线对齐 + 选择 disabled。
+          _CodeBlockBody(
+            code: node.code,
+            language: node.language,
+            highlighter: highlighter,
           ),
         ],
       ),
@@ -478,6 +480,155 @@ class NodeFactory {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final c in node.children) _compactCopy().build(context, c),
+        ],
+      ),
+    );
+  }
+}
+
+/// 代码块主体:行号列 + 双向滚动 + 限高 400px。
+///
+/// 设计跟 legacy `_CodeBlockWidget.build` 对齐(简化版,无 mermaid /
+/// 长按选择上下文):
+/// - 行号列固定宽,与代码同步垂直滚动
+/// - 代码区水平滚动,垂直 RawScrollbar
+/// - 短代码自然撑开;超过 400px 高度后开始垂直滚
+class _CodeBlockBody extends StatefulWidget {
+  const _CodeBlockBody({
+    required this.code,
+    required this.language,
+    required this.highlighter,
+  });
+
+  final String code;
+  final String? language;
+  final CodeBlockHighlighter highlighter;
+
+  @override
+  State<_CodeBlockBody> createState() => _CodeBlockBodyState();
+}
+
+class _CodeBlockBodyState extends State<_CodeBlockBody> {
+  final _vController = ScrollController();
+  final _hController = ScrollController();
+  final _lineNumberVController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _vController.addListener(_syncLineNumberScroll);
+  }
+
+  @override
+  void dispose() {
+    _vController.removeListener(_syncLineNumberScroll);
+    _vController.dispose();
+    _hController.dispose();
+    _lineNumberVController.dispose();
+    super.dispose();
+  }
+
+  void _syncLineNumberScroll() {
+    if (_lineNumberVController.hasClients) {
+      _lineNumberVController.jumpTo(_vController.offset);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final scheme = theme.colorScheme;
+
+    final lines = widget.code.split('\n');
+    final lineCount = lines.length;
+    final padWidth = lineCount.toString().length;
+    // 行号列宽 = 数字宽度(单字符 9px monospace 估算)+ 左右 padding 24
+    final lineNumberWidth = padWidth * 9.0 + 24;
+
+    // 估算高度:行高 13*1.5 = 19.5,+ 上下 padding 12*2
+    const lineHeight = 13.0 * 1.5;
+    const verticalPadding = 24.0;
+    final contentHeight = lineCount * lineHeight + verticalPadding;
+    final estimatedHeight = contentHeight.clamp(0.0, 400.0);
+
+    final lineNumberStyle = TextStyle(
+      fontFamily: 'FiraCode',
+      fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
+      fontSize: 13,
+      height: 1.5,
+      color: isDark
+          ? Colors.white.withValues(alpha: 0.35)
+          : Colors.black.withValues(alpha: 0.35),
+    );
+    final borderColor = scheme.outlineVariant.withValues(alpha: 0.3);
+    final thumbColor = (isDark ? Colors.white : Colors.black)
+        .withValues(alpha: 0.15);
+
+    return SizedBox(
+      height: estimatedHeight,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 行号列(固定宽,跟随主体垂直滚)
+          Container(
+            width: lineNumberWidth,
+            decoration: BoxDecoration(
+              border: Border(right: BorderSide(color: borderColor)),
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.02)
+                  : Colors.black.withValues(alpha: 0.02),
+            ),
+            child: SelectionContainer.disabled(
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(
+                  scrollbars: false,
+                ),
+                child: SingleChildScrollView(
+                  controller: _lineNumberVController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 8,
+                    ),
+                    child: Text(
+                      List.generate(
+                        lineCount,
+                        (i) => (i + 1).toString().padLeft(padWidth),
+                      ).join('\n'),
+                      style: lineNumberStyle,
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 代码内容(双向滚动:垂直主体 + 水平内嵌)
+          Expanded(
+            child: RawScrollbar(
+              controller: _vController,
+              thumbVisibility: false,
+              thickness: 4,
+              radius: const Radius.circular(2),
+              padding: const EdgeInsets.only(right: 2, top: 2, bottom: 2),
+              thumbColor: thumbColor,
+              child: SingleChildScrollView(
+                controller: _vController,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  controller: _hController,
+                  padding: const EdgeInsets.all(12),
+                  child: widget.highlighter(
+                    context,
+                    widget.code,
+                    widget.language,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
