@@ -106,6 +106,53 @@ const List<FixtureEntry> allFixtures = [
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''inline_code/inside_link.html''',
+    html: r'''<p>查看 <a href="https://api.flutter.dev/flutter/widgets/RichText-class.html"><code>RichText</code> 文档</a> 了解细节。</p>
+''',
+    notes: r'''Inline code 嵌套在 link 内 — 验证 LinkRun.children 含 InlineCodeRun 时
+正常渲染:tap 区域含 code 文本,code 仍是 monospace + 灰底,link 下划线
+覆盖 code 文本。''',
+    source: r'''https://example.com/t/sample/1/inline_code5''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''inline_code/long_breaking.html''',
+    html: r'''<p>长命令示例:<code>flutter run -d macos --dart-define=FLAVOR=staging --observatory-port=9100</code> 在终端里换行也要正常显示。</p>
+''',
+    notes: r'''超长 inline code,会强制跨行。当前阶段灰底用 TextStyle.background
+(矩形),跨行会出现两行各自带矩形(不会合并)。这是已知缺陷,
+阶段 5 自研 paint 时补齐(对应 InlineCodePainter 跨行 RRect 合并)。''',
+    source: r'''https://example.com/t/sample/1/inline_code4''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''inline_code/multiple.html''',
+    html: r'''<p>常用命令有 <code>git status</code>、<code>git diff</code> 和 <code>git log</code>,各自查看不同信息。</p>
+''',
+    notes: r'''一段里多个 InlineCodeRun 紧邻,验证灰底不要错位、相邻代码段之间正常
+断字。''',
+    source: r'''https://example.com/t/sample/1/inline_code2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''inline_code/simple.html''',
+    html: r'''<p>使用 <code>flutter pub get</code> 拉取依赖。</p>
+''',
+    notes: r'''最简单的行内代码:中文段落里夹一段命令。验证 InlineCodeRun 基础渲染
+(monospace + 灰底)。''',
+    source: r'''https://example.com/t/sample/1/inline_code1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''inline_code/special_chars.html''',
+    html: r'''<p>注意 HTML 实体:<code>&lt;div class="foo"&gt;</code> 在源码里是字面值。</p>
+''',
+    notes: r'''代码内含 HTML 实体(&lt; &gt; &amp; &quot;),package:html 应自动反转义
+成 < > & ",InlineCodeRun.text 应是字面值。''',
+    source: r'''https://example.com/t/sample/1/inline_code3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''paragraph/link_empty_href.html''',
     html: r'''<p>这是 <a href="">空 href 的 a 标签</a>,应该退化为普通文本。</p>
 <p>这是 <a>无 href 的 a 标签</a>,同样退化。</p>

@@ -347,6 +347,8 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
       for (final c in children) {
         _writeInline(buf, c, indent + 1);
       }
+    case InlineCodeRun(:final text):
+      buf.writeln('${pad}InlineCodeRun(${text.length} chars): $text');
   }
 }
 

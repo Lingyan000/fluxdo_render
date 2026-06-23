@@ -1,5 +1,5 @@
 import 'package:flutter/gestures.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/flatten/inline_flattener.dart';
 import 'package:fluxdo_render/src/node/inline_node.dart';
@@ -155,6 +155,66 @@ void main() {
       expect(linkSpan.children, hasLength(2));
       final strong = linkSpan.children![1] as TextSpan;
       expect(strong.style?.fontWeight, FontWeight.bold);
+    });
+  });
+
+  group('InlineCodeRun', () {
+    test('产出 monospace + background 的 TextSpan', () {
+      final result = flattener.flatten(
+        [const InlineCodeRun('git status')],
+        baseStyle,
+      );
+      final span = result.span.children![0] as TextSpan;
+      expect(span.text, 'git status');
+      expect(span.style?.fontFamily, 'monospace');
+      expect(span.style?.fontFamilyFallback, ['Menlo', 'Courier']);
+      expect(span.style?.background, isNotNull);
+      // 默认无 context → 走 light 灰底
+      expect(
+        span.style?.background?.color.toARGB32(),
+        const Color(0xFFE8E8E8).toARGB32(),
+      );
+    });
+
+    testWidgets('dark 主题用深灰底', (tester) async {
+      late BuildContext capturedContext;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(brightness: Brightness.dark),
+          home: Builder(
+            builder: (ctx) {
+              capturedContext = ctx;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      final result = flattener.flatten(
+        [const InlineCodeRun('x')],
+        baseStyle,
+        context: capturedContext,
+      );
+      final span = result.span.children![0] as TextSpan;
+      expect(
+        span.style?.background?.color.toARGB32(),
+        const Color(0xFF3A3A3A).toARGB32(),
+      );
+    });
+
+    test('与 link / text 混排顺序保留', () {
+      final result = flattener.flatten(
+        [
+          const TextRun('使用 '),
+          const InlineCodeRun('git'),
+          const TextRun(' 命令'),
+        ],
+        baseStyle,
+      );
+      final children = result.span.children!;
+      expect(children, hasLength(3));
+      expect((children[0] as TextSpan).text, '使用 ');
+      expect((children[1] as TextSpan).text, 'git');
+      expect((children[2] as TextSpan).text, ' 命令');
     });
   });
 }

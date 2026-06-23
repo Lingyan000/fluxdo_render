@@ -109,6 +109,7 @@ void main() {
         StrongRun(children: []),
         LineBreakRun(),
         LinkRun(href: 'https://example.com', children: [TextRun('x')]),
+        InlineCodeRun('c'),
       ];
       final labels = list
           .map(
@@ -118,10 +119,32 @@ void main() {
               StrongRun() => 'strong',
               LineBreakRun() => 'br',
               LinkRun() => 'link',
+              InlineCodeRun() => 'inlineCode',
             },
           )
           .toList();
-      expect(labels, ['text', 'em', 'strong', 'br', 'link']);
+      expect(labels, ['text', 'em', 'strong', 'br', 'link', 'inlineCode']);
+    });
+  });
+
+  group('InlineCodeRun', () {
+    test('==/hashCode 按 text 比较', () {
+      const a = InlineCodeRun('hello');
+      const b = InlineCodeRun('hello');
+      const c = InlineCodeRun('world');
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a == c, isFalse);
+    });
+
+    test('空串也可构造', () {
+      const e = InlineCodeRun('');
+      expect(e.text, '');
+    });
+
+    test('toString 含字符数', () {
+      const c = InlineCodeRun('hello');
+      expect(c.toString(), contains('5 chars'));
     });
   });
 }

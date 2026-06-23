@@ -1,7 +1,7 @@
 /// 把 `List<InlineNode>` 压平成 Flutter 的 InlineSpan 树。
 ///
-/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link 五种 + 嵌套样式合并。
-/// 后续阶段会加 MentionRun / EmojiRun / InlineCodeRun / ImageRun 等。
+/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode 六种 +
+/// 嵌套样式合并。后续阶段会加 MentionRun / EmojiRun / ImageRun 等。
 ///
 /// 设计:
 /// - 输出 InlineSpan 树而不是 widget list — 让一个段落的所有文字共享一个
@@ -12,6 +12,8 @@
 /// - LinkRun 产出带 TapGestureRecognizer 的 TextSpan,recognizer 是
 ///   stateful 资源,通过 [FlattenResult.recognizers] 暴露给调用方,
 ///   由 widget dispose 时统一 dispose。
+/// - InlineCodeRun 输出 monospace + 灰底 TextSpan,圆角/padding 留到阶段 5
+///   自研选区+绘制层实现(目前用 TextStyle.background 的纯矩形灰底)。
 ///
 /// 不处理 whitespace 折叠 — 阶段 1.1 输入是 Discourse cooked HTML,
 /// 已经是规整 markdown 输出,标签间空白由 paragraph 边界自然分隔。
@@ -20,7 +22,7 @@
 library;
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../node/inline_node.dart';
 import '../render/link_handler.dart';
@@ -97,6 +99,7 @@ class InlineFlattener {
           context,
           recognizers,
         ),
+      InlineCodeRun(:final text) => _buildInlineCodeSpan(text, context),
     };
   }
 
@@ -126,4 +129,29 @@ class InlineFlattener {
   static const _linkStyleHint = TextStyle(
     decoration: TextDecoration.underline,
   );
+
+  /// 行内代码渲染:monospace + 灰底。
+  ///
+  /// 当前实现走 TextStyle.background(矩形纯填充),没有圆角和外 padding。
+  /// 主项目 legacy 渲染依赖 [InlineCodePainter](独立 CustomPainter +
+  /// TextPainter rect 探测),实现圆角 + 跨行 RRect 合并。等阶段 5 自研
+  /// 选区 + 自研 paint 时同步上,届时 InlineCodeRun 不需要变,渲染层换。
+  TextSpan _buildInlineCodeSpan(String text, BuildContext? context) {
+    final isDark = context != null &&
+        Theme.of(context).brightness == Brightness.dark;
+    final bg = Paint()
+      ..style = PaintingStyle.fill
+      ..color = isDark ? const Color(0xFF3A3A3A) : const Color(0xFFE8E8E8);
+    return TextSpan(
+      text: text,
+      style: TextStyle(
+        fontFamily: _monospaceFont,
+        fontFamilyFallback: const ['Menlo', 'Courier'],
+        background: bg,
+      ),
+    );
+  }
+
+  // 桌面端用系统 monospace,跨平台 fallback 在 fontFamilyFallback
+  static const _monospaceFont = 'monospace';
 }

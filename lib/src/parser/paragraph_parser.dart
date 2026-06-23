@@ -2,7 +2,8 @@
 ///
 /// 当前作用域:
 /// - 块级:`<p>` / `<h1>` - `<h6>`(其他块级标签 fallback 成 ParagraphNode + textContent)
-/// - 行内:文本 / `<em>` / `<i>` / `<strong>` / `<b>` / `<br>`
+/// - 行内:文本 / `<em>` / `<i>` / `<strong>` / `<b>` / `<br>` /
+///   `<a href>` / `<code>`
 ///
 /// 后续阶段会扩展 list / blockquote / code_block / 等。
 
@@ -78,15 +79,15 @@ class ParagraphParser {
                   inlines: List.unmodifiable(inlines),
                 ));
               default:
-                // 未识别块级:fallback 为 paragraph,取所有 textContent 包成一段
-                final inlines = <InlineNode>[];
-                for (final child in node.nodes) {
-                  _collectInlineFromAnyNode(child, inlines);
-                }
-                if (inlines.isNotEmpty) {
+                // 未识别块级:fallback 为 paragraph,只取纯 textContent,
+                // 不识别内部 inline tag(因为我们还不知道该块的语义 ——
+                // 比如 <pre><code> 在 code_block 节点实现前,fallback 应该
+                // 是平铺源码,而不是把 <code> 当成 inline code 渲染灰底)。
+                final text = node.text;
+                if (text.trim().isNotEmpty) {
                   out.add(ParagraphNode(
                     id: nextId(),
-                    inlines: List.unmodifiable(inlines),
+                    inlines: List.unmodifiable([TextRun(text)]),
                   ));
                 }
             }
@@ -126,6 +127,11 @@ class ParagraphParser {
         } else {
           out.add(LinkRun(href: href, children: List.unmodifiable(children)));
         }
+      case 'code':
+        // 浏览器 `<code>` 的实际语义:展示原始字面值,内部 markup 视觉
+        // 被 monospace 盖住意义。这里直接把所有 textContent 拼成一段,
+        // 不保留嵌套样式。
+        out.add(InlineCodeRun(_textContent(el)));
       default:
         // 未识别 inline:展平子节点
         out.addAll(children);
@@ -147,7 +153,26 @@ class ParagraphParser {
   }
 
   /// 已支持的 inline 标签集合。
-  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a'};
+  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a', 'code'};
 
   bool _isInlineTag(String tag) => _inlineTags.contains(tag);
+
+  /// 把元素子树的所有 text 节点拼成一段(用于 InlineCodeRun)。
+  /// 不递归 attribute、不做 trim、保留所有空白。
+  String _textContent(dom.Element el) {
+    final buf = StringBuffer();
+    void visit(dom.Node n) {
+      if (n is dom.Text) {
+        buf.write(n.text);
+      } else if (n is dom.Element) {
+        for (final c in n.nodes) {
+          visit(c);
+        }
+      }
+    }
+    for (final c in el.nodes) {
+      visit(c);
+    }
+    return buf.toString();
+  }
 }

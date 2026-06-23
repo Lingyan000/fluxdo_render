@@ -1,7 +1,7 @@
 /// 行内节点 sealed family。
 ///
-/// 阶段 1.1 范围:Text / Em / Strong / LineBreak
-/// 后续会扩展 LinkRun / MentionRun / EmojiRun / InlineCodeRun / ImageRun 等。
+/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode
+/// 后续会扩展 MentionRun / EmojiRun / ImageRun 等。
 
 library;
 
@@ -122,4 +122,31 @@ class LinkRun extends InlineNode {
 
   @override
   String toString() => 'LinkRun($href, ${children.length} children)';
+}
+
+/// `<code>` 行内代码片段。
+///
+/// 设计上**只持纯文本**,不再嵌套样式(跟浏览器 `<code>` 实际行为一致 ——
+/// `<code>` 内的 `<strong>` 在 Discourse cooked 里会被保留,但视觉上
+/// monospace 已盖住样式;且 inline code 主要意图是展示原始字面值,
+/// 嵌套样式只会带来视觉噪音)。parser 收到嵌套样式时把所有 textContent
+/// 拼成一段。
+@immutable
+class InlineCodeRun extends InlineNode {
+  const InlineCodeRun(this.text);
+
+  final String text;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is InlineCodeRun &&
+          runtimeType == other.runtimeType &&
+          text == other.text;
+
+  @override
+  int get hashCode => text.hashCode;
+
+  @override
+  String toString() => 'InlineCodeRun(${text.length} chars)';
 }
