@@ -43,7 +43,8 @@ typedef EmojiImageBuilder = Widget Function(
 /// 和单测使用。
 ///
 /// Fallback 形态:`:name:` 文本包在浅灰 chip 里,清晰提示"这里有 emoji
-/// 但没图"。完整显示 name,不裁剪。
+/// 但没图"。完整显示 name,不裁剪。Chip 总高度约等于 1em,跟相邻
+/// 文字视觉对齐(避免 WidgetSpan 中点对齐时 chip 偏上偏下)。
 Widget defaultEmojiImageBuilder(
   BuildContext context,
   EmojiRun emoji,
@@ -52,8 +53,12 @@ Widget defaultEmojiImageBuilder(
   Widget placeholder() {
     final text = emoji.name.isEmpty ? ':?:' : ':${emoji.name}:';
     final scheme = Theme.of(context).colorScheme;
+    // Chip 总高 ≈ size(1em),跟周围文字垂直占位一致 ——
+    // 字号 size*0.7 + 上下 padding 各 (size*0.15) = size
+    final innerFontSize = size * 0.7;
+    final vPad = size * 0.15;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: vPad),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(3),
@@ -61,7 +66,7 @@ Widget defaultEmojiImageBuilder(
       child: Text(
         text,
         style: TextStyle(
-          fontSize: size * 0.75,
+          fontSize: innerFontSize,
           fontFamily: 'monospace',
           color: scheme.onSurfaceVariant,
           height: 1.0,

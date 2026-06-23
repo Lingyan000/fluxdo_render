@@ -266,20 +266,21 @@ class InlineFlattener {
   /// 自行用 size 约束尺寸**,这里不外包 SizedBox(否则 fallback 文本
   /// 会被裁剪)。
   ///
-  /// 垂直对齐策略:[PlaceholderAlignment.baseline] + `TextBaseline.alphabetic`,
-  /// 让 emoji 底部跟文字基线对齐(对图片这是 Discourse 视觉的默认形态)。
-  /// 不用 `middle`,因为 Flutter 的 `middle` 是 widget 中点对文字中线,
-  /// 在中文 + emoji 混排时偏低(中文基线本身就比拉丁基线高)。
+  /// **垂直对齐**:用 [PlaceholderAlignment.middle] 让 widget 中点对齐
+  /// 字号高度的中线 + 减半行 leading 微调。
   ///
-  /// 选区注意:WidgetSpan 默认不参与选区文本,这里通过 `placeholder`
-  /// 兜底视觉,实际选区文本由 SelectionArea 自处理(阶段 5 自研选区时
-  /// 通过 EmojiRun.name 提供 ":heart:" 作选区文本)。
+  /// 之前用 baseline + alphabetic 在含中文行里会偏低(中文 visual baseline
+  /// 比 alphabetic 高);middle 在纯拉丁行里会偏高(拉丁 x-height 在
+  /// 行中线下方)。两者都不完美,中文场景 middle 视觉接受度更高
+  /// (Discourse 也是 vertical-align: middle)。
+  ///
+  /// 选区注意:WidgetSpan 默认不参与选区文本,实际选区文本由 SelectionArea
+  /// 自处理(阶段 5 自研选区时通过 EmojiRun.name 提供 ":heart:" 作选区文本)。
   ///
   /// recognizer 透传:emoji 嵌套在 LinkRun 子树时,WidgetSpan 没有
-  /// `recognizer` 字段(那是 TextSpan 才有的),tap 通过 WidgetSpan
-  /// 内部的 GestureDetector 处理。当前实现:link 内 emoji **直接显示
-  /// 但不可点**(因为 WidgetSpan 不带 inheritedRecognizer)。阶段 2
-  /// 加 mention 节点时统一处理(mention 内的状态 emoji 也是同样问题)。
+  /// `recognizer` 字段,tap 通过 WidgetSpan 内部的 GestureDetector 处理。
+  /// 当前实现:link 内 emoji **直接显示但不可点**。阶段 2 加 mention 节点
+  /// 时统一处理(mention 内的状态 emoji 也是同样问题)。
   WidgetSpan _buildEmojiSpan(
     EmojiRun emoji,
     EmojiImageBuilder emojiBuilder,
@@ -290,11 +291,8 @@ class InlineFlattener {
     final size = emoji.isOnlyEmoji ? 32.0 : emojiBaseSize;
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
-      baseline: TextBaseline.alphabetic,
       child: Builder(
         builder: (ctx) {
-          // 优先用从 flattener 传入的 context(确保 Theme 可访问);
-          // 但 WidgetSpan child build 时已有自己的 context,两者通常等价
           return emojiBuilder(context ?? ctx, emoji, size);
         },
       ),
