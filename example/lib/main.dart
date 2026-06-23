@@ -349,6 +349,8 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
       }
     case InlineCodeRun(:final text):
       buf.writeln('${pad}InlineCodeRun(${text.length} chars): $text');
+    case EmojiRun(:final name, :final url, :final isOnlyEmoji):
+      buf.writeln('${pad}EmojiRun(:$name:${isOnlyEmoji ? " only" : ""}) $url');
   }
 }
 

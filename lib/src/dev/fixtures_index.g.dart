@@ -41,6 +41,54 @@ const List<FixtureEntry> allFixtures = [
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''emoji/custom_emoji.html''',
+    html: r'''<p>自定义表情 <img src="https://cdn.example.com/uploads/custom/bili_114.gif" alt=":bili_114:" class="emoji emoji-custom" title=":bili_114:"> 来自 Discourse。</p>
+''',
+    notes: r'''自定义 emoji(Discourse extendedEmojiMap,服务端 customEmoji),URL 来自
+CDN 而非确定性路径。验证 parser 不做 CDN 重写,把原 src 原样存入
+EmojiRun.url —— 主项目的 EmojiImageBuilder 自行做 CDN 路由。
+附加 `emoji-custom` class 不影响 parser(只检查 `emoji`)。''',
+    source: r'''https://example.com/t/sample/1/emoji4''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''emoji/in_heading_vs_paragraph.html''',
+    html: r'''<h2>H2 标题里 <img src="https://example.com/images/emoji/twitter/star.png?v=12" alt=":star:" class="emoji" title=":star:"> 的 emoji</h2>
+<p>段落里 <img src="https://example.com/images/emoji/twitter/star.png?v=12" alt=":star:" class="emoji" title=":star:"> 的 emoji 应该比上面小。</p>
+''',
+    notes: r'''H2 里的 emoji 应该跟随父字号(更大),段落里的 emoji 是 1em。
+验证 emoji 尺寸跟随 baseStyle.fontSize(InlineFlattener 把
+baseStyle.fontSize 传给 emojiBuilder 作 size)。''',
+    source: r'''https://example.com/t/sample/1/emoji5''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''emoji/multiple.html''',
+    html: r'''<p>多个表情 <img src="https://example.com/images/emoji/twitter/smile.png?v=12" alt=":smile:" class="emoji" title=":smile:"> <img src="https://example.com/images/emoji/twitter/heart.png?v=12" alt=":heart:" class="emoji" title=":heart:"> <img src="https://example.com/images/emoji/twitter/fire.png?v=12" alt=":fire:" class="emoji" title=":fire:"> 一起。</p>
+''',
+    notes: r'''一段里多个 emoji 紧邻,验证 WidgetSpan 之间不互相错位。''',
+    source: r'''https://example.com/t/sample/1/emoji2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''emoji/only_emoji_large.html''',
+    html: r'''<p><img src="https://example.com/images/emoji/twitter/tada.png?v=12" alt=":tada:" class="emoji only-emoji" title=":tada:"></p>
+''',
+    notes: r'''整段仅含 emoji + class="only-emoji",Discourse 渲染为 32dp 大图。
+验证 EmojiRun.isOnlyEmoji 解析 + 32px 显示。''',
+    source: r'''https://example.com/t/sample/1/emoji3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''emoji/simple_heart.html''',
+    html: r'''<p>Hello <img src="https://example.com/images/emoji/twitter/heart.png?v=12" alt=":heart:" class="emoji" title=":heart:"> world.</p>
+''',
+    notes: r'''最基础形态:段落内嵌 :heart: 标准 emoji。验证 EmojiRun 解析 +
+WidgetSpan 渲染 + 1em 字号(跟 baseStyle 一致)。''',
+    source: r'''https://example.com/t/sample/1/emoji1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''heading/h1_h2_h3.html''',
     html: r'''<h1>顶层标题</h1>
 <h2>二级标题</h2>

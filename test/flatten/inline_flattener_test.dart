@@ -321,4 +321,78 @@ void main() {
       expect((children[2] as TextSpan).text, ' 命令');
     });
   });
+
+  group('EmojiRun', () {
+    testWidgets('普通 emoji 产出 WidgetSpan,size = baseStyle.fontSize', (tester) async {
+      late BuildContext ctx;
+      double? capturedSize;
+      EmojiRun? capturedRun;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox();
+        }),
+      ));
+      final result = flattener.flatten(
+        [const EmojiRun(name: 'heart', url: 'https://x/heart.png')],
+        baseStyle, // fontSize: 14
+        context: ctx,
+        emojiImageBuilder: (_, run, size) {
+          capturedRun = run;
+          capturedSize = size;
+          return const SizedBox();
+        },
+      );
+      final span = result.span.children![0];
+      expect(span, isA<WidgetSpan>());
+      // build 一次让 Builder 触发
+      await tester.pumpWidget(MaterialApp(home: Text.rich(result.span)));
+      expect(capturedSize, 14);
+      expect(capturedRun?.name, 'heart');
+    });
+
+    testWidgets('only-emoji 用 32dp', (tester) async {
+      double? capturedSize;
+      await tester.pumpWidget(MaterialApp(
+        home: Text.rich(TextSpan(children: [
+          flattener.flatten(
+            [const EmojiRun(name: 'tada', url: 'x.png', isOnlyEmoji: true)],
+            baseStyle,
+            emojiImageBuilder: (_, _, size) {
+              capturedSize = size;
+              return const SizedBox();
+            },
+          ).span,
+        ])),
+      ));
+      expect(capturedSize, 32);
+    });
+
+    testWidgets('h2 字号 21 时 emoji size 跟父 baseStyle', (tester) async {
+      double? capturedSize;
+      const h2Style = TextStyle(fontSize: 21);
+      await tester.pumpWidget(MaterialApp(
+        home: Text.rich(TextSpan(children: [
+          flattener.flatten(
+            [const EmojiRun(name: 'star', url: 'x.png')],
+            h2Style,
+            emojiImageBuilder: (_, _, size) {
+              capturedSize = size;
+              return const SizedBox();
+            },
+          ).span,
+        ])),
+      ));
+      expect(capturedSize, 21);
+    });
+
+    test('无 builder 时走 defaultEmojiImageBuilder(不抛)', () {
+      final result = flattener.flatten(
+        [const EmojiRun(name: 'heart', url: 'https://x/h.png')],
+        baseStyle,
+      );
+      final span = result.span.children![0];
+      expect(span, isA<WidgetSpan>());
+    });
+  });
 }

@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../node/node.dart';
 import '../parser/paragraph_parser.dart';
+import '../render/emoji_handler.dart';
 import '../render/link_handler.dart';
 import '../render/node_factory.dart';
 
 /// 帖子渲染入口 widget。
 ///
-/// 当前作用域(阶段 1):段落 + 标题 + 行内 em/strong/br/text/link。
-/// 其他节点(列表、代码块、引用卡 等)按 docs/node_priority.md 顺序
-/// 在后续阶段实现。未识别块级会 fallback 成段落 + textContent。
+/// 当前作用域(阶段 1):段落 + 标题 + 行内 em/strong/br/text/link/
+/// inline_code/emoji。其他节点(列表、代码块、引用卡 等)按
+/// docs/node_priority.md 顺序在后续阶段实现。未识别块级会 fallback
+/// 成段落 + textContent。
 class FluxdoRender extends StatefulWidget {
   const FluxdoRender({
     super.key,
@@ -17,6 +19,7 @@ class FluxdoRender extends StatefulWidget {
     this.parser = const ParagraphParser(),
     this.factory,
     this.linkHandler,
+    this.emojiImageBuilder,
   });
 
   /// Discourse cooked HTML 内容。
@@ -28,12 +31,15 @@ class FluxdoRender extends StatefulWidget {
 
   /// 节点工厂,默认 NodeFactory()。
   /// 调用方可继承 NodeFactory 做场景化覆盖(用户卡 bio / AI 分享卡 等)。
-  /// 注意:传 factory 时,factory 自带的 linkHandler 优先于本 widget
-  /// 的 [linkHandler] 参数(避免双重注入)。
+  /// 注意:传 factory 时,factory 自带的 linkHandler / emojiImageBuilder
+  /// 优先于本 widget 的同名参数(避免双重注入)。
   final NodeFactory? factory;
 
   /// 链接点击 callback —— 主项目注入。优先级见 [factory] 文档。
   final LinkActionHandler? linkHandler;
+
+  /// Emoji 图片 builder —— 主项目注入。优先级见 [factory] 文档。
+  final EmojiImageBuilder? emojiImageBuilder;
 
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
@@ -59,8 +65,11 @@ class _FluxdoRenderState extends State<FluxdoRender> {
 
   @override
   Widget build(BuildContext context) {
-    final factory =
-        widget.factory ?? NodeFactory(linkHandler: widget.linkHandler);
+    final factory = widget.factory ??
+        NodeFactory(
+          linkHandler: widget.linkHandler,
+          emojiImageBuilder: widget.emojiImageBuilder,
+        );
     if (_nodes.isEmpty) {
       return const SizedBox.shrink();
     }

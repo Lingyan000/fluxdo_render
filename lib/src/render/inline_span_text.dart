@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 
 import '../flatten/inline_flattener.dart';
 import '../node/inline_node.dart';
+import 'emoji_handler.dart';
 import 'link_handler.dart';
 
 class InlineSpanText extends StatefulWidget {
@@ -19,6 +20,7 @@ class InlineSpanText extends StatefulWidget {
     required this.baseStyle,
     this.flattener = const InlineFlattener(),
     this.linkHandler,
+    this.emojiImageBuilder,
     this.textAlign,
   });
 
@@ -26,6 +28,7 @@ class InlineSpanText extends StatefulWidget {
   final TextStyle baseStyle;
   final InlineFlattener flattener;
   final LinkActionHandler? linkHandler;
+  final EmojiImageBuilder? emojiImageBuilder;
   final TextAlign? textAlign;
 
   @override
@@ -58,6 +61,7 @@ class _InlineSpanTextState extends State<InlineSpanText> {
       widget.inlines,
       widget.baseStyle,
       linkHandler: widget.linkHandler,
+      emojiImageBuilder: widget.emojiImageBuilder,
       context: context,
     );
     _recognizers = result.recognizers;

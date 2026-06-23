@@ -1,6 +1,7 @@
 /// 把 BlockNode 渲染成 Flutter Widget。
 ///
-/// 阶段 1 范围:Paragraph + Heading,行内含 Text/Em/Strong/LineBreak/Link。
+/// 阶段 1 范围:Paragraph + Heading,行内含 Text/Em/Strong/LineBreak/Link/
+/// InlineCode/Emoji。
 /// 设计上预留 sub-class 扩展点 — 主项目场景里(用户卡 bio / 通知 / AI 分享卡
 /// 等)可以继承 NodeFactory 在 build* 方法里加 wrapper(如:简化版不让点
 /// 链接、AI 分享卡内禁用图片)。
@@ -14,6 +15,7 @@ import 'package:flutter/material.dart';
 
 import '../flatten/inline_flattener.dart';
 import '../node/node.dart';
+import 'emoji_handler.dart';
 import 'inline_span_text.dart';
 import 'link_handler.dart';
 
@@ -21,6 +23,7 @@ class NodeFactory {
   NodeFactory({
     InlineFlattener? inlineFlattener,
     this.linkHandler,
+    this.emojiImageBuilder,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
 
   final InlineFlattener _inlineFlattener;
@@ -28,6 +31,10 @@ class NodeFactory {
   /// 链接点击 callback,主项目注入。
   /// 不传时用 [defaultLinkHandler](仅 debugPrint)。
   final LinkActionHandler? linkHandler;
+
+  /// Emoji 图片 builder,主项目注入。
+  /// 不传时用 [defaultEmojiImageBuilder](Image.network 兜底,无缓存池)。
+  final EmojiImageBuilder? emojiImageBuilder;
 
   /// 入口 dispatch — sealed class exhaustive switch。
   Widget build(BuildContext context, BlockNode node) {
@@ -53,6 +60,7 @@ class NodeFactory {
         baseStyle: baseStyle,
         flattener: _inlineFlattener,
         linkHandler: linkHandler,
+        emojiImageBuilder: emojiImageBuilder,
       ),
     );
   }
@@ -80,6 +88,7 @@ class NodeFactory {
         baseStyle: headingStyle,
         flattener: _inlineFlattener,
         linkHandler: linkHandler,
+        emojiImageBuilder: emojiImageBuilder,
       ),
     );
   }

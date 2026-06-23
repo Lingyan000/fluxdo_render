@@ -110,6 +110,7 @@ void main() {
         LineBreakRun(),
         LinkRun(href: 'https://example.com', children: [TextRun('x')]),
         InlineCodeRun('c'),
+        EmojiRun(name: 'heart', url: 'https://x/heart.png'),
       ];
       final labels = list
           .map(
@@ -120,10 +121,11 @@ void main() {
               LineBreakRun() => 'br',
               LinkRun() => 'link',
               InlineCodeRun() => 'inlineCode',
+              EmojiRun() => 'emoji',
             },
           )
           .toList();
-      expect(labels, ['text', 'em', 'strong', 'br', 'link', 'inlineCode']);
+      expect(labels, ['text', 'em', 'strong', 'br', 'link', 'inlineCode', 'emoji']);
     });
   });
 
@@ -145,6 +147,32 @@ void main() {
     test('toString 含字符数', () {
       const c = InlineCodeRun('hello');
       expect(c.toString(), contains('5 chars'));
+    });
+  });
+
+  group('EmojiRun', () {
+    test('==/hashCode 按 name+url+isOnlyEmoji 比较', () {
+      const a = EmojiRun(name: 'heart', url: 'x.png');
+      const b = EmojiRun(name: 'heart', url: 'x.png');
+      const c = EmojiRun(name: 'heart', url: 'y.png');
+      const d = EmojiRun(name: 'heart', url: 'x.png', isOnlyEmoji: true);
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a == c, isFalse);
+      expect(a == d, isFalse);
+    });
+
+    test('isOnlyEmoji 默认 false', () {
+      const e = EmojiRun(name: 'x', url: 'y.png');
+      expect(e.isOnlyEmoji, isFalse);
+    });
+
+    test('toString 含 name + url, only-emoji 时标 only', () {
+      const a = EmojiRun(name: 'heart', url: 'x.png');
+      expect(a.toString(), allOf(contains('heart'), contains('x.png')));
+      expect(a.toString(), isNot(contains('only')));
+      const b = EmojiRun(name: 'tada', url: 'y.png', isOnlyEmoji: true);
+      expect(b.toString(), contains('only'));
     });
   });
 }

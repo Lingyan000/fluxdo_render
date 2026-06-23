@@ -3,7 +3,7 @@
 /// 当前作用域:
 /// - 块级:`<p>` / `<h1>` - `<h6>`(其他块级标签 fallback 成 ParagraphNode + textContent)
 /// - 行内:文本 / `<em>` / `<i>` / `<strong>` / `<b>` / `<br>` /
-///   `<a href>` / `<code>`
+///   `<a href>` / `<code>` / `<img class="emoji">`
 ///
 /// 后续阶段会扩展 list / blockquote / code_block / 等。
 
@@ -132,6 +132,21 @@ class ParagraphParser {
         // 被 monospace 盖住意义。这里直接把所有 textContent 拼成一段,
         // 不保留嵌套样式。
         out.add(InlineCodeRun(_textContent(el)));
+      case 'img':
+        // 只识别 class="emoji" 的 img — 普通 inline img(图片帖正文)
+        // 走阶段 2 image 节点单独实现。
+        if (el.classes.contains('emoji')) {
+          final src = el.attributes['src']?.trim() ?? '';
+          // alt/title 里去掉首尾 `:`(Discourse 形如 `:heart:`)
+          final raw = (el.attributes['title'] ?? el.attributes['alt'] ?? '').trim();
+          final name = raw.replaceAll(RegExp(r'^:|:$'), '');
+          out.add(EmojiRun(
+            name: name,
+            url: src,
+            isOnlyEmoji: el.classes.contains('only-emoji'),
+          ));
+        }
+        // 非 emoji 的 img 暂时丢弃(阶段 2 加 image 节点)
       default:
         // 未识别 inline:展平子节点
         out.addAll(children);
@@ -153,7 +168,7 @@ class ParagraphParser {
   }
 
   /// 已支持的 inline 标签集合。
-  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a', 'code'};
+  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a', 'code', 'img'};
 
   bool _isInlineTag(String tag) => _inlineTags.contains(tag);
 

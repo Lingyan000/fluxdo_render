@@ -1,7 +1,7 @@
 /// 行内节点 sealed family。
 ///
-/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode
-/// 后续会扩展 MentionRun / EmojiRun / ImageRun 等。
+/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link / InlineCode / Emoji
+/// 后续会扩展 MentionRun / ImageRun 等。
 
 library;
 
@@ -149,4 +149,56 @@ class InlineCodeRun extends InlineNode {
 
   @override
   String toString() => 'InlineCodeRun(${text.length} chars)';
+}
+
+/// `<img class="emoji">` 行内表情图。
+///
+/// Discourse cooked 形态:
+/// ```html
+/// <img src="https://.../images/emoji/twitter/heart.png" alt=":heart:"
+///      class="emoji" title=":heart:">
+/// <img src="..." class="emoji only-emoji">  <!-- 整段独立大表情 -->
+/// ```
+///
+/// 子包**不实际加载图片**:渲染时通过 [NodeFactory.emojiImageBuilder]
+/// callback 由主项目注入(主项目用 emojiImageProvider + 独立缓存池)。
+/// 子包默认 fallback 是 `Image.network`,便于 example gallery 演示。
+///
+/// **尺寸约定**:
+/// - 普通 emoji:1em(跟随父字号,h1 里比 p 里大)
+/// - only-emoji:32dp(对齐 Discourse `img.emoji.only-emoji { 32px }`)
+@immutable
+class EmojiRun extends InlineNode {
+  const EmojiRun({
+    required this.name,
+    required this.url,
+    this.isOnlyEmoji = false,
+  });
+
+  /// emoji 短名,如 'heart' / ':heart:' 去掉冒号,主要给可访问性 + 选区文本用。
+  /// 可能为空串(alt/title 缺失时)。
+  final String name;
+
+  /// 完整图片 URL(parser 直接从 src 提取,**不做 CDN 重写**;
+  /// CDN 重写由主项目在 emojiImageBuilder 内处理)。
+  final String url;
+
+  /// `class="only-emoji"` —— 整段仅含 emoji 的大表情,显示 32dp。
+  final bool isOnlyEmoji;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EmojiRun &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          url == other.url &&
+          isOnlyEmoji == other.isOnlyEmoji;
+
+  @override
+  int get hashCode => Object.hash(name, url, isOnlyEmoji);
+
+  @override
+  String toString() =>
+      'EmojiRun($name${isOnlyEmoji ? ", only" : ""}, $url)';
 }
