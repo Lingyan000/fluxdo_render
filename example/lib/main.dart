@@ -256,6 +256,7 @@ class _FixtureDetailState extends State<_FixtureDetail> {
                   SnackBar(content: Text('link tapped: $href')),
                 );
               },
+              emojiImageBuilder: _galleryEmojiBuilder,
             ),
           ),
         ),
@@ -381,3 +382,42 @@ class _SectionCard extends StatelessWidget {
     );
   }
 }
+
+/// Gallery 内置 emoji builder。
+///
+/// fixture 用的 emoji 名映射到 Unicode 字符,系统字体直出
+/// (macOS Apple Color Emoji / Windows Segoe UI Emoji / Linux Noto Color
+/// Emoji)。这样不联网也能展示真 emoji,避免子包 fallback chip 出现。
+///
+/// 自定义 emoji(如 :bili_114:)没有 Unicode 对应,fall through 到子包
+/// defaultEmojiImageBuilder 的 chip 占位 —— 那是合理的演示场景。
+Widget _galleryEmojiBuilder(
+  BuildContext context,
+  EmojiRun emoji,
+  double size,
+) {
+  final unicode = _emojiUnicode[emoji.name];
+  if (unicode == null) {
+    return defaultEmojiImageBuilder(context, emoji, size);
+  }
+  return SizedBox(
+    width: size,
+    height: size,
+    child: Center(
+      child: Text(
+        unicode,
+        style: TextStyle(fontSize: size, height: 1.0),
+      ),
+    ),
+  );
+}
+
+/// fixture 用到的 emoji 名 → Unicode 映射。
+/// 新增 fixture 用到新 emoji 时在这里补充即可。
+const _emojiUnicode = <String, String>{
+  'heart': '❤️',
+  'smile': '\u{1F642}',
+  'fire': '\u{1F525}',
+  'tada': '\u{1F389}',
+  'star': '⭐',
+};
