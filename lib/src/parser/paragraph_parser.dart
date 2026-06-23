@@ -1,12 +1,12 @@
 /// HTML cooked → `List<BlockNode>` 解析器(阶段 1 范围)。
 ///
 /// 当前作用域:
-/// - 块级:`<p>` / `<h1>` - `<h6>` / `<ul>` / `<ol>`(其他块级标签
-///   fallback 成 ParagraphNode + textContent)
+/// - 块级:`<p>` / `<h1>` - `<h6>` / `<ul>` / `<ol>` / `<blockquote>` /
+///   `<hr>`(其他块级标签 fallback 成 ParagraphNode + textContent)
 /// - 行内:文本 / `<em>` / `<i>` / `<strong>` / `<b>` / `<br>` /
 ///   `<a href>` / `<code>` / `<img class="emoji">`
 ///
-/// 后续阶段会扩展 blockquote / code_block / 等。
+/// 后续阶段会扩展 code_block / 等。
 
 library;
 
@@ -110,6 +110,8 @@ class ParagraphParser {
                   id: nextId(),
                   children: _parseBlocks(node.nodes, nextId),
                 ));
+              case 'hr':
+                out.add(HorizontalRuleNode(id: nextId()));
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——

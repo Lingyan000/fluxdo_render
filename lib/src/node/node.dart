@@ -204,3 +204,24 @@ class BlockquoteNode extends BlockNode {
   String toString() =>
       'BlockquoteNode($id, ${children.length} children)';
 }
+
+/// 分割线 — `<hr>`。无字段。
+///
+/// 视觉对齐 legacy:`vertical padding 12 + 1px line(outlineVariant @ 0.5)`。
+///
+/// id 仍存在(BlockNode 协议要求),给阶段 5 自研选区时按 id 寻址用。
+@immutable
+class HorizontalRuleNode extends BlockNode {
+  const HorizontalRuleNode({required super.id});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HorizontalRuleNode && runtimeType == other.runtimeType;
+
+  @override
+  int get hashCode => 0;
+
+  @override
+  String toString() => 'HorizontalRuleNode($id)';
+}

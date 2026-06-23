@@ -223,6 +223,37 @@ WidgetSpan 渲染 + 1em 字号(跟 baseStyle 一致)。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''horizontal_rule/between_paragraphs.html''',
+    html: r'''<p>前一段。</p>
+<hr>
+<p>后一段。</p>
+''',
+    notes: r'''hr 在两段之间,验证视觉分隔效果:p 段落本身上下有 1em margin,
+hr 自带 12 上下 padding,叠加不会塌缩(Column 不折叠 margin)。''',
+    source: r'''https://example.com/t/sample/1/hr2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''horizontal_rule/multiple_consecutive.html''',
+    html: r'''<hr>
+<hr>
+<hr>
+''',
+    notes: r'''连续 3 条 hr(罕见但合法)。每条独立 BlockNode,id 各自递增;
+视觉上三条等距分隔线。''',
+    source: r'''https://example.com/t/sample/1/hr3''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''horizontal_rule/simple.html''',
+    html: r'''<hr>
+''',
+    notes: r'''最基础形态:单独一条 hr。验证 HorizontalRuleNode 解析 + 1px 线
++ 上下 12 padding。''',
+    source: r'''https://example.com/t/sample/1/hr1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''inline_code/inside_link.html''',
     html: r'''<p>查看 <a href="https://api.flutter.dev/flutter/widgets/RichText-class.html"><code>RichText</code> 文档</a> 了解细节。</p>
 ''',

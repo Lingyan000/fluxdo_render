@@ -49,6 +49,7 @@ class NodeFactory {
       HeadingNode() => buildHeading(context, node),
       ListNode() => buildList(context, node),
       BlockquoteNode() => buildBlockquote(context, node),
+      HorizontalRuleNode() => buildHorizontalRule(context, node),
     };
   }
 
@@ -226,6 +227,24 @@ class NodeFactory {
             for (final child in node.children) build(context, child),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 分割线 — `<hr>`。
+  ///
+  /// 样式对齐 legacy:vertical padding 12 + 1px 高线 +
+  /// `colorScheme.outlineVariant @ 0.5`(派生)。
+  Widget buildHorizontalRule(
+    BuildContext context,
+    HorizontalRuleNode node,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Container(
+        height: 1,
+        color: scheme.outlineVariant.withValues(alpha: 0.5),
       ),
     );
   }

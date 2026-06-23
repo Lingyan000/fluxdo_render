@@ -101,6 +101,7 @@ void main() {
         HeadingNode() => 'heading',
         ListNode() => 'list',
         BlockquoteNode() => 'blockquote',
+        HorizontalRuleNode() => 'hr',
       };
       expect(label, 'paragraph');
     });
@@ -308,6 +309,31 @@ void main() {
       ]);
       expect(b.toString(), contains('b_3'));
       expect(b.toString(), contains('2 children'));
+    });
+  });
+
+  group('HorizontalRuleNode', () {
+    test('所有实例(只要 runtimeType 相同)都相等', () {
+      const a = HorizontalRuleNode(id: 'b_0');
+      const b = HorizontalRuleNode(id: 'b_99'); // id 不参与 ==
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('跟其他 BlockNode 不相等', () {
+      const hr = HorizontalRuleNode(id: 'b_0');
+      const p = ParagraphNode(id: 'b_0', inlines: []);
+      expect(hr == p, isFalse);
+    });
+
+    test('id 字段可访问', () {
+      const hr = HorizontalRuleNode(id: 'b_7');
+      expect(hr.id, 'b_7');
+    });
+
+    test('toString 含 id', () {
+      const hr = HorizontalRuleNode(id: 'b_3');
+      expect(hr.toString(), contains('b_3'));
     });
   });
 }
