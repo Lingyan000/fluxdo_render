@@ -226,6 +226,50 @@ class HorizontalRuleNode extends BlockNode {
   String toString() => 'HorizontalRuleNode($id)';
 }
 
+/// 代码块 — `<pre><code>`,可带语言标识。
+///
+/// 视觉对齐 legacy `code_block_builder.dart`:
+///   灰底容器(surfaceContainer)+ 圆角 8
+///   顶栏:语言 chip + 复制按钮
+///   主体:横向滚动 + monospace + 行号(可选)
+///
+/// **不含语法高亮**:子包不依赖 highlight.js / mermaid / chart 等
+/// 重量级库,通过 [CodeBlockHighlighter] callback 由主项目注入。
+/// 不传时纯 monospace 显示。
+///
+/// [language] 是 cooked HTML 里 `class="lang-xxx"` 提取的语言标识
+/// (`'dart'` / `'python'` / `'mermaid'` 等);无则 null。
+@immutable
+class CodeBlockNode extends BlockNode {
+  const CodeBlockNode({
+    required super.id,
+    required this.code,
+    this.language,
+  });
+
+  /// 代码原始字面值(parser 已解码 HTML 实体,末尾换行已去掉)。
+  final String code;
+
+  /// 语言标识(小写),如 `'dart'` / `'python'` / `'mermaid'`;
+  /// 未指定 / 未识别时 null。
+  final String? language;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CodeBlockNode &&
+          runtimeType == other.runtimeType &&
+          code == other.code &&
+          language == other.language;
+
+  @override
+  int get hashCode => Object.hash(code, language);
+
+  @override
+  String toString() =>
+      'CodeBlockNode($id, lang=${language ?? "?"}, ${code.length} chars)';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -275,6 +319,8 @@ int countImageRuns(List<BlockNode> nodes) {
           scanBlock(c);
         }
       case HorizontalRuleNode():
+        break;
+      case CodeBlockNode():
         break;
     }
   }

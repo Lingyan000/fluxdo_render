@@ -110,6 +110,56 @@ renderer 通过 build() dispatch 递归。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''code_block/json_with_entities.html''',
+    html: r'''<pre><code class="lang-json">{
+  "name": "fluxdo",
+  "version": "1.0.0",
+  "dependencies": {
+    "flutter": "&gt;=3.10.0",
+    "html": "^0.15.0"
+  }
+}
+</code></pre>
+''',
+    notes: r'''JSON 代码块含 HTML 实体 &gt;(>),验证 package:html 自动解码,
+CodeBlockNode.code 是字面值 ">"。''',
+    source: r'''https://example.com/t/sample/1/code4''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''code_block/long_line_scrolls.html''',
+    html: r'''<pre><code class="lang-bash">flutter run -d macos --dart-define=FLAVOR=staging --observatory-port=9100 --enable-vm-service --disable-service-auth-codes
+echo "this is a very long single line that should trigger horizontal scrolling because we cannot wrap code"
+</code></pre>
+''',
+    notes: r'''超长单行 bash 命令,验证横向滚动(SingleChildScrollView Axis.horizontal)。
+不会换行,可左右滑动查看完整命令。''',
+    source: r'''https://example.com/t/sample/1/code5''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''code_block/no_language.html''',
+    html: r'''<pre><code>plain text without language hint
+just multiple lines
+no syntax highlight needed
+</code></pre>
+''',
+    notes: r'''无 lang-xxx class 的 pre/code,验证 language = null + 顶栏显示 "TEXT"。''',
+    source: r'''https://example.com/t/sample/1/code3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''code_block/python_function.html''',
+    html: r'''<pre><code class="lang-python">def hello():
+    print("hi")
+    return 42
+</code></pre>
+''',
+    notes: r'''python 函数,验证非 dart 语言 lang-xxx 解析。''',
+    source: r'''https://example.com/t/sample/1/code2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''emoji/custom_emoji.html''',
     html: r'''<p>自定义表情 <img src="https://cdn.example.com/uploads/custom/bili_114.gif" alt=":bili_114:" class="emoji emoji-custom" title=":bili_114:"> 来自 Discourse。</p>
 ''',

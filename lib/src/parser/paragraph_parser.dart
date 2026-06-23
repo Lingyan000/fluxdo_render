@@ -2,11 +2,11 @@
 ///
 /// 当前作用域:
 /// - 块级:`<p>` / `<h1>` - `<h6>` / `<ul>` / `<ol>` / `<blockquote>` /
-///   `<hr>`(其他块级标签 fallback 成 ParagraphNode + textContent)
+///   `<hr>` / `<pre>`(其他块级标签 fallback 成 ParagraphNode + textContent)
 /// - 行内:文本 / `<em>` / `<i>` / `<strong>` / `<b>` / `<br>` /
-///   `<a href>` / `<code>` / `<img class="emoji">`
+///   `<a href>` / `<code>` / `<img>`
 ///
-/// 后续阶段会扩展 code_block / 等。
+/// 后续阶段会扩展 quote_card / spoiler / 等。
 
 library;
 
@@ -119,6 +119,29 @@ class ParagraphParser {
                 ));
               case 'hr':
                 out.add(HorizontalRuleNode(id: nextId()));
+              case 'pre':
+                // `<pre><code class="lang-xxx">...</code></pre>` —— 代码块。
+                // 取 textContent(已解码 HTML 实体),从 class 提语言。
+                final codeEl = node.children.firstWhere(
+                  (c) => c.localName?.toLowerCase() == 'code',
+                  orElse: () => node,
+                );
+                final rawText = codeEl.text;
+                // 去掉末尾换行避免多空行(legacy 同样处理)
+                final code = rawText.endsWith('\n')
+                    ? rawText.substring(0, rawText.length - 1)
+                    : rawText;
+                String? language;
+                final className = codeEl.className;
+                if (className.isNotEmpty) {
+                  final m = RegExp(r'lang-(\w+)').firstMatch(className);
+                  if (m != null) language = m.group(1)?.toLowerCase();
+                }
+                out.add(CodeBlockNode(
+                  id: nextId(),
+                  code: code,
+                  language: language,
+                ));
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——

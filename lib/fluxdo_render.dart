@@ -16,6 +16,7 @@ export 'src/dual/dual_render_widget.dart';
 export 'src/flatten/inline_flattener.dart';
 export 'src/node/node.dart';
 export 'src/parser/paragraph_parser.dart';
+export 'src/render/code_block_handler.dart';
 export 'src/render/emoji_handler.dart';
 export 'src/render/image_handler.dart';
 export 'src/render/inline_span_text.dart';

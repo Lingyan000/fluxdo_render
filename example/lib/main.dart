@@ -351,6 +351,8 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       }
     case HorizontalRuleNode():
       buf.writeln('$pad$node');
+    case CodeBlockNode():
+      buf.writeln('$pad$node');
   }
 }
 

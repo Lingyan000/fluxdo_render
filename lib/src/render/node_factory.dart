@@ -12,9 +12,11 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../flatten/inline_flattener.dart';
 import '../node/node.dart';
+import 'code_block_handler.dart';
 import 'emoji_handler.dart';
 import 'image_handler.dart';
 import 'inline_span_text.dart';
@@ -28,6 +30,7 @@ class NodeFactory {
     this.emojiImageBuilder,
     this.mentionTapHandler,
     this.imageContentBuilder,
+    this.codeBlockHighlighter,
     this.totalImagesInPost = 0,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
 
@@ -49,6 +52,10 @@ class NodeFactory {
   /// 不传时用 [defaultImageContentBuilder](Image.network + broken-image 占位)。
   final ImageContentBuilder? imageContentBuilder;
 
+  /// 代码块高亮 builder,主项目注入(主项目用 HighlighterService + Mermaid)。
+  /// 不传时用 [defaultCodeBlockHighlighter](纯 monospace 无高亮)。
+  final CodeBlockHighlighter? codeBlockHighlighter;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -64,6 +71,7 @@ class NodeFactory {
       ListNode() => buildList(context, node),
       BlockquoteNode() => buildBlockquote(context, node),
       HorizontalRuleNode() => buildHorizontalRule(context, node),
+      CodeBlockNode() => buildCodeBlock(context, node),
     };
   }
 
@@ -265,6 +273,113 @@ class NodeFactory {
       child: Container(
         height: 1,
         color: scheme.outlineVariant.withValues(alpha: 0.5),
+      ),
+    );
+  }
+
+  /// 代码块渲染 — `<pre><code>`。
+  ///
+  /// 视觉对齐 legacy `code_block_builder.dart`(简化版,无行号/全屏/分享):
+  ///   外:Container 灰底 surfaceContainer + 圆角 8 + margin 上下 8
+  ///   顶栏:Row(语言 chip(灰色文字 12px 左对齐)+ 复制按钮)
+  ///   主体:横向 SingleChildScrollView + monospace 内容
+  ///
+  /// 高亮 / mermaid 由 [codeBlockHighlighter] callback 接管;不传时纯
+  /// monospace 显示。
+  Widget buildCodeBlock(BuildContext context, CodeBlockNode node) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final highlighter = codeBlockHighlighter ?? defaultCodeBlockHighlighter;
+    final langLabel = (node.language ?? 'TEXT').toUpperCase();
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 顶栏:语言 + 复制按钮
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+            child: Row(
+              children: [
+                Text(
+                  langLabel,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: scheme.onSurfaceVariant,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const Spacer(),
+                _CopyButton(code: node.code),
+              ],
+            ),
+          ),
+          // 分隔线
+          Container(
+            height: 1,
+            color: scheme.outlineVariant.withValues(alpha: 0.3),
+          ),
+          // 主体:横向滚动 + highlighter widget
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.all(12),
+            child: highlighter(context, node.code, node.language),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 代码块右上角的"复制"按钮,带 1.5s "已复制" 反馈。
+class _CopyButton extends StatefulWidget {
+  const _CopyButton({required this.code});
+  final String code;
+
+  @override
+  State<_CopyButton> createState() => _CopyButtonState();
+}
+
+class _CopyButtonState extends State<_CopyButton> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.code));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return TextButton.icon(
+      onPressed: _copy,
+      icon: Icon(
+        _copied ? Icons.check_rounded : Icons.copy_rounded,
+        size: 14,
+      ),
+      label: Text(
+        _copied ? 'Copied' : 'Copy',
+        style: const TextStyle(fontSize: 11),
+      ),
+      style: TextButton.styleFrom(
+        foregroundColor: _copied ? scheme.primary : scheme.onSurfaceVariant,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        minimumSize: const Size(0, 28),
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }

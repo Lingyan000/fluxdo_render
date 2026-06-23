@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../node/node.dart';
 import '../parser/paragraph_parser.dart';
+import '../render/code_block_handler.dart';
 import '../render/emoji_handler.dart';
 import '../render/image_handler.dart';
 import '../render/link_handler.dart';
@@ -10,10 +11,10 @@ import '../render/node_factory.dart';
 
 /// 帖子渲染入口 widget。
 ///
-/// 当前作用域(阶段 1):段落 + 标题 + 列表 + 引用块 + 分割线 + 行内
-/// em/strong/br/text/link/inline_code/emoji/mention/image。
-/// 其他节点(code_block / quote_card / spoiler 等)按 docs/node_priority.md
-/// 顺序在后续阶段实现。未识别块级会 fallback 成段落 + textContent。
+/// 当前作用域(阶段 1):段落 + 标题 + 列表 + 引用块 + 分割线 + 代码块 +
+/// 行内 em/strong/br/text/link/inline_code/emoji/mention/image。
+/// 其他节点(quote_card / spoiler 等)按 docs/node_priority.md 顺序在
+/// 后续阶段实现。未识别块级会 fallback 成段落 + textContent。
 class FluxdoRender extends StatefulWidget {
   const FluxdoRender({
     super.key,
@@ -24,6 +25,7 @@ class FluxdoRender extends StatefulWidget {
     this.emojiImageBuilder,
     this.mentionTapHandler,
     this.imageContentBuilder,
+    this.codeBlockHighlighter,
   });
 
   /// Discourse cooked HTML 内容。
@@ -51,6 +53,10 @@ class FluxdoRender extends StatefulWidget {
   /// 内容图片 builder —— 主项目注入,走主项目的 discourseImageProvider
   /// + gallery + lightbox + 长按菜单 等完整体系。
   final ImageContentBuilder? imageContentBuilder;
+
+  /// 代码块高亮 builder —— 主项目注入,走 HighlighterService(highlight.js)
+  /// + Mermaid 等。不传则纯 monospace。
+  final CodeBlockHighlighter? codeBlockHighlighter;
 
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
@@ -88,6 +94,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           emojiImageBuilder: widget.emojiImageBuilder,
           mentionTapHandler: widget.mentionTapHandler,
           imageContentBuilder: widget.imageContentBuilder,
+          codeBlockHighlighter: widget.codeBlockHighlighter,
           totalImagesInPost: _totalImagesInPost,
         );
     if (_nodes.isEmpty) {

@@ -102,6 +102,7 @@ void main() {
         ListNode() => 'list',
         BlockquoteNode() => 'blockquote',
         HorizontalRuleNode() => 'hr',
+        CodeBlockNode() => 'code',
       };
       expect(label, 'paragraph');
     });
@@ -365,6 +366,31 @@ void main() {
       expect(a.toString(), contains('foo.png'));
       const b = ImageRun(src: 'foo.png', width: 100, height: 50);
       expect(b.toString(), contains('100'));
+    });
+  });
+
+  group('CodeBlockNode', () {
+    test('==/hashCode 按 code + language(id 不参与)', () {
+      const a = CodeBlockNode(id: 'b_0', code: 'x', language: 'dart');
+      const b = CodeBlockNode(id: 'b_99', code: 'x', language: 'dart');
+      const c = CodeBlockNode(id: 'b_0', code: 'y', language: 'dart');
+      const d = CodeBlockNode(id: 'b_0', code: 'x', language: 'python');
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a == c, isFalse);
+      expect(a == d, isFalse);
+    });
+
+    test('language 可 null', () {
+      const e = CodeBlockNode(id: 'b_0', code: 'x');
+      expect(e.language, isNull);
+    });
+
+    test('toString 含 id + language + 字符数', () {
+      const c = CodeBlockNode(id: 'b_3', code: 'hello', language: 'dart');
+      expect(c.toString(), contains('b_3'));
+      expect(c.toString(), contains('dart'));
+      expect(c.toString(), contains('5 chars'));
     });
   });
 }
