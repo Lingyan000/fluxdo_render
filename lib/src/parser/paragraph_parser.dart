@@ -76,6 +76,10 @@ class ParagraphParser {
       switch (node) {
         case dom.Element():
           final tag = node.localName?.toLowerCase() ?? '';
+          // 顶层裸 <br>:Discourse cooked 经常在 block 之间塞 <br> 作为
+          // markdown 段间格式残留(浏览器里因为 block 之间已有 margin 而
+          // 几乎不可见),不能让它单起一行 ParagraphNode 占额外高度。
+          if (tag == 'br' && pendingInlines.isEmpty) continue;
           if (_isInlineTag(tag)) {
             // inline 元素 → 累积到 pending
             _collectInline(node, pendingInlines, nextImageIndex);
