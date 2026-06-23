@@ -57,3 +57,35 @@ class ParagraphNode extends BlockNode {
   @override
   String toString() => 'ParagraphNode($id, ${inlines.length} inlines)';
 }
+
+/// 标题 — h1/h2/h3/h4/h5/h6,字号由 [level] 决定。
+///
+/// 对应 HTML 中的 `<h1>` - `<h6>`。
+@immutable
+class HeadingNode extends BlockNode {
+  const HeadingNode({
+    required super.id,
+    required this.level,
+    required this.inlines,
+  }) : assert(level >= 1 && level <= 6, 'heading level must be 1..6');
+
+  /// 标题级别,1-6。
+  final int level;
+
+  /// 标题内的行内节点序列。
+  final List<InlineNode> inlines;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HeadingNode &&
+          runtimeType == other.runtimeType &&
+          level == other.level &&
+          listEquals(inlines, other.inlines);
+
+  @override
+  int get hashCode => Object.hash(level, Object.hashAll(inlines));
+
+  @override
+  String toString() => 'HeadingNode($id, h$level, ${inlines.length} inlines)';
+}

@@ -1,10 +1,10 @@
-/// HTML cooked → `List<BlockNode>` 解析器(阶段 1.1 范围)。
+/// HTML cooked → `List<BlockNode>` 解析器(阶段 1 范围)。
 ///
 /// 当前作用域:
-/// - 块级:`<p>`(其他块级标签 fallback 成 ParagraphNode + textContent)
+/// - 块级:`<p>` / `<h1>` - `<h6>`(其他块级标签 fallback 成 ParagraphNode + textContent)
 /// - 行内:文本 / `<em>` / `<i>` / `<strong>` / `<b>` / `<br>`
 ///
-/// 后续阶段会扩展 heading / list / blockquote / 等。
+/// 后续阶段会扩展 list / blockquote / code_block / 等。
 
 library;
 
@@ -64,6 +64,17 @@ class ParagraphParser {
                 }
                 out.add(ParagraphNode(
                   id: nextId(),
+                  inlines: List.unmodifiable(inlines),
+                ));
+              case 'h1' || 'h2' || 'h3' || 'h4' || 'h5' || 'h6':
+                final level = int.parse(tag.substring(1));
+                final inlines = <InlineNode>[];
+                for (final child in node.nodes) {
+                  _collectInlineFromAnyNode(child, inlines);
+                }
+                out.add(HeadingNode(
+                  id: nextId(),
+                  level: level,
                   inlines: List.unmodifiable(inlines),
                 ));
               default:
