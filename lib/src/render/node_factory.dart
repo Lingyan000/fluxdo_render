@@ -115,6 +115,7 @@ class NodeFactory {
       QuoteCardNode() => buildQuoteCard(context, node),
       SpoilerBlockNode() => buildSpoilerBlock(context, node),
       OneboxNode() => buildOnebox(context, node),
+      DetailsNode() => buildDetails(context, node),
     };
   }
 
@@ -519,6 +520,30 @@ class NodeFactory {
           linkHandler!(context, url);
         }
       },
+    );
+  }
+
+  /// 折叠块渲染 — `<details>`。
+  ///
+  /// 视觉对齐 legacy `details_builder.dart`:
+  ///   外:margin 上下 8 + outline 边框 + 圆角 8
+  ///   头:可点击灰底 + 旋转箭头(0 → 0.25 turns)+ summary 文本
+  ///   体:折叠时不构建(懒);展开 heightFactor 0→1 动画 200ms easeInOut
+  ///
+  /// 简化:不做 legacy 的 HtmlChunker 渐进式分块(子包 parser 比 fwfh
+  /// 快 10x,首屏不卡顿,无必要)。
+  Widget buildDetails(BuildContext context, DetailsNode node) {
+    // 子节点递归走 compact factory(消除嵌套 paragraph 多余 margin)
+    final childFactory = _compactCopy();
+    return _DetailsWidget(
+      summary: node.summary,
+      initiallyOpen: node.initiallyOpen,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final c in node.children) childFactory.build(context, c),
+        ],
+      ),
     );
   }
 }
@@ -983,6 +1008,169 @@ class _CopyButtonState extends State<_CopyButton> {
         minimumSize: const Size(0, 28),
         visualDensity: VisualDensity.compact,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+  }
+}
+
+/// 折叠块 stateful 交互 widget。
+///
+/// 折叠/展开:箭头旋转 0 → 0.25 turn + heightFactor 0 → 1,200ms easeInOut。
+/// **懒构建**:折叠时不渲染 body widget(animation status = dismissed 时
+/// 清掉 child),节省树深 + memory。
+class _DetailsWidget extends StatefulWidget {
+  const _DetailsWidget({
+    required this.summary,
+    required this.body,
+    required this.initiallyOpen,
+  });
+
+  final String summary;
+  final Widget body;
+  final bool initiallyOpen;
+
+  @override
+  State<_DetailsWidget> createState() => _DetailsWidgetState();
+}
+
+class _DetailsWidgetState extends State<_DetailsWidget>
+    with SingleTickerProviderStateMixin {
+  late bool _isOpen;
+  /// 是否构建 body widget(展开中或动画进行中为 true)
+  late bool _buildBody;
+  late AnimationController _controller;
+  late Animation<double> _iconTurns;
+  late Animation<double> _heightFactor;
+
+  @override
+  void initState() {
+    super.initState();
+    _isOpen = widget.initiallyOpen;
+    _buildBody = _isOpen;
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _controller.addStatusListener(_handleAnimationStatus);
+    _iconTurns = Tween<double>(begin: 0.0, end: 0.25).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    _heightFactor = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    );
+    if (_isOpen) _controller.value = 1.0;
+  }
+
+  @override
+  void dispose() {
+    _controller.removeStatusListener(_handleAnimationStatus);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) {
+      setState(() => _buildBody = false);
+    }
+  }
+
+  void _toggle() {
+    setState(() {
+      _isOpen = !_isOpen;
+      if (_isOpen) {
+        _buildBody = true;
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final borderColor = isDark
+        ? scheme.outlineVariant.withValues(alpha: 0.5)
+        : scheme.outline.withValues(alpha: 0.3);
+    final headerBgColor = isDark
+        ? scheme.surfaceContainerHigh
+        : scheme.surfaceContainerLow;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: borderColor, width: 1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 头:可点击 + 旋转箭头 + summary
+            Material(
+              color: headerBgColor,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(7),
+              ),
+              child: InkWell(
+                onTap: _toggle,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      RotationTransition(
+                        turns: _iconTurns,
+                        child: Icon(
+                          Icons.chevron_right,
+                          size: 20,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          widget.summary.isEmpty ? 'Details' : widget.summary,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // 体:折叠时不构建,展开动画
+            if (_buildBody)
+              ClipRect(
+                child: AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) => Align(
+                    alignment: Alignment.topLeft,
+                    heightFactor: _heightFactor.value,
+                    child: child,
+                  ),
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: scheme.surface,
+                      border: Border(
+                        top: BorderSide(color: borderColor, width: 1),
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: widget.body,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

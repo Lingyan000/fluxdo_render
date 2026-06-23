@@ -187,6 +187,9 @@ class ParagraphParser {
                   id: nextId(),
                   children: _parseBlocks(node.nodes, nextId, nextImageIndex),
                 ));
+              case 'details':
+                // 折叠块:<details><summary>标题</summary>内容</details>
+                out.add(_parseDetails(node, nextId, nextImageIndex));
               // 注意:div.lightbox-wrapper 在块级 switch 之前已被截获
               // 走 pendingInlines 流(不会到达这里),目的是让连续多张
               // lightbox 图合并到同一 ParagraphNode,消除 1em+1em 段间距。
@@ -423,6 +426,37 @@ class ParagraphParser {
       thumbnailUrl: thumbnailUrl.isEmpty ? null : thumbnailUrl,
       sourceName: sourceName.isEmpty ? null : sourceName,
       rawHtml: asideEl.outerHtml,
+    );
+  }
+
+  /// 解析 `<details>` 为 DetailsNode。
+  ///
+  /// - summary:`<summary>` 子节点的 textContent(trim)
+  /// - children:除 summary 外所有节点递归 _parseBlocks
+  /// - initiallyOpen:`<details open>` 属性
+  DetailsNode _parseDetails(
+    dom.Element detailsEl,
+    String Function() nextId,
+    int Function() nextImageIndex,
+  ) {
+    final summaryEl = detailsEl.querySelector('summary');
+    final summary = summaryEl?.text.trim() ?? '';
+
+    // 收集非 summary 子节点用于递归解析
+    final bodyNodes = <dom.Node>[];
+    for (final c in detailsEl.nodes) {
+      if (c is dom.Element && c.localName?.toLowerCase() == 'summary') {
+        continue;
+      }
+      bodyNodes.add(c);
+    }
+    final children = _parseBlocks(bodyNodes, nextId, nextImageIndex);
+
+    return DetailsNode(
+      id: nextId(),
+      summary: summary,
+      children: children,
+      initiallyOpen: detailsEl.attributes.containsKey('open'),
     );
   }
 

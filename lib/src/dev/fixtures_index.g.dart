@@ -160,6 +160,48 @@ no syntax highlight needed
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''details/nested.html''',
+    html: r'''<details>
+<summary>外层</summary>
+<p>外层内容。</p>
+<details>
+<summary>内层</summary>
+<p>内层内容。</p>
+</details>
+</details>
+''',
+    notes: r'''两层嵌套 <details>。验证 _parseDetails 递归 + buildDetails 递归 build,
+内层独立展开/折叠不互相影响。''',
+    source: r'''https://example.com/t/sample/1/details3''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''details/open_with_rich.html''',
+    html: r'''<details open>
+<summary>默认展开</summary>
+<p>这是 <details open> 默认展开形态。</p>
+<p>含多段 + <strong>样式</strong> + <a href="https://example.com">链接</a>。</p>
+</details>
+''',
+    notes: r'''<details open> 默认展开 + 内含富文本(多段 + 样式 + 链接)。
+验证 initiallyOpen=true 时 buildBody 立即构造 + 子节点递归走 compact factory
+(消除嵌套 paragraph 多余 margin)。''',
+    source: r'''https://example.com/t/sample/1/details2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''details/simple_closed.html''',
+    html: r'''<details>
+<summary>点我展开</summary>
+<p>这是被折叠的内容,默认折叠状态。</p>
+</details>
+''',
+    notes: r'''最简形态:<details> 默认折叠,只显示标题栏 + 旋转箭头。
+点击箭头展开,heightFactor 200ms easeInOut。''',
+    source: r'''https://example.com/t/sample/1/details1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''emoji/custom_emoji.html''',
     html: r'''<p>自定义表情 <img src="https://cdn.example.com/uploads/custom/bili_114.gif" alt=":bili_114:" class="emoji emoji-custom" title=":bili_114:"> 来自 Discourse。</p>
 ''',

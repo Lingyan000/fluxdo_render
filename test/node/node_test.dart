@@ -106,6 +106,7 @@ void main() {
         QuoteCardNode() => 'quoteCard',
         SpoilerBlockNode() => 'spoiler',
         OneboxNode() => 'onebox',
+        DetailsNode() => 'details',
       };
       expect(label, 'paragraph');
     });

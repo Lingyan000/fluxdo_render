@@ -512,6 +512,60 @@ class OneboxNode extends BlockNode {
       'OneboxNode($id, $kind${url == null ? "" : ", $url"})';
 }
 
+/// 折叠块 — `<details><summary>标题</summary>内容</details>`。
+///
+/// 视觉对齐 legacy `details_builder.dart`:
+///   外:margin 上下 8 + outline 边框 + 圆角 8
+///   头:可点击灰底 + 旋转箭头 + summary 文字
+///   体:折叠时不构建,展开后递归渲染 [children];动画 200ms easeInOut
+///
+/// `<details open>` 默认展开;无 `open` 默认折叠。
+///
+/// **简化**:
+/// - summary 只持纯文本(legacy 也只用 text,不渲染嵌套样式)
+/// - 不做"渐进式分块渲染"(legacy 用 HtmlChunker 切长内容降低首屏卡顿;
+///   子包 parser 速度比 legacy 快 10x,无必要分块)
+@immutable
+class DetailsNode extends BlockNode {
+  const DetailsNode({
+    required super.id,
+    required this.summary,
+    required this.children,
+    this.initiallyOpen = false,
+  });
+
+  /// summary 文本(`<summary>` 子节点的 textContent)。
+  /// 空时主项目 / 子包应用本地化兜底标签("详情"/"Details")。
+  final String summary;
+
+  /// `<details>` 内除 summary 外的所有块级子节点(递归 parse)。
+  final List<BlockNode> children;
+
+  /// `<details open>` 属性,默认 false。
+  final bool initiallyOpen;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DetailsNode &&
+          runtimeType == other.runtimeType &&
+          summary == other.summary &&
+          initiallyOpen == other.initiallyOpen &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hash(
+        summary,
+        initiallyOpen,
+        Object.hashAll(children),
+      );
+
+  @override
+  String toString() =>
+      'DetailsNode($id, "$summary", ${children.length} children'
+      '${initiallyOpen ? ", open" : ""})';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -577,6 +631,10 @@ int countImageRuns(List<BlockNode> nodes) {
       case OneboxNode():
         // onebox 内部图片(thumbnail / favicon)不计入 ImageRun gallery
         break;
+      case DetailsNode(:final children):
+        for (final c in children) {
+          scanBlock(c);
+        }
     }
   }
 
