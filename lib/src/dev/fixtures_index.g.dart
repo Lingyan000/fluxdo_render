@@ -316,6 +316,51 @@ WidgetSpan 渲染 + 1em 字号(跟 baseStyle 一致)。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''footnote/inline_with_other.html''',
+    html: r'''<p>含 <strong>加粗</strong>、<em>斜体</em>、<code>code</code> 和脚注 <sup class="footnote-ref"><a href="#fn:x">1</a></sup> 的混合段。</p>
+<section class="footnotes">
+<ol class="footnotes-list">
+<li id="fn:x"><p>脚注里也能有 <a href="https://example.com">链接</a>。<a class="footnote-backref" href="#x">↩︎</a></p></li>
+</ol>
+</section>
+''',
+    notes: r'''脚注引用与 strong / em / inline_code / a 混排;脚注正文含 a 链接。
+无 hr.footnotes-sep(部分 cooked 形态省略)。''',
+    source: r'''https://example.com/t/sample/1/fn3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''footnote/multiple_refs.html''',
+    html: r'''<p>第一个 <sup class="footnote-ref"><a href="#fn:a">1</a></sup>,第二个 <sup class="footnote-ref"><a href="#fn:b">2</a></sup>,第三个 <sup class="footnote-ref"><a href="#fn:c">3</a></sup>。</p>
+<hr class="footnotes-sep">
+<section class="footnotes">
+<ol class="footnotes-list">
+<li id="fn:a"><p>脚注 A 的内容。<a class="footnote-backref" href="#x">↩︎</a></p></li>
+<li id="fn:b"><p>脚注 B 的内容,可以含 <strong>样式</strong>。<a class="footnote-backref" href="#x">↩︎</a></p></li>
+<li id="fn:c"><p>脚注 C。<a class="footnote-backref" href="#x">↩︎</a></p></li>
+</ol>
+</section>
+''',
+    notes: r'''3 个脚注引用,内容含 inline 样式;验证多 ref 各自取对应 content。''',
+    source: r'''https://example.com/t/sample/1/fn2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''footnote/single_ref.html''',
+    html: r'''<p>正文中引用脚注 <sup class="footnote-ref"><a href="#fn:1">1</a></sup> 一下。</p>
+<hr class="footnotes-sep">
+<section class="footnotes">
+<ol class="footnotes-list">
+<li id="fn:1"><p>这是脚注正文。 <a class="footnote-backref" href="#fnref:1">↩︎</a></p></li>
+</ol>
+</section>
+''',
+    notes: r'''单个脚注引用 + section.footnotes 隐藏占位。
+渲染:正文段 + 蓝色 [1] 上标(点击调 footnoteTapHandler)+ section 隐藏。''',
+    source: r'''https://example.com/t/sample/1/fn1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''heading/h1_h2_h3.html''',
     html: r'''<h1>顶层标题</h1>
 <h2>二级标题</h2>

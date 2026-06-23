@@ -16,7 +16,13 @@ import 'package:html/parser.dart' as html_parser;
 import '../node/node.dart';
 
 class ParagraphParser {
-  const ParagraphParser();
+  ParagraphParser();
+
+  /// 本次 parse 调用中收集的 fnId → contentHtml 映射。
+  /// `parse` 入口扫一次 fragment 填,sup.footnote-ref 解析时直接 lookup。
+  /// **注意:不是线程安全 — ParagraphParser 不应被多线程同时调用同一实例。**
+  /// 实践上每次 parse 都会重置,无需调用方关心。
+  Map<String, String> _footnotes = const {};
 
   /// 把 cooked HTML 解析成 BlockNode 序列。
   ///
@@ -45,10 +51,53 @@ class ParagraphParser {
     var imageIndexCounter = 0;
     int nextImageIndex() => imageIndexCounter++;
 
+    // 一次性扫整个 fragment 建立 fnId → contentHtml 映射,
+    // 后续 sup.footnote-ref 解析时直接 lookup(避免 inline 节点再回查)。
+    _footnotes = _collectFootnoteContents(fragment);
+
     return _parseBlocks(fragment.nodes, nextId, nextImageIndex);
   }
 
-  /// 把一组 DOM 节点解析成 BlockNode 序列。
+  /// 扫整个 fragment 收集 `section.footnotes` / `ol.footnotes-list` 下的
+  /// 所有 `<li id="fnId">` → contentHtml 映射。
+  ///
+  /// contentHtml 处理:
+  /// - 移除 backref(`<a class="footnote-backref">↩︎</a>`)
+  /// - 若整体被 `<p>...</p>` 单层包裹,剥掉外层 p(legacy 同处理)
+  /// - trim
+  ///
+  /// 找不到任何 footnotes section 时返回空 map。
+  Map<String, String> _collectFootnoteContents(dom.DocumentFragment fragment) {
+    final out = <String, String>{};
+    // 收 section.footnotes 或 ol.footnotes-list 内所有 li
+    final candidates = <dom.Element>[
+      ...fragment.querySelectorAll('section.footnotes li'),
+      ...fragment.querySelectorAll('ol.footnotes-list li'),
+    ];
+    for (final li in candidates) {
+      final id = li.attributes['id']?.trim();
+      if (id == null || id.isEmpty) continue;
+      if (out.containsKey(id)) continue;
+      var html = li.innerHtml;
+      // 去掉 backref(可能在末尾,可能含 emoji ↩)
+      html = html.replaceAll(
+        RegExp(
+          r'<a[^>]*class="[^"]*footnote-backref[^"]*"[^>]*>[\s\S]*?</a>',
+          caseSensitive: false,
+        ),
+        '',
+      );
+      // 剥掉单层 <p>...</p>
+      html = html
+          .replaceAll(RegExp(r'^\s*<p>\s*'), '')
+          .replaceAll(RegExp(r'\s*</p>\s*$'), '')
+          .trim();
+      if (html.isNotEmpty) out[id] = html;
+    }
+    return out;
+  }
+
+
   /// 顶层 parse 调它处理 fragment.nodes;blockquote 递归调它处理 inner。
   ///
   /// 处理流程:
@@ -203,6 +252,10 @@ class ParagraphParser {
               case 'details':
                 // 折叠块:<details><summary>标题</summary>内容</details>
                 out.add(_parseDetails(node, nextId, nextImageIndex));
+              case 'section' when node.classes.contains('footnotes'):
+                // 脚注列表区(隐藏占位 — 真正的脚注内容已在 _collectFootnoteContents
+                // 提前 inline 到 FootnoteRefRun)
+                out.add(FootnotesSectionNode(id: nextId()));
               // 注意:div.lightbox-wrapper 在块级 switch 之前已被截获
               // 走 pendingInlines 流(不会到达这里),目的是让连续多张
               // lightbox 图合并到同一 ParagraphNode,消除 1em+1em 段间距。
@@ -761,9 +814,28 @@ class ParagraphParser {
         // 短期方案:展平内容,不加样式(留 inline 节点扩展给阶段 2)。
         out.addAll(children);
       case 'sup' || 'sub':
-        // <sup> / <sub> 上下标,Discourse 主要在 footnote ref / 化学式。
-        // 子包不支持 baseline 偏移,降级 = 展平内容,不上标(信息保留,
-        // 视觉差一档)。阶段 2 加 SuperscriptRun / SubscriptRun。
+        // sup.footnote-ref 单独识别为 FootnoteRefRun(主项目可点弹脚注)。
+        // 形态:<sup class="footnote-ref"><a href="#fn:abc">1</a></sup>
+        if (tag == 'sup' && el.classes.contains('footnote-ref')) {
+          final aEl = el.querySelector('a');
+          final href = aEl?.attributes['href']?.trim() ?? '';
+          // 取 a 文本作为编号(legacy 形态可能已是 "1" 也可能已是 "[1]")
+          var number = (aEl?.text ?? '').trim();
+          number = number.replaceAll(RegExp(r'^\[|\]$'), '');
+          // fnId 从 href "#fn:abc" 提取
+          final fnId = href.startsWith('#') ? href.substring(1) : '';
+          if (number.isNotEmpty && fnId.isNotEmpty) {
+            out.add(FootnoteRefRun(
+              number: number,
+              fnId: fnId,
+              contentHtml: _footnotes[fnId],
+            ));
+            return;
+          }
+          // 解析失败 → 展平兜底
+        }
+        // 其他 <sup> / <sub>(化学式等):子包不支持 baseline 偏移,
+        // 降级 = 展平内容,不上标(信息保留,视觉差一档)。
         out.addAll(children);
       case 'a':
         final href = el.attributes['href']?.trim() ?? '';

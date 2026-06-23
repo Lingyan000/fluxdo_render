@@ -39,7 +39,7 @@ void main() {
 
     test('blockquote / list 嵌套递归计数', () {
       // 用真 parser 产生(避免手写 ListItem 复杂)
-      const parser = ParagraphParser();
+      final parser = ParagraphParser();
       final nodes = parser.parse(
         '<p><img src="a.png"></p>'
         '<blockquote><p><img src="b.png"></p></blockquote>'

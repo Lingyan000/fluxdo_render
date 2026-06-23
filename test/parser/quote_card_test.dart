@@ -3,7 +3,7 @@ import 'package:fluxdo_render/src/node/node.dart';
 import 'package:fluxdo_render/src/parser/paragraph_parser.dart';
 
 void main() {
-  const parser = ParagraphParser();
+  final parser = ParagraphParser();
 
   group('parser quote_card 识别', () {
     test('aside.quote 产生 QuoteCardNode', () {

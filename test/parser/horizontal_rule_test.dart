@@ -3,7 +3,7 @@ import 'package:fluxdo_render/src/node/node.dart';
 import 'package:fluxdo_render/src/parser/paragraph_parser.dart';
 
 void main() {
-  const parser = ParagraphParser();
+  final parser = ParagraphParser();
 
   group('parser hr 识别', () {
     test('单独 hr 产生 HorizontalRuleNode', () {

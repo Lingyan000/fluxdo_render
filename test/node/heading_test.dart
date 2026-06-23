@@ -3,7 +3,7 @@ import 'package:fluxdo_render/src/node/node.dart';
 import 'package:fluxdo_render/src/parser/paragraph_parser.dart';
 
 void main() {
-  const parser = ParagraphParser();
+  final parser = ParagraphParser();
 
   group('HeadingNode 数据模型', () {
     test('==/hashCode 按 level + inlines 比较(忽略 id)', () {

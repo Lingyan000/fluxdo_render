@@ -3,7 +3,7 @@ import 'package:fluxdo_render/src/node/node.dart';
 import 'package:fluxdo_render/src/parser/paragraph_parser.dart';
 
 void main() {
-  const parser = ParagraphParser();
+  final parser = ParagraphParser();
 
   group('parser 跳过纯展示元素(svg / d-icon / meta / lb-spacer)', () {
     test('inline <svg> 完全跳过,不留任何 inline', () {

@@ -109,6 +109,7 @@ void main() {
         DetailsNode() => 'details',
         CalloutNode() => 'callout',
         ImageGridNode() => 'imageGrid',
+        FootnotesSectionNode() => 'footnotesSection',
       };
       expect(label, 'paragraph');
     });
@@ -139,6 +140,7 @@ void main() {
               MentionRun() => 'mention',
               ImageRun() => 'image',
               SpoilerRun() => 'spoiler',
+              FootnoteRefRun() => 'footnoteRef',
             },
           )
           .toList();

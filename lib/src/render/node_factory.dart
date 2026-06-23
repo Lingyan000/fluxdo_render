@@ -18,6 +18,7 @@ import '../flatten/inline_flattener.dart';
 import '../node/node.dart';
 import 'code_block_handler.dart';
 import 'emoji_handler.dart';
+import 'footnote_handler.dart';
 import 'image_handler.dart';
 import 'inline_span_text.dart';
 import 'link_handler.dart';
@@ -35,6 +36,7 @@ class NodeFactory {
     this.codeBlockHighlighter,
     this.quoteAvatarBuilder,
     this.oneboxBuilder,
+    this.footnoteTapHandler,
     this.totalImagesInPost = 0,
     this.compact = false,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
@@ -70,6 +72,10 @@ class NodeFactory {
   /// 返回 null 时子包用内置通用卡片(标题 + 描述 + 缩略图)。
   final OneboxBuilder? oneboxBuilder;
 
+  /// 脚注点击 callback,主项目注入弹 popover 显示 contentHtml。
+  /// 不传时用 [defaultFootnoteTapHandler](仅 debugPrint)。
+  final FootnoteTapHandler? footnoteTapHandler;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -98,6 +104,7 @@ class NodeFactory {
       codeBlockHighlighter: codeBlockHighlighter,
       quoteAvatarBuilder: quoteAvatarBuilder,
       oneboxBuilder: oneboxBuilder,
+      footnoteTapHandler: footnoteTapHandler,
       totalImagesInPost: totalImagesInPost,
       compact: true,
     );
@@ -118,6 +125,7 @@ class NodeFactory {
       DetailsNode() => buildDetails(context, node),
       CalloutNode() => buildCallout(context, node),
       ImageGridNode() => buildImageGrid(context, node),
+      FootnotesSectionNode() => const SizedBox.shrink(),
     };
   }
 
@@ -154,6 +162,7 @@ class NodeFactory {
         emojiImageBuilder: emojiImageBuilder,
         mentionTapHandler: mentionTapHandler,
         imageContentBuilder: imageContentBuilder,
+        footnoteTapHandler: footnoteTapHandler,
         totalImagesInPost: totalImagesInPost,
       ),
     );
@@ -185,6 +194,7 @@ class NodeFactory {
         emojiImageBuilder: emojiImageBuilder,
         mentionTapHandler: mentionTapHandler,
         imageContentBuilder: imageContentBuilder,
+        footnoteTapHandler: footnoteTapHandler,
         totalImagesInPost: totalImagesInPost,
       ),
     );
@@ -261,6 +271,7 @@ class NodeFactory {
                   emojiImageBuilder: emojiImageBuilder,
                   mentionTapHandler: mentionTapHandler,
                   imageContentBuilder: imageContentBuilder,
+        footnoteTapHandler: footnoteTapHandler,
                   totalImagesInPost: totalImagesInPost,
                 ),
               ),

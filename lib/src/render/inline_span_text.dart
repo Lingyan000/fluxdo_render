@@ -11,6 +11,7 @@ import 'package:flutter/widgets.dart';
 import '../flatten/inline_flattener.dart';
 import '../node/inline_node.dart';
 import 'emoji_handler.dart';
+import 'footnote_handler.dart';
 import 'image_handler.dart';
 import 'link_handler.dart';
 import 'mention_handler.dart';
@@ -25,6 +26,7 @@ class InlineSpanText extends StatefulWidget {
     this.emojiImageBuilder,
     this.mentionTapHandler,
     this.imageContentBuilder,
+    this.footnoteTapHandler,
     this.totalImagesInPost = 0,
     this.textAlign,
   });
@@ -36,6 +38,7 @@ class InlineSpanText extends StatefulWidget {
   final EmojiImageBuilder? emojiImageBuilder;
   final MentionTapHandler? mentionTapHandler;
   final ImageContentBuilder? imageContentBuilder;
+  final FootnoteTapHandler? footnoteTapHandler;
   final int totalImagesInPost;
   final TextAlign? textAlign;
 
@@ -72,6 +75,7 @@ class _InlineSpanTextState extends State<InlineSpanText> {
       emojiImageBuilder: widget.emojiImageBuilder,
       mentionTapHandler: widget.mentionTapHandler,
       imageContentBuilder: widget.imageContentBuilder,
+      footnoteTapHandler: widget.footnoteTapHandler,
       totalImagesInPost: widget.totalImagesInPost,
       context: context,
     );

@@ -28,6 +28,7 @@ import 'package:flutter/material.dart';
 
 import '../node/inline_node.dart';
 import '../render/emoji_handler.dart';
+import '../render/footnote_handler.dart';
 import '../render/image_handler.dart';
 import '../render/link_handler.dart';
 import '../render/mention_handler.dart';
@@ -66,6 +67,7 @@ class InlineFlattener {
     EmojiImageBuilder? emojiImageBuilder,
     MentionTapHandler? mentionTapHandler,
     ImageContentBuilder? imageContentBuilder,
+    FootnoteTapHandler? footnoteTapHandler,
     int totalImagesInPost = 0,
     BuildContext? context,
   }) {
@@ -75,6 +77,7 @@ class InlineFlattener {
     final emojiBuilder = emojiImageBuilder ?? defaultEmojiImageBuilder;
     final mentionHandler = mentionTapHandler ?? defaultMentionTapHandler;
     final imageBuilder = imageContentBuilder ?? defaultImageContentBuilder;
+    final footnoteHandler = footnoteTapHandler ?? defaultFootnoteTapHandler;
     final emojiBaseSize = baseStyle.fontSize ?? 14;
     for (final node in inlines) {
       children.add(_toSpan(
@@ -83,6 +86,7 @@ class InlineFlattener {
         emojiBuilder,
         mentionHandler,
         imageBuilder,
+        footnoteHandler,
         emojiBaseSize,
         totalImagesInPost,
         context,
@@ -101,6 +105,7 @@ class InlineFlattener {
     EmojiImageBuilder emojiBuilder,
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
+    FootnoteTapHandler footnoteHandler,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -115,6 +120,7 @@ class InlineFlattener {
           emojiBuilder,
           mentionHandler,
           imageBuilder,
+          footnoteHandler,
           emojiBaseSize,
           totalImagesInPost,
           context,
@@ -130,6 +136,7 @@ class InlineFlattener {
     EmojiImageBuilder emojiBuilder,
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
+    FootnoteTapHandler footnoteHandler,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -149,6 +156,7 @@ class InlineFlattener {
             emojiBuilder,
             mentionHandler,
             imageBuilder,
+            footnoteHandler,
             emojiBaseSize,
             totalImagesInPost,
             context,
@@ -164,6 +172,7 @@ class InlineFlattener {
             emojiBuilder,
             mentionHandler,
             imageBuilder,
+            footnoteHandler,
             emojiBaseSize,
             totalImagesInPost,
             context,
@@ -182,6 +191,7 @@ class InlineFlattener {
           emojiBuilder,
           mentionHandler,
           imageBuilder,
+          footnoteHandler,
           emojiBaseSize,
           totalImagesInPost,
           context,
@@ -218,10 +228,16 @@ class InlineFlattener {
           emojiBuilder,
           mentionHandler,
           imageBuilder,
+          footnoteHandler,
           emojiBaseSize,
           totalImagesInPost,
           context,
           recognizers,
+        ),
+      FootnoteRefRun() => _buildFootnoteRefSpan(
+          node,
+          footnoteHandler,
+          context,
         ),
     };
   }
@@ -233,6 +249,7 @@ class InlineFlattener {
     EmojiImageBuilder emojiBuilder,
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
+    FootnoteTapHandler footnoteHandler,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -264,6 +281,7 @@ class InlineFlattener {
         emojiBuilder,
         mentionHandler,
         imageBuilder,
+        footnoteHandler,
         emojiBaseSize,
         totalImagesInPost,
         context,
@@ -486,6 +504,7 @@ class InlineFlattener {
     EmojiImageBuilder emojiBuilder,
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
+    FootnoteTapHandler footnoteHandler,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -499,6 +518,7 @@ class InlineFlattener {
       emojiBuilder,
       mentionHandler,
       imageBuilder,
+      footnoteHandler,
       emojiBaseSize,
       totalImagesInPost,
       context,
@@ -507,6 +527,57 @@ class InlineFlattener {
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: _SpoilerInlineWidget(spans: spans),
+    );
+  }
+
+  /// 脚注引用渲染:`[N]` 蓝色上标 + 点击调主项目 [footnoteTapHandler]
+  /// 弹 popover(子包不依赖 popover 包)。
+  ///
+  /// 视觉对齐 legacy `_FootnoteRefWidget`:
+  ///   Padding(horizontal 2, vertical 6) + Transform.translate(0, -3)
+  ///   蓝色 / fontSize 11 / w600 / height 1
+  WidgetSpan _buildFootnoteRefSpan(
+    FootnoteRefRun node,
+    FootnoteTapHandler footnoteHandler,
+    BuildContext? context,
+  ) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: _FootnoteRefWidget(
+        node: node,
+        handler: footnoteHandler,
+      ),
+    );
+  }
+}
+
+/// 行内脚注引用 widget。
+class _FootnoteRefWidget extends StatelessWidget {
+  const _FootnoteRefWidget({required this.node, required this.handler});
+  final FootnoteRefRun node;
+  final FootnoteTapHandler handler;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: () => handler(context, node.fnId, node.contentHtml),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+        child: Transform.translate(
+          offset: const Offset(0, -3),
+          child: Text(
+            '[${node.number}]',
+            style: TextStyle(
+              color: scheme.primary,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              height: 1,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

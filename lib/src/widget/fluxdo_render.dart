@@ -21,7 +21,7 @@ class FluxdoRender extends StatefulWidget {
   const FluxdoRender({
     super.key,
     required this.cookedHtml,
-    this.parser = const ParagraphParser(),
+    this.parser,
     this.factory,
     this.linkHandler,
     this.emojiImageBuilder,
@@ -37,7 +37,7 @@ class FluxdoRender extends StatefulWidget {
 
   /// 解析器,默认是 ParagraphParser。
   /// 后续可注入自定义实现做 dogfood / fixture 测试。
-  final ParagraphParser parser;
+  final ParagraphParser? parser;
 
   /// 节点工厂,默认 NodeFactory()。
   /// 调用方可继承 NodeFactory 做场景化覆盖(用户卡 bio / AI 分享卡 等)。
@@ -95,7 +95,8 @@ class _FluxdoRenderState extends State<FluxdoRender> {
   }
 
   void _reparse() {
-    _nodes = widget.parser.parse(widget.cookedHtml);
+    final parser = widget.parser ?? ParagraphParser();
+    _nodes = parser.parse(widget.cookedHtml);
     _totalImagesInPost = countImageRuns(_nodes);
   }
 

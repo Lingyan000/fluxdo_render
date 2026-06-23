@@ -366,3 +366,61 @@ class SpoilerRun extends InlineNode {
   @override
   String toString() => 'SpoilerRun(${children.length} children)';
 }
+
+/// 脚注引用 — `<sup class="footnote-ref"><a href="#fn-id">N</a></sup>`。
+///
+/// Discourse 用 markdown-it-footnote 渲染,典型 cooked:
+/// ```html
+/// 正文里 <sup class="footnote-ref"><a href="#fn:abc">1</a></sup> 这里。
+/// <hr class="footnotes-sep">
+/// <section class="footnotes">
+///   <ol class="footnotes-list">
+///     <li id="fn:abc"><p>脚注正文 <a class="footnote-backref" href="#fnref:abc">↩︎</a></p></li>
+///   </ol>
+/// </section>
+/// ```
+///
+/// 渲染对齐 legacy `footnote_builder.dart`:
+///   上标蓝字 `[N]`(11px / w600,Transform y-3 抬起视觉为上标)
+///   点击 → popover 显示脚注 [contentHtml]
+///
+/// 子包简化:
+/// - parser 一次性扫 fragment 建 `fnId → contentHtml` 映射,sup 命中时
+///   就把对应 contentHtml 内联到 FootnoteRefRun(避免渲染时再 lookup)
+/// - 子包不依赖 popover,弹窗交给主项目 `footnoteTapHandler` callback;
+///   不传 handler 时点击无反应(同 linkHandler 兜底)
+@immutable
+class FootnoteRefRun extends InlineNode {
+  const FootnoteRefRun({
+    required this.number,
+    required this.fnId,
+    this.contentHtml,
+  });
+
+  /// 脚注编号(`<a>` 文本,典型 "1" / "2",legacy 用 `[N]` 包装显示)。
+  final String number;
+
+  /// 脚注锚点 id(`href="#fn:abc"` 的 `fn:abc`)。给主项目跳转用。
+  final String fnId;
+
+  /// 脚注正文 HTML(parser 从 section.footnotes 内 `<li id="fnId">` 提取,
+  /// 已 strip 末尾 `<a class="footnote-backref">↩︎</a>`)。
+  /// 找不到时 null(罕见 — cooked 损坏或前后段拆开 parse)。
+  final String? contentHtml;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FootnoteRefRun &&
+          runtimeType == other.runtimeType &&
+          number == other.number &&
+          fnId == other.fnId &&
+          contentHtml == other.contentHtml;
+
+  @override
+  int get hashCode => Object.hash(number, fnId, contentHtml);
+
+  @override
+  String toString() =>
+      'FootnoteRefRun(#$number → $fnId${contentHtml == null ? "" : ", ${contentHtml!.length} chars"})';
+}

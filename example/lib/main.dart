@@ -164,7 +164,7 @@ class _FixtureDetail extends StatefulWidget {
 }
 
 class _FixtureDetailState extends State<_FixtureDetail> {
-  static const _parser = ParagraphParser();
+  final _parser = ParagraphParser();
 
   late List<BlockNode> _nodes;
   int _parseUs = 0;
@@ -377,6 +377,8 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       }
     case ImageGridNode():
       buf.writeln('$pad$node');
+    case FootnotesSectionNode():
+      buf.writeln('$pad$node');
   }
 }
 
@@ -421,6 +423,8 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
       for (final c in children) {
         _writeInline(buf, c, indent + 1);
       }
+    case FootnoteRefRun():
+      buf.writeln('$pad$node');
   }
 }
 

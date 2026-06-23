@@ -799,6 +799,30 @@ class ImageGridNode extends BlockNode {
       'ImageGridNode($id, ${images.length} images, cols=$columns, $mode)';
 }
 
+/// 脚注列表区域 — `<section class="footnotes">`。
+///
+/// 视觉:**完全隐藏**(对齐 legacy `buildFootnotesList` / `buildFootnotesSep`
+/// 的 `SizedBox.shrink()`)。脚注正文已在 parser 时被提到 [FootnoteRefRun.contentHtml]
+/// 上,这个节点本身不渲染任何内容,只是占个 BlockNode 位置避免被 fallback
+/// 当作 paragraph 渲染 raw text。
+///
+/// 子包不持脚注 entries(parser 已 inline 化)— 这是个纯占位节点。
+@immutable
+class FootnotesSectionNode extends BlockNode {
+  const FootnotesSectionNode({required super.id});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FootnotesSectionNode && runtimeType == other.runtimeType;
+
+  @override
+  int get hashCode => 0;
+
+  @override
+  String toString() => 'FootnotesSectionNode($id)';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -823,8 +847,9 @@ int countImageRuns(List<BlockNode> nodes) {
         case InlineCodeRun():
         case EmojiRun():
         case MentionRun():
+        case FootnoteRefRun():
           // 这些 inline 节点不会含 ImageRun(MentionRun 的 statusEmoji 是
-          // EmojiRun 不是 ImageRun)
+          // EmojiRun 不是 ImageRun;FootnoteRefRun 只持 content HTML)
           break;
       }
     }
@@ -876,6 +901,9 @@ int countImageRuns(List<BlockNode> nodes) {
         // 网格内 ImageRun 直接计数(它们也是有效的 post 图片,跟 gallery
         // viewer 协作)
         count += images.length;
+      case FootnotesSectionNode():
+        // 脚注区块已被隐藏,不计图
+        break;
     }
   }
 
