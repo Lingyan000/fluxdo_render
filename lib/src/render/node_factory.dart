@@ -124,7 +124,9 @@ class NodeFactory {
   ///
   /// 子类可 override 实现段落级别的定制(如调字号、加 margin)。
   ///
-  /// margin 对齐 legacy(fwfh `_tagP`):`1em 0`(上下各一个 em)。
+  /// margin 对齐 legacy(fwfh `_tagP` `1em 0` + 浏览器 CSS margin-collapsing):
+  /// 用 `em / 2` 做上下 padding,相邻两段累加正好 = `1em`(等同于 CSS
+  /// margin-collapsing 取一份的结果)。直接用 `em` 会让相邻段距离 `2em`。
   /// **[compact] 模式下 margin 为 0**(嵌套在容器内,如 blockquote /
   /// quote_card,容器自己已加 padding,不再叠加)。
   Widget buildParagraph(BuildContext context, ParagraphNode node) {
@@ -132,7 +134,7 @@ class NodeFactory {
     final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
     final em = baseStyle.fontSize ?? 14;
     // image-only 段落(全是 ImageRun / LineBreakRun,无真文字)用更小的
-    // vertical padding。否则文本 1em margin 叠加 image 自身上下 padding,
+    // vertical padding。否则文本 margin 叠加 image 自身上下 padding,
     // 与前后段距离过大,跟 fwfh margin-collapsing 行为差距明显。
     final isImageOnly = node.inlines.isNotEmpty &&
         node.inlines.every((n) => n is ImageRun || n is LineBreakRun);
@@ -140,7 +142,7 @@ class NodeFactory {
         ? 0.0
         : isImageOnly
             ? 4.0
-            : em;
+            : em / 2;
     return Padding(
       padding: EdgeInsets.symmetric(vertical: vertical),
       child: InlineSpanText(
