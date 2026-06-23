@@ -216,6 +216,10 @@ class ParagraphParser {
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——
                 // 比如 <pre><code> 在 code_block 节点实现前,fallback 应该
                 // 是平铺源码,而不是把 <code> 当成 inline code 渲染灰底)。
+                //
+                // 但跳过 skip 元素(svg / d-icon / meta / lb-spacer),
+                // 它们没有有意义的文字内容(只是 UI 占位)。
+                if (_isSkipElement(tag, node)) break;
                 final text = node.text;
                 if (text.trim().isNotEmpty) {
                   out.add(ParagraphNode(
@@ -378,6 +382,10 @@ class ParagraphParser {
     int Function() nextImageIndex,
   ) {
     final tag = el.localName?.toLowerCase() ?? '';
+    // 纯展示 / 占位元素:Discourse cooked 注入的 UI 图标 / 元数据容器,
+    // 不参与文字流。不跳过会进 textContent 当文字渲染(出现 use href
+    // 字面值 / filename 重复 / fa-... 占位文字 等)
+    if (_isSkipElement(tag, el)) return;
     final children = <InlineNode>[];
     for (final child in el.nodes) {
       _collectInlineFromAnyNode(child, children, nextImageIndex);
@@ -389,6 +397,22 @@ class ParagraphParser {
         out.add(StrongRun(children: List.unmodifiable(children)));
       case 'br':
         out.add(const LineBreakRun());
+      case 'ins':
+        // 编辑历史 diff:`<ins>` 是新增。最简降级 = underline em。
+        // legacy 用 .diff-ins 加绿底,留到阶段 2 优化。
+        out.add(EmRun(children: List.unmodifiable(children)));
+      case 'del' || 's':
+        // 编辑历史 diff:`<del>` 是删除。最简降级 = strikethrough。
+        // s 是 HTML5 的"不再相关"语义,视觉跟 del 一致。
+        // 这里复用 EmRun 字段不合适,直接走"包裹文本"形态:展平 children
+        // 加 line-through 是更准确,但 sealed 没"StrikethroughRun"节点。
+        // 短期方案:展平内容,不加样式(留 inline 节点扩展给阶段 2)。
+        out.addAll(children);
+      case 'sup' || 'sub':
+        // <sup> / <sub> 上下标,Discourse 主要在 footnote ref / 化学式。
+        // 子包不支持 baseline 偏移,降级 = 展平内容,不上标(信息保留,
+        // 视觉差一档)。阶段 2 加 SuperscriptRun / SubscriptRun。
+        out.addAll(children);
       case 'a':
         final href = el.attributes['href']?.trim() ?? '';
         if (href.isEmpty) {
@@ -485,9 +509,32 @@ class ParagraphParser {
   }
 
   /// 已支持的 inline 标签集合。
-  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a', 'code', 'img', 'span'};
+  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a', 'code', 'img', 'span', 'ins', 'del', 's', 'sup', 'sub'};
 
   bool _isInlineTag(String tag) => _inlineTags.contains(tag);
+
+  /// 判断元素是否应该**整体跳过**(不渲染、不取 textContent)。
+  ///
+  /// Discourse cooked 里有几类元素仅作 UI 占位,不该出现在文字流:
+  /// - `<svg>`(d-icon / Discourse 自带图标 / lightbox 展开图标 等)
+  /// - `.d-icon`(同上)
+  /// - `.meta`(lightbox 的文件名 + 尺寸 + KB 容器,我们已用结构化字段)
+  /// - `.lb-spacer`(legacy 给 lightbox 之间留间距的固定高度块)
+  ///
+  /// 不跳过时:
+  /// - `<svg><use href="#far-image"/></svg>` 的 textContent 是空,但同
+  ///   段落出现这个会让 paragraph 多出空 inline 噪音
+  /// - `.meta` 的 `<span class="filename">hash</span><span class="informations">1686×128 15.7 KB</span>`
+  ///   会被 fallback textContent 收成 "hash 1686×128 15.7 KB" 字符串,
+  ///   就是用户截图里看到的乱码
+  bool _isSkipElement(String tag, dom.Element el) {
+    if (tag == 'svg') return true;
+    final classes = el.classes;
+    if (classes.contains('d-icon')) return true;
+    if (classes.contains('meta')) return true;
+    if (classes.contains('lb-spacer')) return true;
+    return false;
+  }
 
   /// 把元素子树的所有 text 节点拼成一段(用于 InlineCodeRun)。
   /// 不递归 attribute、不做 trim、保留所有空白。

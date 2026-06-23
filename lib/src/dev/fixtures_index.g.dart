@@ -551,6 +551,28 @@ size 跟父 chip 字号 * 1.2。''',
     edgeCase: true,
   ),
   FixtureEntry(
+    relativePath: r'''paragraph/inline_svg_skip.html''',
+    html: r'''<p>含 <svg class="fa d-icon d-icon-far-image svg-icon" aria-hidden="true"><use href="#far-image"></use></svg> 图标的段落,svg 应该完全跳过,不留任何文字噪音。</p>
+''',
+    notes: r'''inline `<svg>` (Discourse d-icon)应该被 parser 整体跳过。
+不跳过会出现 `<use href="#far-image">` 字面值进 textContent
+形成噪音。''',
+    source: r'''https://example.com/t/sample/1/svg_skip''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''paragraph/ins_del_diff.html''',
+    html: r'''<p>编辑前:这是 <del>旧文本</del> 段落。</p>
+<p>编辑后:这是 <ins>新文本</ins> 段落。</p>
+<p>合并:这是 <del>旧</del><ins>新</ins> 部分。</p>
+''',
+    notes: r'''编辑历史 diff 形态:`<ins>` 新增 / `<del>` 删除。
+阶段 1 简化:ins 降级 EmRun(斜体);del 展平内容(信息保留无样式)。
+阶段 2 应该加 InsertedRun / DeletedRun + 绿/红着色。''',
+    source: r'''https://example.com/t/sample/1/insdel''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
     relativePath: r'''paragraph/link_empty_href.html''',
     html: r'''<p>这是 <a href="">空 href 的 a 标签</a>,应该退化为普通文本。</p>
 <p>这是 <a>无 href 的 a 标签</a>,同样退化。</p>

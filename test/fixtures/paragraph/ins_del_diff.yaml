@@ -1,0 +1,11 @@
+source: https://example.com/t/sample/1/insdel
+fetched_at: 2026-06-23
+primary_node: paragraph
+sha256: 9d7196598c6c3fa853a2e940e16eaf2c8b6d2634dac49146092742ce63ce41e6
+also_contains: []
+edge_case: true
+notes: |
+  编辑历史 diff 形态:`<ins>` 新增 / `<del>` 删除。
+  阶段 1 简化:ins 降级 EmRun(斜体);del 展平内容(信息保留无样式)。
+  阶段 2 应该加 InsertedRun / DeletedRun + 绿/红着色。
+sanitized: true
