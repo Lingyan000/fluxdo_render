@@ -100,6 +100,7 @@ void main() {
         ParagraphNode() => 'paragraph',
         HeadingNode() => 'heading',
         ListNode() => 'list',
+        BlockquoteNode() => 'blockquote',
       };
       expect(label, 'paragraph');
     });
@@ -270,6 +271,43 @@ void main() {
       const i = ListItem(inlines: [TextRun('x')]);
       expect(i.children, isNull);
       expect(i.toString(), isNot(contains('sub-lists')));
+    });
+  });
+
+  group('BlockquoteNode', () {
+    test('==/hashCode 按 children 比较(id 不参与)', () {
+      const a = BlockquoteNode(id: 'b_0', children: [
+        ParagraphNode(id: 'b_1', inlines: [TextRun('x')]),
+      ]);
+      const b = BlockquoteNode(id: 'b_99', children: [
+        ParagraphNode(id: 'b_42', inlines: [TextRun('x')]),
+      ]);
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      const c = BlockquoteNode(id: 'b_0', children: [
+        ParagraphNode(id: 'b_1', inlines: [TextRun('y')]),
+      ]);
+      expect(a == c, isFalse);
+    });
+
+    test('空 children 可构造', () {
+      const e = BlockquoteNode(id: 'b_0', children: []);
+      expect(e.children, isEmpty);
+    });
+
+    test('支持嵌套 BlockquoteNode 作 child', () {
+      const inner = BlockquoteNode(id: 'b_1', children: []);
+      const outer = BlockquoteNode(id: 'b_0', children: [inner]);
+      expect(outer.children[0], isA<BlockquoteNode>());
+    });
+
+    test('toString 含 id + child 数', () {
+      const b = BlockquoteNode(id: 'b_3', children: [
+        ParagraphNode(id: 'b_4', inlines: []),
+        ParagraphNode(id: 'b_5', inlines: []),
+      ]);
+      expect(b.toString(), contains('b_3'));
+      expect(b.toString(), contains('2 children'));
     });
   });
 }

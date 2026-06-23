@@ -168,3 +168,39 @@ class ListNode extends BlockNode {
   String toString() =>
       'ListNode($id, ${ordered ? "ol" : "ul"}, depth=$depth, ${items.length} items)';
 }
+
+/// 引用块 — `<blockquote>`,内部含任意 BlockNode 子节点(支持嵌套)。
+///
+/// 视觉对齐 legacy(`blockquote_builder.dart` 普通引用分支):
+///   margin 上下 8
+///   padding L 12 / 上下 8 / R 12
+///   背景 colorScheme.surfaceContainerHighest @ 0.3
+///   左边 4px outline 竖条
+///   右上 / 右下 圆角 4
+///   字色 onSurfaceVariant + 行高 1.5
+///
+/// **Obsidian Callout**(`[!note]` / `[!warning]` 等)是 Discourse 在
+/// blockquote 内的特殊语法,渲染为带图标的彩色卡片 —— 那是独立节点
+/// (`NodeKind.callout`),阶段 1 不在 scope,parser 暂时把 callout 形态
+/// 当普通 blockquote 处理。
+@immutable
+class BlockquoteNode extends BlockNode {
+  const BlockquoteNode({required super.id, required this.children});
+
+  /// 引用块内部的块级子节点(可嵌套 blockquote / paragraph / list)。
+  final List<BlockNode> children;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BlockquoteNode &&
+          runtimeType == other.runtimeType &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hashAll(children);
+
+  @override
+  String toString() =>
+      'BlockquoteNode($id, ${children.length} children)';
+}

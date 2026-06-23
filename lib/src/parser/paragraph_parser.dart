@@ -34,13 +34,28 @@ class ParagraphParser {
     if (html.isEmpty) return const [];
 
     final fragment = html_parser.parseFragment(html);
-    final out = <BlockNode>[];
-    final pendingInlines = <InlineNode>[];
 
-    // 全局 id counter — 嵌套块级(如 list 内 list)也用这个分配,
+    // 全局 id counter — 嵌套块级(list / blockquote 等)也用这个分配,
     // 保证一次 parse 内的 BlockNode id 全局唯一。
     var idCounter = 0;
     String nextId() => 'b_${idCounter++}';
+
+    return _parseBlocks(fragment.nodes, nextId);
+  }
+
+  /// 把一组 DOM 节点解析成 BlockNode 序列。
+  /// 顶层 parse 调它处理 fragment.nodes;blockquote 递归调它处理 inner。
+  ///
+  /// 处理流程:
+  /// - 块级 element → 直接产 BlockNode
+  /// - inline element / 裸 text → 累积到 pendingInlines,遇到下一个块级
+  ///   或结束时 flush 成 ParagraphNode
+  List<BlockNode> _parseBlocks(
+    Iterable<dom.Node> nodes,
+    String Function() nextId,
+  ) {
+    final out = <BlockNode>[];
+    final pendingInlines = <InlineNode>[];
 
     void flushInlines() {
       if (pendingInlines.isEmpty) return;
@@ -51,12 +66,12 @@ class ParagraphParser {
       pendingInlines.clear();
     }
 
-    for (final node in fragment.nodes) {
+    for (final node in nodes) {
       switch (node) {
         case dom.Element():
           final tag = node.localName?.toLowerCase() ?? '';
           if (_isInlineTag(tag)) {
-            // 顶层 inline 元素 → 累积到 pending
+            // inline 元素 → 累积到 pending
             _collectInline(node, pendingInlines);
           } else {
             flushInlines();
@@ -88,6 +103,12 @@ class ParagraphParser {
                   ordered: tag == 'ol',
                   depth: 0,
                   nextId: nextId,
+                ));
+              case 'blockquote':
+                // blockquote 是块级容器,递归处理内部 BlockNode
+                out.add(BlockquoteNode(
+                  id: nextId(),
+                  children: _parseBlocks(node.nodes, nextId),
                 ));
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,

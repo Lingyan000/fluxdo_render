@@ -29,6 +29,75 @@ const List<FixtureEntry> allFixtures = [
     edgeCase: true,
   ),
   FixtureEntry(
+    relativePath: r'''blockquote/multi_paragraph.html''',
+    html: r'''<blockquote>
+<p>第一段引用。</p>
+<p>第二段引用,跟第一段同属一个 blockquote。</p>
+</blockquote>
+''',
+    notes: r'''多段引用,验证 blockquote 内多个 ParagraphNode 之间 1em 段间距
+仍生效(段落自己有 vertical em padding,blockquote 容器只加外 8px)。''',
+    source: r'''https://example.com/t/sample/1/bq2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''blockquote/nested_three_levels.html''',
+    html: r'''<blockquote>
+<p>外层引用。</p>
+<blockquote>
+<p>中层引用。</p>
+<blockquote>
+<p>最里层引用。</p>
+</blockquote>
+</blockquote>
+</blockquote>
+''',
+    notes: r'''三层嵌套 blockquote。验证 parser 递归 + renderer 递归 build。
+每层都有自己的灰底 + 左竖条,深嵌套时视觉层次清晰。''',
+    source: r'''https://example.com/t/sample/1/bq4''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
+    relativePath: r'''blockquote/simple.html''',
+    html: r'''<blockquote>
+<p>这是一段普通的引用。</p>
+</blockquote>
+''',
+    notes: r'''最基础形态:单 blockquote 含一段 p。验证 BlockquoteNode 解析 +
+灰底 + 左竖条 + 右上下圆角。''',
+    source: r'''https://example.com/t/sample/1/bq1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''blockquote/with_inline_mix.html''',
+    html: r'''<blockquote>
+<p>引用里含 <strong>粗体</strong>、<em>斜体</em>、<code>inline code</code> 和 <a href="https://example.com">链接</a>。</p>
+</blockquote>
+''',
+    notes: r'''引用内含 strong/em/code/link inline 混排。验证 inline 节点在
+blockquote 子段落里正常渲染,字色受 DefaultTextStyle.merge 影响
+(onSurfaceVariant,但 link 仍是 primary 因为 LinkRun 显式设)。''',
+    source: r'''https://example.com/t/sample/1/bq3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''blockquote/with_list_inside.html''',
+    html: r'''<blockquote>
+<p>引用前置说明。</p>
+<ul>
+<li>引用内的列表项 1</li>
+<li>引用内的列表项 2,含 <a href="/x">链接</a></li>
+</ul>
+<p>引用后置说明。</p>
+</blockquote>
+''',
+    notes: r'''引用内含 list:p + ul + p 混合。验证 BlockquoteNode.children 是
+BlockNode 序列,可以包含 ParagraphNode + ListNode 等任意块级类型,
+renderer 通过 build() dispatch 递归。''',
+    source: r'''https://example.com/t/sample/1/bq5''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
     relativePath: r'''code_block/dart_hello_world.html''',
     html: r'''<pre><code class="lang-dart">void main() {
   print('hello');

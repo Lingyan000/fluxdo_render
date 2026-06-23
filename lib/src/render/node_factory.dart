@@ -48,6 +48,7 @@ class NodeFactory {
       ParagraphNode() => buildParagraph(context, node),
       HeadingNode() => buildHeading(context, node),
       ListNode() => buildList(context, node),
+      BlockquoteNode() => buildBlockquote(context, node),
     };
   }
 
@@ -180,6 +181,51 @@ class NodeFactory {
           if (hasChildren)
             for (final sub in item.children!) buildList(context, sub),
         ],
+      ),
+    );
+  }
+
+  /// 引用块渲染 — `<blockquote>`,内部 BlockNode 递归 build。
+  ///
+  /// 样式对齐 legacy(`blockquote_builder.dart` 普通引用分支):
+  ///   margin 上下 8
+  ///   padding L 12 / 上下 8 / R 12
+  ///   背景 colorScheme.surfaceContainerHighest @ 0.3
+  ///   左边 4px outline 竖条
+  ///   右上 / 右下 圆角 4
+  ///
+  /// 子节点用 DefaultTextStyle 注入 onSurfaceVariant + height 1.5,
+  /// 这样子 ParagraphNode 渲染时跟随这个色调(让引用块整体偏次要文本色)。
+  Widget buildBlockquote(BuildContext context, BlockquoteNode node) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        border: Border(
+          left: BorderSide(
+            color: scheme.outline,
+            width: 4,
+          ),
+        ),
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(4),
+          bottomRight: Radius.circular(4),
+        ),
+      ),
+      child: DefaultTextStyle.merge(
+        style: TextStyle(
+          color: scheme.onSurfaceVariant,
+          height: 1.5,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final child in node.children) build(context, child),
+          ],
+        ),
       ),
     );
   }

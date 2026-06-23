@@ -343,6 +343,11 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
           }
         }
       }
+    case BlockquoteNode():
+      buf.writeln('$pad$node');
+      for (final child in node.children) {
+        _writeNode(buf, child, indent + 1);
+      }
   }
 }
 
