@@ -171,13 +171,14 @@ class InlineFlattener {
     );
   }
 
-  /// 行内代码渲染:monospace + 较小字号 + 主题适配灰色字。
+  /// 行内代码渲染:monospace + 较小字号 + 主题色派生灰色字 + 灰底。
   ///
-  /// 样式对齐 legacy `inline_decorator_common.dart::getInlineCodeStyles`:
-  ///   font-family: FiraCode, monospace
-  ///   font-size: 0.85em
-  ///   color: dark=#b0b0b0 / light=#666666
-  ///   background-color: transparent(legacy 用独立 CustomPainter 画灰底圆角)
+  /// 颜色策略:**派生自 ColorScheme**,跟主题统一(legacy 用了固定 hex,
+  /// 我们在子包内主动升级 — 任何品牌色 / 自定义 seed 都自动适配):
+  /// - 字色 ← `colorScheme.onSurfaceVariant`(中性次要文本)
+  /// - 底色 ← `colorScheme.surfaceContainerHighest`(M3 灰底容器)
+  ///
+  /// 字体/字号沿用 legacy:`FiraCode, monospace` + 0.85em。
   ///
   /// **TODO(阶段 5)**:legacy 的 InlineCodePainter 用 CustomPainter +
   /// TextPainter rect 探测,实现灰底**圆角** + **跨行 RRect 合并** +
@@ -189,11 +190,15 @@ class InlineFlattener {
     BuildContext? context, {
     GestureRecognizer? inheritedRecognizer,
   }) {
-    final isDark = context != null &&
-        Theme.of(context).brightness == Brightness.dark;
-    final bg = Paint()
-      ..style = PaintingStyle.fill
-      ..color = isDark ? const Color(0xFF3A3A3A) : const Color(0xFFE8E8E8);
+    // 无 context 时退化到固定 fallback(便于纯 unit test 跳过 widget tree)
+    final scheme = context == null ? null : Theme.of(context).colorScheme;
+    final fgColor = scheme?.onSurfaceVariant;
+    final bgColor = scheme?.surfaceContainerHighest;
+    final bg = bgColor == null
+        ? null
+        : (Paint()
+          ..style = PaintingStyle.fill
+          ..color = bgColor);
     return TextSpan(
       text: text,
       recognizer: inheritedRecognizer,
@@ -201,7 +206,7 @@ class InlineFlattener {
         fontFamily: 'FiraCode',
         fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
         fontSize: _inlineCodeFontSize, // baseStyle 14 → 11.9
-        color: isDark ? const Color(0xFFB0B0B0) : const Color(0xFF666666),
+        color: fgColor,
         background: bg,
       ),
     );

@@ -238,59 +238,71 @@ void main() {
   });
 
   group('InlineCodeRun', () {
-    test('产出 FiraCode + 0.85em 字号 + 灰色字 + 背景(对齐 legacy)', () {
+    testWidgets('light 主题:派生 onSurfaceVariant 字色 + surfaceContainerHighest 背景',
+        (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(brightness: Brightness.light),
+        home: Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox();
+        }),
+      ));
+      final scheme = Theme.of(ctx).colorScheme;
       final result = flattener.flatten(
         [const InlineCodeRun('git status')],
         baseStyle,
+        context: ctx,
       );
       final span = result.span.children![0] as TextSpan;
       expect(span.text, 'git status');
-      // legacy: font-family: FiraCode, monospace
       expect(span.style?.fontFamily, 'FiraCode');
       expect(span.style?.fontFamilyFallback, ['monospace', 'Menlo', 'Courier']);
-      // legacy: font-size: 0.85em → 14 * 0.85 ≈ 11.9
+      // 0.85em
       expect(span.style?.fontSize, closeTo(11.9, 0.01));
-      // legacy: color: #666666 (light)
-      expect(
-        span.style?.color?.toARGB32(),
-        const Color(0xFF666666).toARGB32(),
-      );
-      // 灰底:阶段 5 前用 TextStyle.background 占位(legacy 用 CustomPainter)
+      // 派生:onSurfaceVariant / surfaceContainerHighest
+      expect(span.style?.color, scheme.onSurfaceVariant);
       expect(span.style?.background, isNotNull);
       expect(
         span.style?.background?.color.toARGB32(),
-        const Color(0xFFE8E8E8).toARGB32(),
+        scheme.surfaceContainerHighest.toARGB32(),
       );
     });
 
-    testWidgets('dark 主题用深灰底 + 浅灰字', (tester) async {
-      late BuildContext capturedContext;
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: ThemeData(brightness: Brightness.dark),
-          home: Builder(
-            builder: (ctx) {
-              capturedContext = ctx;
-              return const SizedBox();
-            },
-          ),
-        ),
-      );
+    testWidgets('dark 主题也走派生(颜色自动跟随)', (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark),
+        home: Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox();
+        }),
+      ));
+      final scheme = Theme.of(ctx).colorScheme;
       final result = flattener.flatten(
         [const InlineCodeRun('x')],
         baseStyle,
-        context: capturedContext,
+        context: ctx,
       );
       final span = result.span.children![0] as TextSpan;
-      // legacy: color: #b0b0b0 (dark)
-      expect(
-        span.style?.color?.toARGB32(),
-        const Color(0xFFB0B0B0).toARGB32(),
-      );
+      expect(span.style?.color, scheme.onSurfaceVariant);
       expect(
         span.style?.background?.color.toARGB32(),
-        const Color(0xFF3A3A3A).toARGB32(),
+        scheme.surfaceContainerHighest.toARGB32(),
       );
+    });
+
+    test('无 context 时 color/background 退化为 null', () {
+      final result = flattener.flatten(
+        [const InlineCodeRun('x')],
+        baseStyle,
+      );
+      final span = result.span.children![0] as TextSpan;
+      expect(span.style?.color, isNull);
+      expect(span.style?.background, isNull);
+      // 字体/字号仍生效
+      expect(span.style?.fontFamily, 'FiraCode');
+      expect(span.style?.fontSize, closeTo(11.9, 0.01));
     });
 
     test('与 link / text 混排顺序保留', () {
