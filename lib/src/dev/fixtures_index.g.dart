@@ -98,6 +98,72 @@ renderer 通过 build() dispatch 递归。''',
     edgeCase: true,
   ),
   FixtureEntry(
+    relativePath: r'''callout/foldable_closed_danger.html''',
+    html: r'''<blockquote>
+<p>[!danger]- 不要点击<br>
+这里有一个会触发宇宙重置的按钮,默认折叠,提醒用户慎重展开。</p>
+</blockquote>
+''',
+    notes: r'''[!danger]- 可折叠 + 默认折叠。
+渲染:红色 + dangerous 图标 + 标题 "不要点击" + 未旋转的箭头 + 内容隐藏。''',
+    source: r'''https://example.com/t/sample/1/callout4''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''callout/foldable_open_tip.html''',
+    html: r'''<blockquote>
+<p>[!tip]+ 进阶技巧<br>
+你可以通过 <code>--update-goldens</code> 刷新 golden 基线。</p>
+<ul>
+<li>不要在 CI 上加该参数</li>
+<li>commit 前检查 diff</li>
+</ul>
+</blockquote>
+''',
+    notes: r'''[!tip]+ 可折叠 + 默认展开。
+渲染:teal + tips_and_updates 图标 + 标题 "进阶技巧" + 旋转过的展开箭头
++ 一段含 inline code 的内容 + 无序列表。''',
+    source: r'''https://example.com/t/sample/1/callout3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''callout/simple_note.html''',
+    html: r'''<blockquote>
+<p>[!note]<br>
+这是一段说明,提醒读者注意。</p>
+</blockquote>
+''',
+    notes: r'''最简形态:[!note] 不带折叠标记、不带自定义标题。
+渲染:蓝色 + edit_note 图标 + 默认标题 "Note",一行正文。''',
+    source: r'''https://example.com/t/sample/1/callout1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''callout/unknown_type.html''',
+    html: r'''<blockquote>
+<p>[!xyz]<br>
+未知类型,应该走灰色兜底,标题首字母大写 "Xyz"。</p>
+</blockquote>
+''',
+    notes: r'''未知类型 [!xyz]:CalloutKind.unknown + 灰色 + format_quote 图标 +
+typeRaw 首字母大写作为默认标题。''',
+    source: r'''https://example.com/t/sample/1/callout5''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''callout/warning_with_title.html''',
+    html: r'''<blockquote>
+<p>[!warning] 操作不可逆<br>
+请在执行前确认你已经备份了数据库。</p>
+<p>本操作会清空所有 cookies。</p>
+</blockquote>
+''',
+    notes: r'''[!warning] + 自定义标题(覆盖默认 "Warning")+ 多段正文。
+渲染:橙色 + warning_amber 图标 + 标题 "操作不可逆" + 两段内容。''',
+    source: r'''https://example.com/t/sample/1/callout2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''code_block/dart_hello_world.html''',
     html: r'''<pre><code class="lang-dart">void main() {
   print('hello');
@@ -425,6 +491,64 @@ HTML5 不允许 p 含 div,package:html 会自动闭合 p,所以 wrapper 实际
 填到 ImageRun.width/height,fallback placeholder 用这个尺寸撑出
 正确的占位框。''',
     source: r'''https://example.com/t/sample/1/img2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''image_grid/carousel_mode.html''',
+    html: r'''<div class="d-image-grid d-image-grid--carousel" data-mode="carousel">
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/c1.jpg"><img src="https://example.com/c1_thumb.jpg" alt="片 1" width="800" height="450"></a></div>
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/c2.jpg"><img src="https://example.com/c2_thumb.jpg" alt="片 2" width="800" height="450"></a></div>
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/c3.jpg"><img src="https://example.com/c3_thumb.jpg" alt="片 3" width="800" height="450"></a></div>
+</div>
+''',
+    notes: r'''d-image-grid--carousel + data-mode=carousel。
+子包 fallback 渲染:单列大图垂直叠(主项目可 override 实现真 carousel)。''',
+    source: r'''https://example.com/t/sample/1/grid3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''image_grid/skip_emoji_avatar.html''',
+    html: r'''<div class="d-image-grid" data-columns="2">
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/full1.jpg"><img src="https://example.com/thumb1.jpg" alt="正常图" width="600" height="400"></a></div>
+<img class="emoji" src=":heart:" alt="emoji 不计入">
+<img class="avatar" src="https://example.com/avatar.png" alt="头像 不计入">
+<img class="thumbnail" src="https://example.com/yt_thumb.jpg" alt="yt 缩略 不计入">
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/full2.jpg"><img src="https://example.com/thumb2.jpg" alt="另一张正常图" width="600" height="400"></a></div>
+</div>
+''',
+    notes: r'''跳过 emoji/avatar/thumbnail 类 img,只保留 2 张正常图。
+对齐 legacy extractGridImages skip list。''',
+    source: r'''https://example.com/t/sample/1/grid4''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''image_grid/three_columns_bare_img.html''',
+    html: r'''<div class="d-image-grid" data-columns="3">
+<img src="https://example.com/a.jpg" alt="A" width="300" height="200">
+<img src="https://example.com/b.jpg" alt="B" width="300" height="200">
+<img src="https://example.com/c.jpg" alt="C" width="300" height="200">
+<img src="https://example.com/d.jpg" alt="D" width="300" height="200">
+<img src="https://example.com/e.jpg" alt="E" width="300" height="200">
+<img src="https://example.com/f.jpg" alt="F" width="300" height="200">
+</div>
+''',
+    notes: r'''d-image-grid data-columns=3,6 张裸 img 无 lightbox-wrapper。
+渲染:Wrap 三列,每张无 lightboxUrl(走 imageContentBuilder 默认行为)。''',
+    source: r'''https://example.com/t/sample/1/grid2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''image_grid/two_columns_lightbox.html''',
+    html: r'''<div class="d-image-grid" data-columns="2">
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/full1.jpg"><img src="https://example.com/thumb1.jpg" alt="图 1" width="600" height="400"></a></div>
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/full2.jpg"><img src="https://example.com/thumb2.jpg" alt="图 2" width="600" height="400"></a></div>
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/full3.jpg"><img src="https://example.com/thumb3.jpg" alt="图 3" width="600" height="600"></a></div>
+<div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/full4.jpg"><img src="https://example.com/thumb4.jpg" alt="图 4" width="600" height="400"></a></div>
+</div>
+''',
+    notes: r'''d-image-grid data-columns=2,4 张图,每张被 lightbox-wrapper 包裹。
+渲染:Wrap 两列,每瓦片有 lightboxUrl(可点查看大图)。''',
+    source: r'''https://example.com/t/sample/1/grid1''',
     edgeCase: false,
   ),
   FixtureEntry(
