@@ -164,8 +164,16 @@ class ParagraphParser {
             continue;
           }
         }
+        // 跳过 li 直属的纯空白文本(HTML 缩进 + 换行,markdown 渲染时
+        // 自动加的,在浏览器里不显示;不跳过会让 InlineSpanText 多渲染
+        // 一行 `\n`,跟下面的子 list 之间空一截)
+        if (liChild is dom.Text && liChild.text.trim().isEmpty) continue;
         _collectInlineFromAnyNode(liChild, inlines);
       }
+      // 把首尾 TextRun 的 leading/trailing whitespace(`\n`、缩进 space)
+      // 去掉,但保留中间 inline 之间的空格(`"x <em>y</em> z"` 里两端空格
+      // 是有意义的)。
+      _trimEdgeWhitespace(inlines);
       items.add(ListItem(
         inlines: List.unmodifiable(inlines),
         children: subLists.isEmpty ? null : List.unmodifiable(subLists),
@@ -177,6 +185,36 @@ class ParagraphParser {
       depth: depth,
       items: List.unmodifiable(items),
     );
+  }
+
+  /// 原地去掉 inline 列表首尾 TextRun 的 leading/trailing whitespace
+  /// (`\n`、 tab、 space、 缩进等)。中间的 TextRun 不动。
+  ///
+  /// 用于 li 的 inline 收尾:HTML 缩进引入的 `\n` 在浏览器里不渲染,
+  /// 但在 RichText 里会变成空行,必须清理。
+  void _trimEdgeWhitespace(List<InlineNode> inlines) {
+    if (inlines.isEmpty) return;
+    // leading
+    if (inlines.first is TextRun) {
+      final t = (inlines.first as TextRun).text;
+      final trimmed = t.trimLeft();
+      if (trimmed.isEmpty) {
+        inlines.removeAt(0);
+      } else if (trimmed.length != t.length) {
+        inlines[0] = TextRun(trimmed);
+      }
+    }
+    if (inlines.isEmpty) return;
+    // trailing
+    if (inlines.last is TextRun) {
+      final t = (inlines.last as TextRun).text;
+      final trimmed = t.trimRight();
+      if (trimmed.isEmpty) {
+        inlines.removeLast();
+      } else if (trimmed.length != t.length) {
+        inlines[inlines.length - 1] = TextRun(trimmed);
+      }
+    }
   }
 
   /// 把一个 inline element 转成 InlineNode 加入 out。
