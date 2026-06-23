@@ -108,6 +108,7 @@ void main() {
         EmRun(children: []),
         StrongRun(children: []),
         LineBreakRun(),
+        LinkRun(href: 'https://example.com', children: [TextRun('x')]),
       ];
       final labels = list
           .map(
@@ -116,10 +117,11 @@ void main() {
               EmRun() => 'em',
               StrongRun() => 'strong',
               LineBreakRun() => 'br',
+              LinkRun() => 'link',
             },
           )
           .toList();
-      expect(labels, ['text', 'em', 'strong', 'br']);
+      expect(labels, ['text', 'em', 'strong', 'br', 'link']);
     });
   });
 }

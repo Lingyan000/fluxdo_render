@@ -118,6 +118,14 @@ class ParagraphParser {
         out.add(StrongRun(children: List.unmodifiable(children)));
       case 'br':
         out.add(const LineBreakRun());
+      case 'a':
+        final href = el.attributes['href']?.trim() ?? '';
+        if (href.isEmpty) {
+          // 空 href:fallback 为纯样式(展平子节点,不可点)
+          out.addAll(children);
+        } else {
+          out.add(LinkRun(href: href, children: List.unmodifiable(children)));
+        }
       default:
         // 未识别 inline:展平子节点
         out.addAll(children);
@@ -139,7 +147,7 @@ class ParagraphParser {
   }
 
   /// 已支持的 inline 标签集合。
-  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br'};
+  static const _inlineTags = {'em', 'i', 'strong', 'b', 'br', 'a'};
 
   bool _isInlineTag(String tag) => _inlineTags.contains(tag);
 }

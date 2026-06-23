@@ -1,8 +1,7 @@
 /// 把 `List<InlineNode>` 压平成 Flutter 的 InlineSpan 树。
 ///
-/// 阶段 1.1 范围:Text / Em / Strong / LineBreak 四种 + 嵌套样式合并。
-/// 后续阶段会加 LinkRun(GestureRecognizer)、MentionRun / EmojiRun
-/// (InlineCustomWidget WidgetSpan)等。
+/// 阶段 1 范围:Text / Em / Strong / LineBreak / Link 五种 + 嵌套样式合并。
+/// 后续阶段会加 MentionRun / EmojiRun / InlineCodeRun / ImageRun 等。
 ///
 /// 设计:
 /// - 输出 InlineSpan 树而不是 widget list — 让一个段落的所有文字共享一个
@@ -10,46 +9,121 @@
 /// - Em/Strong 用 TextStyle 合并(`merge`)而不是嵌套 WidgetSpan,
 ///   性能 + 选区表现更好。
 /// - LineBreak 渲染为 `\n` 文本字符。
+/// - LinkRun 产出带 TapGestureRecognizer 的 TextSpan,recognizer 是
+///   stateful 资源,通过 [FlattenResult.recognizers] 暴露给调用方,
+///   由 widget dispose 时统一 dispose。
 ///
 /// 不处理 whitespace 折叠 — 阶段 1.1 输入是 Discourse cooked HTML,
 /// 已经是规整 markdown 输出,标签间空白由 paragraph 边界自然分隔。
-/// 阶段 1.2(加 link / inline_code)再视情况引入 fwfh 的 whitespace 折叠。
+/// 阶段 1.2(加 inline_code)再视情况引入 fwfh 的 whitespace 折叠。
 
 library;
 
-import 'package:flutter/painting.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/widgets.dart';
 
 import '../node/inline_node.dart';
+import '../render/link_handler.dart';
+
+/// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers。
+class FlattenResult {
+  FlattenResult({required this.span, required this.recognizers});
+
+  final TextSpan span;
+
+  /// 这次 flatten 创建的所有 GestureRecognizer,调用方必须在 widget
+  /// dispose 时遍历 `recognizer.dispose()`。
+  final List<GestureRecognizer> recognizers;
+}
 
 class InlineFlattener {
   const InlineFlattener();
 
-  /// 把 inline 节点列表压平成 TextSpan,根 span 用 baseStyle 作 fallback。
-  TextSpan flatten(List<InlineNode> inlines, TextStyle baseStyle) {
-    return TextSpan(
-      style: baseStyle,
-      children: _build(inlines),
+  /// 把 inline 节点列表压平,根 span 用 baseStyle 作 fallback。
+  ///
+  /// [linkHandler]:点击链接时执行的回调(主项目注入)。null 时用
+  /// [defaultLinkHandler](仅 debugPrint)。
+  /// [context]:link 点击时传给 handler 用;null 时 link 不可点。
+  FlattenResult flatten(
+    List<InlineNode> inlines,
+    TextStyle baseStyle, {
+    LinkActionHandler? linkHandler,
+    BuildContext? context,
+  }) {
+    final recognizers = <GestureRecognizer>[];
+    final children = <InlineSpan>[];
+    final handler = linkHandler ?? defaultLinkHandler;
+    for (final node in inlines) {
+      children.add(_toSpan(node, handler, context, recognizers));
+    }
+    return FlattenResult(
+      span: TextSpan(style: baseStyle, children: children),
+      recognizers: recognizers,
     );
   }
 
-  List<InlineSpan> _build(List<InlineNode> nodes) {
+  List<InlineSpan> _build(
+    List<InlineNode> nodes,
+    LinkActionHandler handler,
+    BuildContext? context,
+    List<GestureRecognizer> recognizers,
+  ) {
     return [
-      for (final node in nodes) _toSpan(node),
+      for (final node in nodes) _toSpan(node, handler, context, recognizers),
     ];
   }
 
-  InlineSpan _toSpan(InlineNode node) {
+  InlineSpan _toSpan(
+    InlineNode node,
+    LinkActionHandler handler,
+    BuildContext? context,
+    List<GestureRecognizer> recognizers,
+  ) {
     return switch (node) {
       TextRun(:final text) => TextSpan(text: text),
       EmRun(:final children) => TextSpan(
           style: const TextStyle(fontStyle: FontStyle.italic),
-          children: _build(children),
+          children: _build(children, handler, context, recognizers),
         ),
       StrongRun(:final children) => TextSpan(
           style: const TextStyle(fontWeight: FontWeight.bold),
-          children: _build(children),
+          children: _build(children, handler, context, recognizers),
         ),
       LineBreakRun() => const TextSpan(text: '\n'),
+      LinkRun(:final href, :final children) => _buildLinkSpan(
+          href,
+          children,
+          handler,
+          context,
+          recognizers,
+        ),
     };
   }
+
+  TextSpan _buildLinkSpan(
+    String href,
+    List<InlineNode> children,
+    LinkActionHandler handler,
+    BuildContext? context,
+    List<GestureRecognizer> recognizers,
+  ) {
+    final ctx = context;
+    final recognizer = ctx == null
+        ? null
+        : (TapGestureRecognizer()..onTap = () => handler(ctx, href));
+    if (recognizer != null) recognizers.add(recognizer);
+
+    return TextSpan(
+      // 链接视觉:跟随 Theme 的 colorScheme.primary,加下划线
+      // 实际颜色由调用方在 baseStyle 上方决定;这里只给 link semantics
+      style: _linkStyleHint,
+      recognizer: recognizer,
+      children: _build(children, handler, context, recognizers),
+    );
+  }
+
+  // 链接默认样式 — 颜色由调用方在 baseStyle 上 merge(主项目可用 Theme 注入)
+  static const _linkStyleHint = TextStyle(
+    decoration: TextDecoration.underline,
+  );
 }

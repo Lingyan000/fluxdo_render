@@ -91,3 +91,35 @@ class LineBreakRun extends InlineNode {
   @override
   String toString() => 'LineBreakRun()';
 }
+
+/// `<a href="...">` 链接,可嵌套行内子节点。
+///
+/// 点击行为不由子包决定 —— 渲染时通过 [NodeFactory.linkHandler] 注入,
+/// 主项目负责 URL 路由(launchUrl / 内部话题跳转 / 用户卡跳转 等)。
+///
+/// 阶段 1 暂不带 click_count 注入(那是 post.linkCounts 数据,跟主项目
+/// model 强耦合),留到阶段 2 link 体系细化时再加。
+@immutable
+class LinkRun extends InlineNode {
+  const LinkRun({required this.href, required this.children});
+
+  /// 已解析的链接 URL(parser 阶段不做 CDN 重写,显示给 LinkHandler)。
+  final String href;
+
+  /// 链接显示内容,可嵌套样式(em/strong)。
+  final List<InlineNode> children;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LinkRun &&
+          runtimeType == other.runtimeType &&
+          href == other.href &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hash(href, Object.hashAll(children));
+
+  @override
+  String toString() => 'LinkRun($href, ${children.length} children)';
+}

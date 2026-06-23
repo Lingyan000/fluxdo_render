@@ -1,4 +1,5 @@
-import 'package:flutter/painting.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/flatten/inline_flattener.dart';
 import 'package:fluxdo_render/src/node/inline_node.dart';
@@ -8,40 +9,41 @@ void main() {
   const baseStyle = TextStyle(fontSize: 14, color: Color(0xFF000000));
 
   test('空列表产出空 children', () {
-    final span = flattener.flatten([], baseStyle);
-    expect(span.style, baseStyle);
-    expect(span.children, isEmpty);
+    final result = flattener.flatten([], baseStyle);
+    expect(result.span.style, baseStyle);
+    expect(result.span.children, isEmpty);
+    expect(result.recognizers, isEmpty);
   });
 
   test('纯文本', () {
-    final span = flattener.flatten([const TextRun('hello')], baseStyle);
-    expect(span.children, hasLength(1));
-    final inner = span.children![0] as TextSpan;
-    expect(inner.text, 'hello');
+    final result = flattener.flatten([const TextRun('hello')], baseStyle);
+    final children = result.span.children!;
+    expect(children, hasLength(1));
+    expect((children[0] as TextSpan).text, 'hello');
   });
 
-  test('em 注入 italic style,style 不含 baseStyle(merge 由 RichText 完成)', () {
-    final span = flattener.flatten(
+  test('em 注入 italic style', () {
+    final result = flattener.flatten(
       [const EmRun(children: [TextRun('it')])],
       baseStyle,
     );
-    final em = span.children![0] as TextSpan;
+    final em = result.span.children![0] as TextSpan;
     expect(em.style?.fontStyle, FontStyle.italic);
     expect(em.children, hasLength(1));
     expect((em.children![0] as TextSpan).text, 'it');
   });
 
   test('strong 注入 bold style', () {
-    final span = flattener.flatten(
+    final result = flattener.flatten(
       [const StrongRun(children: [TextRun('bd')])],
       baseStyle,
     );
-    final strong = span.children![0] as TextSpan;
+    final strong = result.span.children![0] as TextSpan;
     expect(strong.style?.fontWeight, FontWeight.bold);
   });
 
   test('em 嵌套 strong 产生双层 span', () {
-    final span = flattener.flatten(
+    final result = flattener.flatten(
       [
         const EmRun(
           children: [
@@ -51,16 +53,14 @@ void main() {
       ],
       baseStyle,
     );
-    final em = span.children![0] as TextSpan;
+    final em = result.span.children![0] as TextSpan;
     final nestedStrong = em.children![0] as TextSpan;
     expect(em.style?.fontStyle, FontStyle.italic);
     expect(nestedStrong.style?.fontWeight, FontWeight.bold);
-    // Flutter RichText 渲染时会自动 merge 父子 style,所以 nested 的
-    // text 实际呈现 italic + bold
   });
 
   test('LineBreak 渲染为 \\n', () {
-    final span = flattener.flatten(
+    final result = flattener.flatten(
       [
         const TextRun('a'),
         const LineBreakRun(),
@@ -68,12 +68,13 @@ void main() {
       ],
       baseStyle,
     );
-    expect(span.children, hasLength(3));
-    expect((span.children![1] as TextSpan).text, '\n');
+    final children = result.span.children!;
+    expect(children, hasLength(3));
+    expect((children[1] as TextSpan).text, '\n');
   });
 
   test('混合复合段落保持顺序', () {
-    final span = flattener.flatten(
+    final result = flattener.flatten(
       [
         const TextRun('hello '),
         const StrongRun(children: [TextRun('bold')]),
@@ -84,6 +85,76 @@ void main() {
       ],
       baseStyle,
     );
-    expect(span.children, hasLength(6));
+    expect(result.span.children, hasLength(6));
+  });
+
+  group('LinkRun', () {
+    testWidgets('有 context 时产生 TapGestureRecognizer', (tester) async {
+      late BuildContext capturedContext;
+      await tester.pumpWidget(
+        Builder(
+          builder: (ctx) {
+            capturedContext = ctx;
+            return const SizedBox();
+          },
+        ),
+      );
+      String? tapped;
+      final result = flattener.flatten(
+        [const LinkRun(href: 'https://example.com', children: [TextRun('go')])],
+        baseStyle,
+        context: capturedContext,
+        linkHandler: (_, href) => tapped = href,
+      );
+      expect(result.recognizers, hasLength(1));
+      expect(result.recognizers[0], isA<TapGestureRecognizer>());
+
+      // 直接触发 onTap 验证 handler 被调
+      (result.recognizers[0] as TapGestureRecognizer).onTap!();
+      expect(tapped, 'https://example.com');
+
+      // 清理 recognizer 避免 leak warning
+      for (final r in result.recognizers) {
+        r.dispose();
+      }
+    });
+
+    test('无 context 时不创建 recognizer(link 不可点)', () {
+      final result = flattener.flatten(
+        [const LinkRun(href: 'https://example.com', children: [TextRun('go')])],
+        baseStyle,
+      );
+      expect(result.recognizers, isEmpty);
+      final linkSpan = result.span.children![0] as TextSpan;
+      expect(linkSpan.recognizer, isNull);
+    });
+
+    test('link span 自带下划线样式 hint', () {
+      final result = flattener.flatten(
+        [const LinkRun(href: 'https://example.com', children: [TextRun('x')])],
+        baseStyle,
+      );
+      final linkSpan = result.span.children![0] as TextSpan;
+      expect(linkSpan.style?.decoration, TextDecoration.underline);
+    });
+
+    test('link 内嵌 strong 保留嵌套样式', () {
+      final result = flattener.flatten(
+        [
+          const LinkRun(
+            href: 'https://example.com',
+            children: [
+              TextRun('点击 '),
+              StrongRun(children: [TextRun('粗体')]),
+            ],
+          ),
+        ],
+        baseStyle,
+      );
+      final linkSpan = result.span.children![0] as TextSpan;
+      expect(linkSpan.children, hasLength(2));
+      final strong = linkSpan.children![1] as TextSpan;
+      expect(strong.style?.fontWeight, FontWeight.bold);
+    });
   });
 }

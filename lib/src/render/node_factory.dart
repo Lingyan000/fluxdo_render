@@ -1,6 +1,6 @@
 /// 把 BlockNode 渲染成 Flutter Widget。
 ///
-/// 阶段 1 范围:Paragraph + Heading。
+/// 阶段 1 范围:Paragraph + Heading,行内含 Text/Em/Strong/LineBreak/Link。
 /// 设计上预留 sub-class 扩展点 — 主项目场景里(用户卡 bio / 通知 / AI 分享卡
 /// 等)可以继承 NodeFactory 在 build* 方法里加 wrapper(如:简化版不让点
 /// 链接、AI 分享卡内禁用图片)。
@@ -14,13 +14,20 @@ import 'package:flutter/material.dart';
 
 import '../flatten/inline_flattener.dart';
 import '../node/node.dart';
+import 'inline_span_text.dart';
+import 'link_handler.dart';
 
 class NodeFactory {
   NodeFactory({
     InlineFlattener? inlineFlattener,
+    this.linkHandler,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
 
   final InlineFlattener _inlineFlattener;
+
+  /// 链接点击 callback,主项目注入。
+  /// 不传时用 [defaultLinkHandler](仅 debugPrint)。
+  final LinkActionHandler? linkHandler;
 
   /// 入口 dispatch — sealed class exhaustive switch。
   Widget build(BuildContext context, BlockNode node) {
@@ -30,16 +37,20 @@ class NodeFactory {
     };
   }
 
-  /// 段落渲染 — 默认 RichText + padding。
+  /// 段落渲染 — InlineSpanText 自动管 GestureRecognizer 生命周期。
   ///
   /// 子类可 override 实现段落级别的定制(如调字号、加 margin)。
   Widget buildParagraph(BuildContext context, ParagraphNode node) {
     final theme = Theme.of(context);
     final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
-    final span = _inlineFlattener.flatten(node.inlines, baseStyle);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Text.rich(span),
+      child: InlineSpanText(
+        inlines: node.inlines,
+        baseStyle: baseStyle,
+        flattener: _inlineFlattener,
+        linkHandler: linkHandler,
+      ),
     );
   }
 
@@ -57,12 +68,16 @@ class NodeFactory {
       fontWeight: FontWeight.bold,
       height: 1.2,
     );
-    final span = _inlineFlattener.flatten(node.inlines, headingStyle);
     return Padding(
       padding: EdgeInsets.symmetric(
         vertical: em * _headingMargin[node.level - 1],
       ),
-      child: Text.rich(span),
+      child: InlineSpanText(
+        inlines: node.inlines,
+        baseStyle: headingStyle,
+        flattener: _inlineFlattener,
+        linkHandler: linkHandler,
+      ),
     );
   }
 
