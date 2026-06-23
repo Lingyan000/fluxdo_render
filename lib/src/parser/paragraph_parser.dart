@@ -126,6 +126,9 @@ class ParagraphParser {
                   children: _parseBlocks(node.nodes, nextId, nextImageIndex),
                 ));
               case 'hr':
+                // hr.footnotes-sep:legacy 隐藏(脚注体系的分隔)。
+                // 其他 hr 才走 HorizontalRuleNode。
+                if (node.classes.contains('footnotes-sep')) break;
                 out.add(HorizontalRuleNode(id: nextId()));
               case 'pre':
                 // `<pre><code class="lang-xxx">...</code></pre>` —— 代码块。

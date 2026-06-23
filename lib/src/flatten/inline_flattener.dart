@@ -352,12 +352,19 @@ class InlineFlattener {
     GestureRecognizer? inheritedRecognizer,
   }) {
     final size = emoji.isOnlyEmoji ? 32.0 : emojiBaseSize;
+    // legacy 对齐:普通 emoji 左右各 2px;only-emoji 左右 1px + 上下 0.5em
+    final margin = emoji.isOnlyEmoji
+        ? EdgeInsets.symmetric(horizontal: 1.0, vertical: emojiBaseSize * 0.5)
+        : const EdgeInsets.symmetric(horizontal: 2.0);
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
-      child: Builder(
-        builder: (ctx) {
-          return emojiBuilder(context ?? ctx, emoji, size);
-        },
+      child: Padding(
+        padding: margin,
+        child: Builder(
+          builder: (ctx) {
+            return emojiBuilder(context ?? ctx, emoji, size);
+          },
+        ),
       ),
     );
   }

@@ -34,6 +34,7 @@ class NodeFactory {
     this.codeBlockHighlighter,
     this.quoteAvatarBuilder,
     this.totalImagesInPost = 0,
+    this.compact = false,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
 
   final InlineFlattener _inlineFlattener;
@@ -69,6 +70,31 @@ class NodeFactory {
   /// 若不需要 image 路由,保持默认 0 即可。
   final int totalImagesInPost;
 
+  /// **紧凑模式**:在容器内(blockquote / quote_card / spoiler 等)递归
+  /// 渲染子节点时,paragraph 不再加 `1em 0` 上下 margin,避免与容器
+  /// 自己的 padding 叠加产生过大间距。
+  ///
+  /// 对齐 legacy `DiscourseHtmlContent(compact: true)` 用法。
+  final bool compact;
+
+  /// 派生一个"紧凑"版本(给 buildBlockquote / buildQuoteCard / 等
+  /// 渲染子节点用)。所有 handlers / builders 完全相同,只是 [compact]
+  /// 切到 true。
+  NodeFactory _compactCopy() {
+    if (compact) return this;
+    return NodeFactory(
+      inlineFlattener: _inlineFlattener,
+      linkHandler: linkHandler,
+      emojiImageBuilder: emojiImageBuilder,
+      mentionTapHandler: mentionTapHandler,
+      imageContentBuilder: imageContentBuilder,
+      codeBlockHighlighter: codeBlockHighlighter,
+      quoteAvatarBuilder: quoteAvatarBuilder,
+      totalImagesInPost: totalImagesInPost,
+      compact: true,
+    );
+  }
+
   /// 入口 dispatch — sealed class exhaustive switch。
   Widget build(BuildContext context, BlockNode node) {
     return switch (node) {
@@ -88,12 +114,14 @@ class NodeFactory {
   /// 子类可 override 实现段落级别的定制(如调字号、加 margin)。
   ///
   /// margin 对齐 legacy(fwfh `_tagP`):`1em 0`(上下各一个 em)。
+  /// **[compact] 模式下 margin 为 0**(嵌套在容器内,如 blockquote /
+  /// quote_card,容器自己已加 padding,不再叠加)。
   Widget buildParagraph(BuildContext context, ParagraphNode node) {
     final theme = Theme.of(context);
     final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
     final em = baseStyle.fontSize ?? 14;
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: em),
+      padding: EdgeInsets.symmetric(vertical: compact ? 0 : em),
       child: InlineSpanText(
         inlines: node.inlines,
         baseStyle: baseStyle,
@@ -260,7 +288,9 @@ class NodeFactory {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            for (final child in node.children) build(context, child),
+            // 容器内子节点走 compact factory(消除嵌套 paragraph 多余 margin)
+            for (final child in node.children)
+              _compactCopy().build(context, child),
           ],
         ),
       ),
@@ -422,7 +452,9 @@ class NodeFactory {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final child in node.children) build(context, child),
+                    // quote_card 内子节点走 compact factory
+                    for (final child in node.children)
+                      _compactCopy().build(context, child),
                   ],
                 ),
               ),
@@ -441,11 +473,11 @@ class NodeFactory {
   /// 状态由 _SpoilerBlockWidget 内部管。
   Widget buildSpoilerBlock(BuildContext context, SpoilerBlockNode node) {
     return _SpoilerBlockWidget(
-      // 通过 factory 自身递归 build 子节点,避免再造一份 factory
+      // spoiler 内子节点走 compact factory(消除嵌套 paragraph 多余 margin)
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final c in node.children) build(context, c),
+          for (final c in node.children) _compactCopy().build(context, c),
         ],
       ),
     );
