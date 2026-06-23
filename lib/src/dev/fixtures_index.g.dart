@@ -315,6 +315,24 @@ hr 自带 12 上下 padding,叠加不会塌缩(Column 不折叠 margin)。''',
     edgeCase: true,
   ),
   FixtureEntry(
+    relativePath: r'''image/lightbox_wrapper.html''',
+    html: r'''<p><strong>段落 1。</strong></p>
+<p><div class="lightbox-wrapper"><a class="lightbox" href="https://cdn.example.com/original/4X/d/1/e/abcdef.png" data-download-href="/uploads/short-url/xyz.png?dl=1" title="d5112e737a71778e6de420459be91f92" rel="noopener nofollow ugc"><img src="https://cdn.example.com/optimized/4X/d/1/e/abcdef_2_690x52.png" alt="d5112e737a71778e6de420459be91f92" data-base62-sha1="xyz" width="690" height="52"><div class="meta"><svg class="fa d-icon d-icon-far-image svg-icon" aria-hidden="true"><use href="#far-image"></use></svg><span class="filename">d5112e737a71778e6de420459be91f92</span><span class="informations">1686×128 15.7 KB</span><svg class="fa d-icon d-icon-discourse-expand svg-icon" aria-hidden="true"><use href="#discourse-expand"></use></svg></div></a></div></p>
+<p><strong>段落 2,图片之后。</strong></p>
+''',
+    notes: r'''Discourse cooked 把上传图包成 lightbox-wrapper:
+  div.lightbox-wrapper > a.lightbox(href=原图) > img(src=缩略图) +
+  div.meta(文件名 + 尺寸 + svg)
+HTML5 不允许 p 含 div,package:html 会自动闭合 p,所以 wrapper 实际
+顶层 block。Parser 应该:
+  1. 识别 div.lightbox-wrapper
+  2. 提 img 的 src (缩略图) + a 的 href (原图,填 lightboxUrl)
+  3. .meta 子树不进 textContent(否则会显示 filename + 尺寸 KB 文字)
+没修之前:全靠 fallback textContent 把 .meta 文字渲染成 "filename 尺寸 KB"。''',
+    source: r'''https://example.com/t/sample/1/img6''',
+    edgeCase: true,
+  ),
+  FixtureEntry(
     relativePath: r'''image/multiple_in_paragraph.html''',
     html: r'''<p>对比图:<img src="https://example.com/upload/before.png" alt="before" width="120" height="80"> 和 <img src="https://example.com/upload/after.png" alt="after" width="120" height="80"></p>
 ''',

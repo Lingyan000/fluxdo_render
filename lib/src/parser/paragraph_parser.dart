@@ -88,6 +88,10 @@ class ParagraphParser {
                 for (final child in node.nodes) {
                   _collectInlineFromAnyNode(child, inlines, nextImageIndex);
                 }
+                // 空 paragraph 不产节点。HTML5 在某些 implicit p-close 情况下
+                // (例如 `<p><div>...</div></p>` 里 div 自动关闭 p,后续 </p>
+                // 无配对会产生空 p)会有这种残留,渲染时多出空段落不美观。
+                if (inlines.isEmpty) break;
                 out.add(ParagraphNode(
                   id: nextId(),
                   inlines: List.unmodifiable(inlines),
@@ -163,6 +167,46 @@ class ParagraphParser {
                   id: nextId(),
                   children: _parseBlocks(node.nodes, nextId, nextImageIndex),
                 ));
+              case 'div' when node.classes.contains('lightbox-wrapper'):
+                // Discourse cooked 把 lightbox 图包成:
+                //   <div class="lightbox-wrapper">
+                //     <a class="lightbox" href="原图URL">
+                //       <img src="缩略图URL" alt="..." width=... height=...>
+                //       <div class="meta">...filename + 尺寸 + svg icons</div>
+                //     </a>
+                //   </div>
+                //
+                // 注意:虽然 cooked 里这个 div 通常被 markdown 写在 `<p>` 内,
+                // 但 HTML5 spec 不允许 p 含 div,package:html parse 时会自动
+                // 闭合 p,所以这个 div 实际是顶层 block 出现的。
+                //
+                // 处理:产 ParagraphNode(含 1 个 ImageRun with lightboxUrl),
+                // .meta 子树纯展示,不进 textContent 当文字渲染。
+                final img = node.querySelector('a.lightbox > img') ??
+                    node.querySelector('img');
+                if (img != null) {
+                  final aEl = node.querySelector('a.lightbox');
+                  final lightboxUrl = aEl?.attributes['href']?.trim();
+                  final src = img.attributes['src']?.trim() ?? '';
+                  final alt = img.attributes['alt']?.trim() ?? '';
+                  final w = double.tryParse(img.attributes['width'] ?? '');
+                  final h = double.tryParse(img.attributes['height'] ?? '');
+                  out.add(ParagraphNode(
+                    id: nextId(),
+                    inlines: List.unmodifiable([
+                      ImageRun(
+                        src: src,
+                        alt: alt,
+                        width: w,
+                        height: h,
+                        indexInPost: nextImageIndex(),
+                        lightboxUrl: (lightboxUrl ?? '').isEmpty
+                            ? null
+                            : lightboxUrl,
+                      ),
+                    ]),
+                  ));
+                }
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——

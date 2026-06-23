@@ -70,6 +70,58 @@ void main() {
       expect((p.inlines[0] as ImageRun).height, isNull);
     });
 
+    test('div.lightbox-wrapper 产 ImageRun(src=缩略图, lightboxUrl=原图)', () {
+      final result = parser.parse(
+        '<div class="lightbox-wrapper">'
+        '<a class="lightbox" href="https://x/full.png">'
+        '<img src="https://x/thumb_690x52.png" alt="hash" width="690" height="52">'
+        '<div class="meta">'
+        '<span class="filename">hash</span>'
+        '<span class="informations">1686×128 15.7 KB</span>'
+        '</div>'
+        '</a>'
+        '</div>',
+      );
+      expect(result, hasLength(1));
+      final p = result[0] as ParagraphNode;
+      expect(p.inlines, hasLength(1));
+      final img = p.inlines[0] as ImageRun;
+      expect(img.src, 'https://x/thumb_690x52.png');
+      expect(img.lightboxUrl, 'https://x/full.png');
+      expect(img.alt, 'hash');
+      expect(img.width, 690);
+      expect(img.height, 52);
+    });
+
+    test('lightbox-wrapper 在 p 内(HTML5 implicit p close)', () {
+      // 真实 Discourse cooked 形态,markdown 渲染时把 div 写在 p 里
+      final result = parser.parse(
+        '<p><strong>前</strong></p>'
+        '<p><div class="lightbox-wrapper">'
+        '<a class="lightbox" href="https://x/full.png">'
+        '<img src="https://x/thumb.png" alt="x" width="100" height="50">'
+        '<div class="meta"><span>x</span><span>100×50 1 KB</span></div>'
+        '</a>'
+        '</div></p>'
+        '<p><strong>后</strong></p>',
+      );
+      // 期望:p1(前) + p(image) + p2(后)
+      expect(result.whereType<ParagraphNode>(), hasLength(3));
+      final imageP = result[1] as ParagraphNode;
+      expect(imageP.inlines, hasLength(1));
+      expect(imageP.inlines[0], isA<ImageRun>());
+      // 关键:不应有 ".meta" 内的文字 (hash / 100×50 / 1 KB)
+      // textContent fallback 走的话会有
+    });
+
+    test('lightbox-wrapper 内无 img 时不产 ImageRun', () {
+      final result = parser.parse(
+        '<div class="lightbox-wrapper"><a>no img</a></div>',
+      );
+      // 容错:跳过不产节点
+      expect(result.whereType<ImageRun>(), isEmpty);
+    });
+
     test('indexInPost 按出现顺序 0,1,2 递增', () {
       final result = parser.parse(
         '<p><img src="a.png"></p>'

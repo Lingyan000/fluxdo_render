@@ -277,9 +277,13 @@ class ImageRun extends InlineNode {
     this.width,
     this.height,
     this.indexInPost = 0,
+    this.lightboxUrl,
   });
 
   /// 完整图片 URL(parser 不做任何重写;含 upload:// 短链时由主项目解析)。
+  ///
+  /// **缩略图**(若是 lightbox 包装):指向 `_2_690x52` 这种压缩版,
+  /// 列表渲染用。
   final String src;
 
   /// alt 文本,a11y + 加载失败时占位。
@@ -299,6 +303,13 @@ class ImageRun extends InlineNode {
   /// ```
   final int indexInPost;
 
+  /// 原图 URL(若是 `<div class="lightbox-wrapper"><a class="lightbox"
+  /// href="原图.png"><img src="缩略图.png"></a></div>` 形态)。
+  ///
+  /// null 表示这不是 lightbox 图片(直接 `<img>`),[src] 已经是显示用
+  /// 的最佳 URL。主项目点击放大时优先用 lightboxUrl,fallback 到 src。
+  final String? lightboxUrl;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -308,15 +319,18 @@ class ImageRun extends InlineNode {
           alt == other.alt &&
           width == other.width &&
           height == other.height &&
-          indexInPost == other.indexInPost;
+          indexInPost == other.indexInPost &&
+          lightboxUrl == other.lightboxUrl;
 
   @override
-  int get hashCode => Object.hash(src, alt, width, height, indexInPost);
+  int get hashCode =>
+      Object.hash(src, alt, width, height, indexInPost, lightboxUrl);
 
   @override
   String toString() =>
       'ImageRun(#$indexInPost $src'
-      '${width == null ? "" : ", ${width}x$height"})';
+      '${width == null ? "" : ", ${width}x$height"}'
+      '${lightboxUrl == null ? "" : ", lightbox=$lightboxUrl"})';
 }
 
 /// `<span class="spoiler">` 行内剧透,默认遮蔽,点击展开。

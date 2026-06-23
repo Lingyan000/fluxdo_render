@@ -358,11 +358,20 @@ void main() {
       expect(a == e, isFalse);
     });
 
-    test('alt 默认空串, width/height 默认 null', () {
+    test('alt 默认空串, width/height 默认 null, lightboxUrl 默认 null', () {
       const i = ImageRun(src: 'x.png');
       expect(i.alt, '');
       expect(i.width, isNull);
       expect(i.height, isNull);
+      expect(i.lightboxUrl, isNull);
+    });
+
+    test('lightboxUrl 参与 ==', () {
+      const a = ImageRun(src: 'thumb.png');
+      const b = ImageRun(src: 'thumb.png', lightboxUrl: 'full.png');
+      expect(a == b, isFalse);
+      const c = ImageRun(src: 'thumb.png', lightboxUrl: 'full.png');
+      expect(b, c);
     });
 
     test('toString 含 src, 有尺寸时标尺寸', () {
