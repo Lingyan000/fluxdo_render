@@ -51,19 +51,42 @@ void main() {
   });
 
   group('ParagraphNode', () {
-    test('==/hashCode 按 inlines listEquals', () {
-      const a = ParagraphNode(inlines: [TextRun('hello'), LineBreakRun()]);
-      const b = ParagraphNode(inlines: [TextRun('hello'), LineBreakRun()]);
-      const c = ParagraphNode(inlines: [TextRun('hello')]);
+    test('==/hashCode 按 inlines listEquals(忽略 id)', () {
+      const a = ParagraphNode(
+        id: 'b_0',
+        inlines: [TextRun('hello'), LineBreakRun()],
+      );
+      const b = ParagraphNode(
+        id: 'b_0',
+        inlines: [TextRun('hello'), LineBreakRun()],
+      );
+      const c = ParagraphNode(id: 'b_1', inlines: [TextRun('hello')]);
+      // 同 id 同内容 → 相等
       expect(a, b);
       expect(a.hashCode, b.hashCode);
+      // 不同内容(id 也可能不同) → 不相等
       expect(a == c, isFalse);
     });
 
-    test('toString 含 inlines 数量', () {
+    test('id 不参与 ==,只要内容相同就相等', () {
+      const a = ParagraphNode(id: 'b_0', inlines: [TextRun('x')]);
+      const b = ParagraphNode(id: 'b_99', inlines: [TextRun('x')]);
+      // 不同 id 同内容 → 也相等(让 widget diff 不必要 rebuild)
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('id 字段可访问', () {
+      const p = ParagraphNode(id: 'b_7', inlines: []);
+      expect(p.id, 'b_7');
+    });
+
+    test('toString 含 id 和 inlines 数量', () {
       const p = ParagraphNode(
+        id: 'b_2',
         inlines: [TextRun('a'), TextRun('b'), TextRun('c')],
       );
+      expect(p.toString(), contains('b_2'));
       expect(p.toString(), contains('3 inlines'));
     });
   });
@@ -72,7 +95,7 @@ void main() {
     test('BlockNode switch 必须覆盖所有 case', () {
       // 这是个编译期检查 — 如果新增 BlockNode 子类没在 switch 里,
       // analyzer 会报 non-exhaustive,这条用例只是 runtime 烟雾测试。
-      const p = ParagraphNode(inlines: []);
+      const p = ParagraphNode(id: 'b_0', inlines: []);
       final label = switch (p) {
         ParagraphNode() => 'paragraph',
       };

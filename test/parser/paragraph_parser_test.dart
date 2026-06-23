@@ -75,6 +75,11 @@ void main() {
         const StrongRun(children: [TextRun('x')]),
       ]);
     });
+
+    test('单个 p 分配 id b_0', () {
+      final p = parser.parse('<p>hello</p>')[0] as ParagraphNode;
+      expect(p.id, 'b_0');
+    });
   });
 
   group('多段', () {
@@ -84,10 +89,13 @@ void main() {
       expect(
         result,
         [
-          const ParagraphNode(inlines: [TextRun('first')]),
-          const ParagraphNode(inlines: [TextRun('second')]),
+          const ParagraphNode(id: 'b_0', inlines: [TextRun('first')]),
+          const ParagraphNode(id: 'b_1', inlines: [TextRun('second')]),
         ],
       );
+      // id 也得对(虽然 == 不查 id,但要确保 parser 真的递增了)
+      expect((result[0] as ParagraphNode).id, 'b_0');
+      expect((result[1] as ParagraphNode).id, 'b_1');
     });
 
     test('p 中间有空白文本被忽略', () {

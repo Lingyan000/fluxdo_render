@@ -24,6 +24,10 @@ class ParagraphParser {
   ///   textContent
   /// - 顶层 inline-only(没用 `<p>` 包,某些 cooked 形态)→ 把这一组合并
   ///   成单个 ParagraphNode
+  ///
+  /// 每个产出的 BlockNode 分配稳定 id("b_0", "b_1", ...),id 仅在
+  /// 这一次 parse 调用内有意义,不跨调用稳定(同一 html parse 两次 id
+  /// 相同是因为顺序确定,不需要额外保证)。
   List<BlockNode> parse(String html) {
     if (html.isEmpty) return const [];
 
@@ -31,9 +35,14 @@ class ParagraphParser {
     final out = <BlockNode>[];
     final pendingInlines = <InlineNode>[];
 
+    String nextId() => 'b_${out.length}';
+
     void flushInlines() {
       if (pendingInlines.isEmpty) return;
-      out.add(ParagraphNode(inlines: List.unmodifiable(pendingInlines)));
+      out.add(ParagraphNode(
+        id: nextId(),
+        inlines: List.unmodifiable(pendingInlines),
+      ));
       pendingInlines.clear();
     }
 
@@ -53,7 +62,10 @@ class ParagraphParser {
                 for (final child in node.nodes) {
                   _collectInlineFromAnyNode(child, inlines);
                 }
-                out.add(ParagraphNode(inlines: List.unmodifiable(inlines)));
+                out.add(ParagraphNode(
+                  id: nextId(),
+                  inlines: List.unmodifiable(inlines),
+                ));
               default:
                 // 未识别块级:fallback 为 paragraph,取所有 textContent 包成一段
                 final inlines = <InlineNode>[];
@@ -61,7 +73,10 @@ class ParagraphParser {
                   _collectInlineFromAnyNode(child, inlines);
                 }
                 if (inlines.isNotEmpty) {
-                  out.add(ParagraphNode(inlines: List.unmodifiable(inlines)));
+                  out.add(ParagraphNode(
+                    id: nextId(),
+                    inlines: List.unmodifiable(inlines),
+                  ));
                 }
             }
           }
