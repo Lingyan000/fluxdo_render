@@ -120,8 +120,18 @@ class NodeFactory {
     final theme = Theme.of(context);
     final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
     final em = baseStyle.fontSize ?? 14;
+    // image-only 段落(全是 ImageRun / LineBreakRun,无真文字)用更小的
+    // vertical padding。否则文本 1em margin 叠加 image 自身上下 padding,
+    // 与前后段距离过大,跟 fwfh margin-collapsing 行为差距明显。
+    final isImageOnly = node.inlines.isNotEmpty &&
+        node.inlines.every((n) => n is ImageRun || n is LineBreakRun);
+    final vertical = compact
+        ? 0.0
+        : isImageOnly
+            ? 4.0
+            : em;
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: compact ? 0 : em),
+      padding: EdgeInsets.symmetric(vertical: vertical),
       child: InlineSpanText(
         inlines: node.inlines,
         baseStyle: baseStyle,
