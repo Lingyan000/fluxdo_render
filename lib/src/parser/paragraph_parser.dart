@@ -529,8 +529,11 @@ class ParagraphParser {
     // 收集首段 <br> 之后的剩余 inline(若有)→ 单独一个 ParagraphNode
     final childNodes = <dom.Node>[];
     if (brMatch != null) {
-      final afterBrHtml = firstParaHtml.substring(brMatch.end);
-      if (afterBrHtml.trim().isNotEmpty) {
+      // trim 掉 <br> 后的 leading/trailing 空白(典型 cooked 里 `<br>\n正文`,
+      // 不 trim 的话 fragment.parse 产生的 TextNode 带头部 \n,渲染时占一
+      // 整行空高度 — 视觉上 callout 标题和正文之间多一行空白)
+      final afterBrHtml = firstParaHtml.substring(brMatch.end).trim();
+      if (afterBrHtml.isNotEmpty) {
         // 用 fragment parse 让它产生跟原 DOM 一致的节点
         final frag = html_parser.parseFragment(afterBrHtml);
         childNodes.addAll(frag.nodes);
