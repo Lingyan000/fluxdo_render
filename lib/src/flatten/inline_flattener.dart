@@ -475,7 +475,7 @@ class InlineFlattener {
               mention.href,
             ),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHigh,
                 borderRadius: BorderRadius.circular(10),
@@ -488,7 +488,6 @@ class InlineFlattener {
                     style: TextStyle(
                       color: scheme.primary,
                       fontSize: fontSize,
-                      height: 1.0,
                     ),
                   ),
                   if (mention.statusEmoji != null) ...[
