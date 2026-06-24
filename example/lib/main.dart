@@ -263,6 +263,25 @@ class _FixtureDetailState extends State<_FixtureDetail> {
                 );
               },
               imageContentBuilder: _galleryImageBuilder,
+              footnoteTapHandler: (ctx, fnId, contentHtml) {
+                showDialog<void>(
+                  context: ctx,
+                  builder: (_) => AlertDialog(
+                    title: Text('Footnote $fnId'),
+                    // demo 里直接展示原始 HTML;主项目接入会再走一遍
+                    // FluxdoRender 渲染成富文本。
+                    content: SingleChildScrollView(
+                      child: Text(contentHtml ?? '(无内容)'),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: const Text('Close'),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ),
