@@ -1146,7 +1146,18 @@ class ParagraphParser {
           ));
           return;
         }
-        // 其他 span(如 .click-count)留后续阶段,当前展平
+        // span.click-count → ClickCountRun(链接旁的点击数小 chip,
+        // 纯展示节点;Discourse 用 _injectClickCounts 在 <a> 后注入)
+        if (el.classes.contains('click-count')) {
+          final raw = el.text.trim();
+          // legacy 用 thin space ( ) 包数字,去掉首尾让数字纯净
+          final count = raw.replaceAll(RegExp(r'^ | $'), '').trim();
+          if (count.isNotEmpty) {
+            out.add(ClickCountRun(count));
+            return;
+          }
+        }
+        // 其他 span 留后续阶段,当前展平
         out.addAll(children);
       default:
         // 未识别 inline:展平子节点

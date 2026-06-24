@@ -528,3 +528,35 @@ class LocalDateRun extends InlineNode {
       '${timezone == null ? "" : " @$timezone"}'
       '${countdown ? ", countdown" : ""})';
 }
+
+/// 链接点击数 chip — `<span class="click-count">123</span>`。
+///
+/// Discourse 在帖子链接旁注入这种 span 显示点击次数(legacy 通过
+/// `_injectClickCounts` 把 `<a>` 后面追加 `<span class="click-count">N</span>`)。
+///
+/// 视觉对齐 legacy `buildClickCountWidget`:
+///   小灰底圆角(radius 10)+ horizontal 5 / vertical 1 padding
+///   暗主题:bg #3a3d47 / text #9ca3af;亮:bg #e8ebef / text #6b7280
+///   字号 10
+///
+/// 纯展示节点,无 callback,无主项目接入需求。
+@immutable
+class ClickCountRun extends InlineNode {
+  const ClickCountRun(this.count);
+
+  /// 点击数字符串(legacy 是 textContent.trim(),可能含 thin space  )。
+  final String count;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ClickCountRun &&
+          runtimeType == other.runtimeType &&
+          count == other.count;
+
+  @override
+  int get hashCode => count.hashCode;
+
+  @override
+  String toString() => 'ClickCountRun($count)';
+}

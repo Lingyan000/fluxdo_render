@@ -12,7 +12,7 @@ const validNodeTypes = {
   'iframe', 'image_grid', 'lazy_video', 'footnote', 'mention',
   'emoji', 'lightbox', 'inline_code', 'blockquote', 'callout',
   'chat_transcript', 'local_date', 'policy', 'horizontal_rule',
-  'image',
+  'image', 'click_count',
   'edge_case',
 };
 

@@ -47,6 +47,7 @@ primary_node:
     - local_date
     - policy
     - horizontal_rule
+    - click_count
     - edge_case  # 跨类型,不能归入单一节点
   description: 主节点类型(应与所在目录名一致,_edge_cases/ 下用 edge_case)
   required: true

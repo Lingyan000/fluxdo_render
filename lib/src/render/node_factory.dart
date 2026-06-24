@@ -2092,6 +2092,8 @@ class _TableWidget extends StatelessWidget {
             buf.write(':$name:');
           case LocalDateRun(:final fallbackText):
             buf.write(fallbackText);
+          case ClickCountRun(:final count):
+            buf.write(count);
           case ImageRun() ||
                 LineBreakRun() ||
                 FootnoteRefRun():

@@ -164,6 +164,25 @@ typeRaw 首字母大写作为默认标题。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''click_count/after_links.html''',
+    html: r'''<p>查看 <a href="https://example.com/post/123">这条帖子</a> <span class="click-count"> 42 </span> 和 <a href="https://example.com/post/456">另一条</a> <span class="click-count"> 1.2k </span>。</p>
+''',
+    notes: r'''典型形态:Discourse _injectClickCounts 在 <a> 后追加
+<span class="click-count"> 42 </span> 显示帖内链接点击次数。
+渲染:链接后跟小灰底圆角 chip(10 字号)。''',
+    source: r'''https://example.com/t/sample/1/cc1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''click_count/various_formats.html''',
+    html: r'''<p>大点击数:<span class="click-count"> 12.3k </span>;小点击数:<span class="click-count"> 5 </span>;还有 <span class="click-count">空格已被 trim 仅数字 100</span>。</p>
+''',
+    notes: r'''各种点击数格式:1.2k / 5 / 含 thin space ( ) 的纯数字。
+验证 parser thin space trim 行为。''',
+    source: r'''https://example.com/t/sample/1/cc2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''code_block/dart_hello_world.html''',
     html: r'''<pre><code class="lang-dart">void main() {
   print('hello');

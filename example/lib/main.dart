@@ -452,6 +452,8 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
       buf.writeln('$pad$node');
     case LocalDateRun():
       buf.writeln('$pad$node');
+    case ClickCountRun():
+      buf.writeln('$pad$node');
   }
 }
 

@@ -145,6 +145,7 @@ void main() {
               SpoilerRun() => 'spoiler',
               FootnoteRefRun() => 'footnoteRef',
               LocalDateRun() => 'localDate',
+              ClickCountRun() => 'clickCount',
             },
           )
           .toList();

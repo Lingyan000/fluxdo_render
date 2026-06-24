@@ -258,6 +258,7 @@ class InlineFlattener {
           node,
           localDateBuilder,
         ),
+      ClickCountRun() => _buildClickCountSpan(node),
     };
   }
 
@@ -713,6 +714,43 @@ class _LocalDateFallbackWidget extends StatelessWidget {
             style: TextStyle(color: scheme.primary, fontSize: fontSize),
           ),
         ],
+      ),
+    );
+  }
+}
+
+extension on InlineFlattener {
+  /// 链接点击数 chip 渲染(对齐 legacy `buildClickCountWidget`)。
+  /// 小灰底圆角(radius 10),h5/v1 padding,10px 字号。
+  WidgetSpan _buildClickCountSpan(ClickCountRun node) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: _ClickCountWidget(count: node.count),
+    );
+  }
+}
+
+/// 链接点击数 chip widget(纯展示,无 callback)。
+class _ClickCountWidget extends StatelessWidget {
+  const _ClickCountWidget({required this.count});
+  final String count;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor =
+        isDark ? const Color(0xFF3A3D47) : const Color(0xFFE8EBEF);
+    final textColor =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        count,
+        style: TextStyle(color: textColor, fontSize: 10),
       ),
     );
   }
