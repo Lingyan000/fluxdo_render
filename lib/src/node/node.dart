@@ -1344,6 +1344,87 @@ class PollNode extends BlockNode {
       'PollNode($id, name=$pollName${title == null ? "" : ", \"$title\""})';
 }
 
+/// 聊天记录块 — `<div class="chat-transcript">`(Discourse chat 转帖)。
+///
+/// 纯 DOM 驱动(不依赖 post API,对齐 onebox)。结构:
+/// ```html
+/// <div class="chat-transcript [chat-transcript-chained]"
+///      data-username="..." data-datetime="ISO" data-channel-name="...">
+///   <img class="avatar" src="...">
+///   <div class="chat-transcript-messages">消息 HTML(可递归)</div>
+///   <div class="chat-transcript-reactions">...</div>
+///   <details><summary>...thread-header__title...</summary></details>
+/// </div>
+/// ```
+///
+/// 子包存结构化字段(给 fallback 用)+ [rawHtml]。主项目 [ChatTranscriptBuilder]
+/// 把 rawHtml 喂给 legacy buildChatTranscript(消息内容走 htmlBuilder 递归)。
+@immutable
+class ChatTranscriptNode extends BlockNode {
+  const ChatTranscriptNode({
+    required super.id,
+    required this.username,
+    this.avatarUrl,
+    this.datetime,
+    this.channelName,
+    this.isChained = false,
+    this.messagesHtml = '',
+    this.rawHtml = '',
+  });
+
+  /// `data-username`。
+  final String username;
+
+  /// `img.avatar` 的 src(原始 URL,主项目 fallback 用 SmartAvatar 渲染)。
+  final String? avatarUrl;
+
+  /// `data-datetime`(ISO 8601 字符串)。
+  final String? datetime;
+
+  /// `data-channel-name`(可空)。
+  final String? channelName;
+
+  /// `chat-transcript-chained` class(链式引用,去边框/margin 紧贴上一条)。
+  final bool isChained;
+
+  /// `.chat-transcript-messages` 的 innerHtml(消息内容,fallback 显示纯文本)。
+  final String messagesHtml;
+
+  /// 原始 `<div class="chat-transcript">` outerHtml。
+  /// 主项目 ChatTranscriptBuilder 喂给 legacy buildChatTranscript。
+  final String rawHtml;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ChatTranscriptNode &&
+          runtimeType == other.runtimeType &&
+          username == other.username &&
+          avatarUrl == other.avatarUrl &&
+          datetime == other.datetime &&
+          channelName == other.channelName &&
+          isChained == other.isChained &&
+          messagesHtml == other.messagesHtml &&
+          rawHtml == other.rawHtml;
+
+  @override
+  int get hashCode => Object.hash(
+        username,
+        avatarUrl,
+        datetime,
+        channelName,
+        isChained,
+        messagesHtml,
+        rawHtml,
+      );
+
+  @override
+  String toString() =>
+      'ChatTranscriptNode($id, @$username'
+      '${channelName == null ? "" : " #$channelName"}'
+      '${isChained ? ", chained" : ""})';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -1454,6 +1535,9 @@ int countImageRuns(List<BlockNode> nodes) {
         break;
       case PollNode():
         // poll 数据在 API,cooked 里的 poll div 不含正文图
+        break;
+      case ChatTranscriptNode():
+        // 消息图在 messagesHtml(未解析成 ImageRun),主项目 builder 递归渲染
         break;
     }
   }

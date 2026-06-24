@@ -164,6 +164,39 @@ typeRaw 首字母大写作为默认标题。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''chat_transcript/chained.html''',
+    html: r'''<div class="chat-transcript chat-transcript-chained" data-username="bob" data-datetime="2026-02-12T10:31:00Z">
+<div class="chat-transcript-messages">
+<p>这是链式引用的第二条,无边框无频道名</p>
+</div>
+</div>
+''',
+    notes: r'''链式引用 chat-transcript(chat-transcript-chained,无频道名/无头像)。
+验证 isChained → 去边框 + margin 0,紧贴上一条。''',
+    source: r'''https://example.com/t/sample/1/ct2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''chat_transcript/simple.html''',
+    html: r'''<div class="chat-transcript" data-message-id="123" data-username="alice" data-datetime="2026-02-12T10:30:00Z" data-channel-name="general">
+<div class="chat-transcript-user">
+<div class="chat-transcript-user-avatar">
+<img loading="lazy" alt="alice" width="20" height="20" src="https://cdn.example.com/avatar/alice.png" class="avatar">
+</div>
+<span class="chat-transcript-username">alice</span>
+<span class="chat-transcript-datetime"><a href="https://example.com/chat/c/-/1/123">10:30 AM</a></span>
+</div>
+<div class="chat-transcript-messages">
+<p>大家好,这是一条聊天记录消息</p>
+</div>
+</div>
+''',
+    notes: r'''最简 chat-transcript(频道 general + 头像 + 用户名 + 时间 + 消息)。
+纯 DOM,主项目接 legacy buildChatTranscript;子包 fallback 卡。''',
+    source: r'''https://example.com/t/sample/1/ct1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''click_count/after_links.html''',
     html: r'''<p>查看 <a href="https://example.com/post/123">这条帖子</a> <span class="click-count"> 42 </span> 和 <a href="https://example.com/post/456">另一条</a> <span class="click-count"> 1.2k </span>。</p>
 ''',

@@ -29,6 +29,7 @@ import 'math_handler.dart';
 import 'mention_handler.dart';
 import 'onebox_handler.dart';
 import 'policy_handler.dart';
+import 'chat_transcript_handler.dart';
 import 'poll_handler.dart';
 import 'quote_avatar_handler.dart';
 
@@ -48,6 +49,7 @@ class NodeFactory {
     this.localDateBuilder,
     this.policyBuilder,
     this.pollBuilder,
+    this.chatTranscriptBuilder,
     this.mathBlockBuilder,
     this.mathInlineBuilder,
     this.totalImagesInPost = 0,
@@ -109,6 +111,10 @@ class NodeFactory {
   /// 返回 null 时子包 fallback 占位卡(标题 + 接入提示)。
   final PollBuilder? pollBuilder;
 
+  /// 聊天记录 builder,主项目接 legacy buildChatTranscript。
+  /// 返回 null 时子包 fallback 卡(头像 + 用户名 + 时间 + 消息纯文本)。
+  final ChatTranscriptBuilder? chatTranscriptBuilder;
+
   /// 块级数学公式 builder,主项目接入 flutter_math_fork。
   /// 返回 null 时子包用 monospace `$latex$` 原文。
   final MathBlockBuilder? mathBlockBuilder;
@@ -151,6 +157,7 @@ class NodeFactory {
       localDateBuilder: localDateBuilder,
       policyBuilder: policyBuilder,
       pollBuilder: pollBuilder,
+      chatTranscriptBuilder: chatTranscriptBuilder,
       mathBlockBuilder: mathBlockBuilder,
       mathInlineBuilder: mathInlineBuilder,
       totalImagesInPost: totalImagesInPost,
@@ -179,6 +186,7 @@ class NodeFactory {
       TableNode() => buildTable(context, node),
       PolicyNode() => buildPolicy(context, node),
       PollNode() => buildPoll(context, node),
+      ChatTranscriptNode() => buildChatTranscript(context, node),
       MathBlockNode() => buildMathBlock(context, node),
     };
   }
@@ -853,6 +861,16 @@ class NodeFactory {
     final custom = pollBuilder?.call(context, node);
     if (custom != null) return custom;
     return _PollFallbackCard(node: node);
+  }
+
+  /// 聊天记录渲染 — `<div class="chat-transcript">`。
+  ///
+  /// **优先 [chatTranscriptBuilder]** — 主项目接 legacy buildChatTranscript
+  /// (头像/反应/线程/消息递归);返回 null 时画 fallback 卡。
+  Widget buildChatTranscript(BuildContext context, ChatTranscriptNode node) {
+    final custom = chatTranscriptBuilder?.call(context, node);
+    if (custom != null) return custom;
+    return _ChatTranscriptFallbackCard(node: node);
   }
 
   /// 块级数学公式渲染 — `<div class="math">`(对齐 legacy
@@ -2466,5 +2484,112 @@ class _PollFallbackCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// 聊天记录 fallback 卡(主项目不注入 chatTranscriptBuilder 时)。
+///
+/// 对齐 legacy chat_transcript_builder 的基础视觉:非 chained 时左侧 4px
+/// 竖条 + 圆角;头像首字母 + 用户名 + 消息纯文本(strip HTML)。
+/// 主项目接 builder 后会替换为带头像图/反应/线程/消息递归的完整 widget。
+class _ChatTranscriptFallbackCard extends StatelessWidget {
+  const _ChatTranscriptFallbackCard({required this.node});
+  final ChatTranscriptNode node;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final messageText = _stripHtml(node.messagesHtml);
+    return Container(
+      margin: node.isChained
+          ? EdgeInsets.zero
+          : const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        border: node.isChained
+            ? null
+            : Border(left: BorderSide(color: scheme.outline, width: 4)),
+        borderRadius: node.isChained
+            ? null
+            : const BorderRadius.only(
+                topRight: Radius.circular(4),
+                bottomRight: Radius.circular(4),
+              ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (node.channelName != null && !node.isChained)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.tag_rounded,
+                      size: 14, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 4),
+                  Text(
+                    node.channelName!,
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              12,
+              node.isChained ? 8 : (node.channelName != null ? 4 : 8),
+              12,
+              0,
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 12,
+                  backgroundColor: scheme.surfaceContainerHighest,
+                  child: Text(
+                    node.username.isNotEmpty
+                        ? node.username.characters.first.toUpperCase()
+                        : '?',
+                    style: theme.textTheme.labelSmall,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${node.username}:',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (messageText.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              child: Text(
+                messageText,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  height: 1.5,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 极简 strip HTML(fallback 显示纯文本用)。主项目 builder 走 htmlBuilder
+  /// 递归渲染真 HTML,这里只是无 builder 时的兜底。
+  static String _stripHtml(String html) {
+    return html
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 }

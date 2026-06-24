@@ -413,6 +413,8 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       buf.writeln('$pad$node');
     case PollNode():
       buf.writeln('$pad$node');
+    case ChatTranscriptNode():
+      buf.writeln('$pad$node');
   }
 }
 

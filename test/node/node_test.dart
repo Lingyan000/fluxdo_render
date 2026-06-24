@@ -116,6 +116,7 @@ void main() {
         PolicyNode() => 'policy',
         MathBlockNode() => 'mathBlock',
         PollNode() => 'poll',
+        ChatTranscriptNode() => 'chatTranscript',
       };
       expect(label, 'paragraph');
     });

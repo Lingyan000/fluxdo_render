@@ -15,6 +15,7 @@ import '../render/mention_handler.dart';
 import '../render/node_factory.dart';
 import '../render/onebox_handler.dart';
 import '../render/policy_handler.dart';
+import '../render/chat_transcript_handler.dart';
 import '../render/poll_handler.dart';
 import '../render/quote_avatar_handler.dart';
 
@@ -43,6 +44,7 @@ class FluxdoRender extends StatefulWidget {
     this.localDateBuilder,
     this.policyBuilder,
     this.pollBuilder,
+    this.chatTranscriptBuilder,
     this.mathBlockBuilder,
     this.mathInlineBuilder,
   });
@@ -110,6 +112,10 @@ class FluxdoRender extends StatefulWidget {
   /// 返回 null 时子包 fallback 占位卡。
   final PollBuilder? pollBuilder;
 
+  /// 聊天记录 builder —— 主项目接 legacy buildChatTranscript。
+  /// 返回 null 时子包 fallback 卡。
+  final ChatTranscriptBuilder? chatTranscriptBuilder;
+
   /// 块级数学公式 builder —— 主项目接入 flutter_math_fork。
   /// 返回 null 时子包 fallback 用 monospace `$latex$` 原文。
   final MathBlockBuilder? mathBlockBuilder;
@@ -164,6 +170,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           localDateBuilder: widget.localDateBuilder,
           policyBuilder: widget.policyBuilder,
           pollBuilder: widget.pollBuilder,
+          chatTranscriptBuilder: widget.chatTranscriptBuilder,
           mathBlockBuilder: widget.mathBlockBuilder,
           mathInlineBuilder: widget.mathInlineBuilder,
           totalImagesInPost: _totalImagesInPost,

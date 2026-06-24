@@ -30,6 +30,7 @@ export 'src/render/mention_handler.dart';
 export 'src/render/node_factory.dart';
 export 'src/render/onebox_handler.dart';
 export 'src/render/policy_handler.dart';
+export 'src/render/chat_transcript_handler.dart';
 export 'src/render/poll_handler.dart';
 export 'src/render/quote_avatar_handler.dart';
 export 'src/widget/fluxdo_render.dart';

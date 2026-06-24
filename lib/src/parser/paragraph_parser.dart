@@ -157,6 +157,12 @@ class ParagraphParser {
             out.add(_parsePoll(node, nextId));
             continue;
           }
+          // div.chat-transcript:Discourse chat 转帖(纯 DOM,主项目接 legacy)
+          if (tag == 'div' && node.classes.contains('chat-transcript')) {
+            flushInlines();
+            out.add(_parseChatTranscript(node, nextId));
+            continue;
+          }
           // div.d-image-grid:多图网格(Discourse 原生 image-grid 组件)。
           // 优先于 lightbox-wrapper 检测,因为 grid 内可能含多个 lightbox-wrapper。
           if (tag == 'div' && node.classes.contains('d-image-grid')) {
@@ -954,6 +960,35 @@ class ParagraphParser {
       id: nextId(),
       pollName: pollName,
       title: title,
+      rawHtml: divEl.outerHtml,
+    );
+  }
+
+  /// 解析 `<div class="chat-transcript">` 为 ChatTranscriptNode。
+  ///
+  /// 纯 DOM(不依赖 post API)。提结构化字段给 fallback 用 + rawHtml 给
+  /// 主项目喂 legacy buildChatTranscript。对齐 legacy chat_transcript_builder。
+  ChatTranscriptNode _parseChatTranscript(
+    dom.Element divEl,
+    String Function() nextId,
+  ) {
+    final attrs = divEl.attributes;
+    String? optStr(String key) {
+      final v = attrs[key]?.trim();
+      return (v == null || v.isEmpty) ? null : v;
+    }
+
+    final avatarEl = divEl.querySelector('img.avatar');
+    final messagesEl = divEl.querySelector('.chat-transcript-messages');
+
+    return ChatTranscriptNode(
+      id: nextId(),
+      username: optStr('data-username') ?? '',
+      avatarUrl: avatarEl?.attributes['src']?.trim(),
+      datetime: optStr('data-datetime'),
+      channelName: optStr('data-channel-name'),
+      isChained: divEl.classes.contains('chat-transcript-chained'),
+      messagesHtml: messagesEl?.innerHtml ?? '',
       rawHtml: divEl.outerHtml,
     );
   }
