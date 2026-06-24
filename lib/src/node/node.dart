@@ -1064,8 +1064,10 @@ int countImageRuns(List<BlockNode> nodes) {
         case EmojiRun():
         case MentionRun():
         case FootnoteRefRun():
+        case LocalDateRun():
           // 这些 inline 节点不会含 ImageRun(MentionRun 的 statusEmoji 是
-          // EmojiRun 不是 ImageRun;FootnoteRefRun 只持 content HTML)
+          // EmojiRun 不是 ImageRun;FootnoteRefRun 只持 content HTML;
+          // LocalDateRun 只持 date/time 字符串)
           break;
       }
     }

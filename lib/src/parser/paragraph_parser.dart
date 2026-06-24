@@ -1023,14 +1023,46 @@ class ParagraphParser {
           ));
         }
       case 'span':
-        // span.spoiler / span.spoiled → SpoilerRun;
-        // 其他 span(如 .discourse-local-date / .click-count)留后续阶段,
-        // 当前展平
+        // span.spoiler / span.spoiled → SpoilerRun
         if (el.classes.contains('spoiler') || el.classes.contains('spoiled')) {
           out.add(SpoilerRun(children: List.unmodifiable(children)));
-        } else {
-          out.addAll(children);
+          return;
         }
+        // span.discourse-local-date → LocalDateRun(主项目接 builder 渲染
+        // 真实带时区换算的 chip;子包 fallback 显示服务端预渲染文本)
+        if (el.classes.contains('discourse-local-date')) {
+          final attrs = el.attributes;
+          final date = attrs['data-date']?.trim() ?? '';
+          if (date.isEmpty) {
+            // 无效:date 必填,降级展平
+            out.addAll(children);
+            return;
+          }
+          final time = attrs['data-time']?.trim();
+          final timezone = attrs['data-timezone']?.trim();
+          final timezonesRaw = attrs['data-timezones']?.trim() ?? '';
+          final timezones = timezonesRaw.isEmpty
+              ? const <String>[]
+              : timezonesRaw
+                  .split('|')
+                  .map((s) => s.trim())
+                  .where((s) => s.isNotEmpty)
+                  .toList(growable: false);
+          out.add(LocalDateRun(
+            date: date,
+            time: (time == null || time.isEmpty) ? null : time,
+            timezone: (timezone == null || timezone.isEmpty) ? null : timezone,
+            timezones: timezones,
+            format: attrs['data-format']?.trim(),
+            displayedTimezone: attrs['data-displayed-timezone']?.trim(),
+            countdown: attrs.containsKey('data-countdown'),
+            range: attrs['data-range']?.trim(),
+            fallbackText: el.text.trim(),
+          ));
+          return;
+        }
+        // 其他 span(如 .click-count)留后续阶段,当前展平
+        out.addAll(children);
       default:
         // 未识别 inline:展平子节点
         out.addAll(children);

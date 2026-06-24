@@ -24,6 +24,7 @@ import 'image_handler.dart';
 import 'inline_span_text.dart';
 import 'lazy_video_handler.dart';
 import 'link_handler.dart';
+import 'local_date_handler.dart';
 import 'mention_handler.dart';
 import 'onebox_handler.dart';
 import 'quote_avatar_handler.dart';
@@ -41,6 +42,7 @@ class NodeFactory {
     this.footnoteTapHandler,
     this.lazyVideoBuilder,
     this.iframeBuilder,
+    this.localDateBuilder,
     this.totalImagesInPost = 0,
     this.compact = false,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
@@ -88,6 +90,10 @@ class NodeFactory {
   /// 返回 null 时子包用内置占位卡(图标 + 域名 + 打开按钮)。
   final IframeBuilder? iframeBuilder;
 
+  /// 本地日期 chip builder,主项目注入完整虚线下划线 + 时区换算 + popover。
+  /// 返回 null 时子包用内置 fallback(直接显示服务端预渲染文本 + 时钟图标)。
+  final LocalDateBuilder? localDateBuilder;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -119,6 +125,7 @@ class NodeFactory {
       footnoteTapHandler: footnoteTapHandler,
       lazyVideoBuilder: lazyVideoBuilder,
       iframeBuilder: iframeBuilder,
+      localDateBuilder: localDateBuilder,
       totalImagesInPost: totalImagesInPost,
       compact: true,
     );
@@ -179,6 +186,7 @@ class NodeFactory {
         mentionTapHandler: mentionTapHandler,
         imageContentBuilder: imageContentBuilder,
         footnoteTapHandler: footnoteTapHandler,
+        localDateBuilder: localDateBuilder,
         totalImagesInPost: totalImagesInPost,
       ),
     );
@@ -211,6 +219,7 @@ class NodeFactory {
         mentionTapHandler: mentionTapHandler,
         imageContentBuilder: imageContentBuilder,
         footnoteTapHandler: footnoteTapHandler,
+        localDateBuilder: localDateBuilder,
         totalImagesInPost: totalImagesInPost,
       ),
     );
@@ -287,7 +296,8 @@ class NodeFactory {
                   emojiImageBuilder: emojiImageBuilder,
                   mentionTapHandler: mentionTapHandler,
                   imageContentBuilder: imageContentBuilder,
-        footnoteTapHandler: footnoteTapHandler,
+                  footnoteTapHandler: footnoteTapHandler,
+                  localDateBuilder: localDateBuilder,
                   totalImagesInPost: totalImagesInPost,
                 ),
               ),

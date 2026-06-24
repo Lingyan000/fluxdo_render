@@ -448,6 +448,8 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
       }
     case FootnoteRefRun():
       buf.writeln('$pad$node');
+    case LocalDateRun():
+      buf.writeln('$pad$node');
   }
 }
 

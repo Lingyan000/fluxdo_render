@@ -9,6 +9,7 @@ import '../render/iframe_handler.dart';
 import '../render/image_handler.dart';
 import '../render/lazy_video_handler.dart';
 import '../render/link_handler.dart';
+import '../render/local_date_handler.dart';
 import '../render/mention_handler.dart';
 import '../render/node_factory.dart';
 import '../render/onebox_handler.dart';
@@ -36,6 +37,7 @@ class FluxdoRender extends StatefulWidget {
     this.footnoteTapHandler,
     this.lazyVideoBuilder,
     this.iframeBuilder,
+    this.localDateBuilder,
   });
 
   /// Discourse cooked HTML 内容。
@@ -89,6 +91,10 @@ class FluxdoRender extends StatefulWidget {
   /// 返回 null 时子包用内置占位卡(图标 + 域名 + 打开按钮)。
   final IframeBuilder? iframeBuilder;
 
+  /// 本地日期 chip builder —— 主项目注入完整虚线下划线 + 时区换算 + popover。
+  /// 返回 null 时子包用内置 fallback(服务端预渲染文本 + 时钟图标)。
+  final LocalDateBuilder? localDateBuilder;
+
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
 }
@@ -132,6 +138,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           footnoteTapHandler: widget.footnoteTapHandler,
           lazyVideoBuilder: widget.lazyVideoBuilder,
           iframeBuilder: widget.iframeBuilder,
+          localDateBuilder: widget.localDateBuilder,
           totalImagesInPost: _totalImagesInPost,
         );
     if (_nodes.isEmpty) {

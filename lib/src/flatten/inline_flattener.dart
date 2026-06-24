@@ -31,6 +31,7 @@ import '../render/emoji_handler.dart';
 import '../render/footnote_handler.dart';
 import '../render/image_handler.dart';
 import '../render/link_handler.dart';
+import '../render/local_date_handler.dart';
 import '../render/mention_handler.dart';
 
 /// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers。
@@ -68,6 +69,7 @@ class InlineFlattener {
     MentionTapHandler? mentionTapHandler,
     ImageContentBuilder? imageContentBuilder,
     FootnoteTapHandler? footnoteTapHandler,
+    LocalDateBuilder? localDateBuilder,
     int totalImagesInPost = 0,
     BuildContext? context,
   }) {
@@ -87,6 +89,7 @@ class InlineFlattener {
         mentionHandler,
         imageBuilder,
         footnoteHandler,
+        localDateBuilder,
         emojiBaseSize,
         totalImagesInPost,
         context,
@@ -106,6 +109,7 @@ class InlineFlattener {
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
     FootnoteTapHandler footnoteHandler,
+    LocalDateBuilder? localDateBuilder,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -121,6 +125,8 @@ class InlineFlattener {
           mentionHandler,
           imageBuilder,
           footnoteHandler,
+
+          localDateBuilder,
           emojiBaseSize,
           totalImagesInPost,
           context,
@@ -137,6 +143,7 @@ class InlineFlattener {
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
     FootnoteTapHandler footnoteHandler,
+    LocalDateBuilder? localDateBuilder,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -157,6 +164,8 @@ class InlineFlattener {
             mentionHandler,
             imageBuilder,
             footnoteHandler,
+
+            localDateBuilder,
             emojiBaseSize,
             totalImagesInPost,
             context,
@@ -173,6 +182,8 @@ class InlineFlattener {
             mentionHandler,
             imageBuilder,
             footnoteHandler,
+
+            localDateBuilder,
             emojiBaseSize,
             totalImagesInPost,
             context,
@@ -192,6 +203,8 @@ class InlineFlattener {
           mentionHandler,
           imageBuilder,
           footnoteHandler,
+
+          localDateBuilder,
           emojiBaseSize,
           totalImagesInPost,
           context,
@@ -229,6 +242,8 @@ class InlineFlattener {
           mentionHandler,
           imageBuilder,
           footnoteHandler,
+
+          localDateBuilder,
           emojiBaseSize,
           totalImagesInPost,
           context,
@@ -238,6 +253,10 @@ class InlineFlattener {
           node,
           footnoteHandler,
           context,
+        ),
+      LocalDateRun() => _buildLocalDateSpan(
+          node,
+          localDateBuilder,
         ),
     };
   }
@@ -250,6 +269,7 @@ class InlineFlattener {
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
     FootnoteTapHandler footnoteHandler,
+    LocalDateBuilder? localDateBuilder,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -282,6 +302,8 @@ class InlineFlattener {
         mentionHandler,
         imageBuilder,
         footnoteHandler,
+
+        localDateBuilder,
         emojiBaseSize,
         totalImagesInPost,
         context,
@@ -505,6 +527,7 @@ class InlineFlattener {
     MentionTapHandler mentionHandler,
     ImageContentBuilder imageBuilder,
     FootnoteTapHandler footnoteHandler,
+    LocalDateBuilder? localDateBuilder,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -519,6 +542,8 @@ class InlineFlattener {
       mentionHandler,
       imageBuilder,
       footnoteHandler,
+
+      localDateBuilder,
       emojiBaseSize,
       totalImagesInPost,
       context,
@@ -627,6 +652,65 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget> {
                 borderRadius: BorderRadius.circular(3),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+extension on InlineFlattener {
+  /// 本地日期渲染:优先调主项目注入的 [localDateBuilder](带时区换算 +
+  /// popover);fallback 显示 fallbackText(服务端预渲染)+ 时钟图标。
+  ///
+  /// 子包不绑 `timezone` / `flutter_timezone` / `popover` 等重依赖。
+  WidgetSpan _buildLocalDateSpan(
+    LocalDateRun node,
+    LocalDateBuilder? localDateBuilder,
+  ) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: Builder(
+        builder: (context) {
+          final custom = localDateBuilder?.call(context, node);
+          if (custom != null) return custom;
+          return _LocalDateFallbackWidget(node: node);
+        },
+      ),
+    );
+  }
+}
+
+/// 子包内置本地日期 fallback widget — 直接显示服务端预渲染文本 +
+/// 时钟图标(无时区换算 / 无 popover)。主项目接入 LocalDateBuilder 后
+/// 会被替换。
+class _LocalDateFallbackWidget extends StatelessWidget {
+  const _LocalDateFallbackWidget({required this.node});
+  final LocalDateRun node;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final fontSize = theme.textTheme.bodyMedium?.fontSize ?? 14;
+    final text = node.fallbackText.isNotEmpty
+        ? node.fallbackText
+        : (node.time == null ? node.date : '${node.date} ${node.time}');
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(
+            node.countdown ? Icons.schedule_rounded : Icons.public_rounded,
+            size: fontSize * 0.95,
+            color: scheme.primary,
+          ),
+          const SizedBox(width: 3),
+          Text(
+            text,
+            style: TextStyle(color: scheme.primary, fontSize: fontSize),
           ),
         ],
       ),

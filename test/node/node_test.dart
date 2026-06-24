@@ -143,6 +143,7 @@ void main() {
               ImageRun() => 'image',
               SpoilerRun() => 'spoiler',
               FootnoteRefRun() => 'footnoteRef',
+              LocalDateRun() => 'localDate',
             },
           )
           .toList();

@@ -14,6 +14,7 @@ import 'emoji_handler.dart';
 import 'footnote_handler.dart';
 import 'image_handler.dart';
 import 'link_handler.dart';
+import 'local_date_handler.dart';
 import 'mention_handler.dart';
 
 class InlineSpanText extends StatefulWidget {
@@ -27,6 +28,7 @@ class InlineSpanText extends StatefulWidget {
     this.mentionTapHandler,
     this.imageContentBuilder,
     this.footnoteTapHandler,
+    this.localDateBuilder,
     this.totalImagesInPost = 0,
     this.textAlign,
   });
@@ -39,6 +41,7 @@ class InlineSpanText extends StatefulWidget {
   final MentionTapHandler? mentionTapHandler;
   final ImageContentBuilder? imageContentBuilder;
   final FootnoteTapHandler? footnoteTapHandler;
+  final LocalDateBuilder? localDateBuilder;
   final int totalImagesInPost;
   final TextAlign? textAlign;
 
@@ -76,6 +79,7 @@ class _InlineSpanTextState extends State<InlineSpanText> {
       mentionTapHandler: widget.mentionTapHandler,
       imageContentBuilder: widget.imageContentBuilder,
       footnoteTapHandler: widget.footnoteTapHandler,
+      localDateBuilder: widget.localDateBuilder,
       totalImagesInPost: widget.totalImagesInPost,
       context: context,
     );

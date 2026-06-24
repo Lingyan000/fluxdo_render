@@ -424,3 +424,107 @@ class FootnoteRefRun extends InlineNode {
   String toString() =>
       'FootnoteRefRun(#$number → $fnId${contentHtml == null ? "" : ", ${contentHtml!.length} chars"})';
 }
+
+/// Discourse 本地日期 — `<span class="discourse-local-date">` 行内时间 chip。
+///
+/// cooked 形态(Discourse 插件 `discourse-local-dates` 渲染):
+/// ```html
+/// <span class="discourse-local-date"
+///       data-date="2026-04-01"
+///       data-time="22:00"
+///       data-timezone="Asia/Shanghai"
+///       data-timezones="Europe/Paris|America/Los_Angeles"
+///       data-format="LLL"
+///       data-countdown
+///       data-range="from"
+///       data-displayed-timezone="Asia/Shanghai">
+///   2026年4月1日 22:00 ← 服务端预渲染文本(中文 / 各 locale)
+/// </span>
+/// ```
+///
+/// 子包**只持原始字段**,不做时区换算(需要 `timezone`/`flutter_timezone`
+/// 等重依赖):
+/// - 主项目通过 [LocalDateBuilder] callback 注入完整 chip(虚线下划线 +
+///   图标 + 本地时区文本 + 点击弹多时区 popover)
+/// - 不传 builder 时子包用内置 fallback:展示 [fallbackText](服务端预
+///   渲染的字符串)+ 时钟图标,无时区换算
+///
+/// [fallbackText] 是 span 元素的 textContent —— Discourse 服务端按帖子作者
+/// 时区预渲染了一段可读字符串,主项目即使没接 builder,也能看到原始时间。
+@immutable
+class LocalDateRun extends InlineNode {
+  const LocalDateRun({
+    required this.date,
+    required this.fallbackText,
+    this.time,
+    this.timezone,
+    this.timezones = const [],
+    this.format,
+    this.displayedTimezone,
+    this.countdown = false,
+    this.range,
+  });
+
+  /// `data-date="2026-04-01"`(YYYY-MM-DD)。空 = 无效时间(parser 会跳过)。
+  final String date;
+
+  /// `data-time="22:00"`(HH:mm 或 HH:mm:ss),null = 仅日期不带时分。
+  final String? time;
+
+  /// `data-timezone="Asia/Shanghai"`,作者所在时区。
+  final String? timezone;
+
+  /// `data-timezones="A|B|C"` 拆分后的列表(popover 多时区预览)。
+  /// 空时主项目按站点默认值兜底(`Europe/Paris`, `America/Los_Angeles`)。
+  final List<String> timezones;
+
+  /// `data-format`,moment.js 格式 token(`LL` / `LLL` / `LLLL` / `LT` 等)。
+  final String? format;
+
+  /// `data-displayed-timezone`,强制以某时区显示(罕见)。
+  final String? displayedTimezone;
+
+  /// `data-countdown` 属性存在 = 倒计时模式。
+  final bool countdown;
+
+  /// `data-range="from"` / `"to"` / null,标记范围起止(可选)。
+  final String? range;
+
+  /// span 的 textContent — Discourse 服务端预渲染的兜底文本。
+  /// 子包不做时区换算时直接显示这段。
+  final String fallbackText;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LocalDateRun &&
+          runtimeType == other.runtimeType &&
+          date == other.date &&
+          time == other.time &&
+          timezone == other.timezone &&
+          format == other.format &&
+          displayedTimezone == other.displayedTimezone &&
+          countdown == other.countdown &&
+          range == other.range &&
+          fallbackText == other.fallbackText &&
+          listEquals(timezones, other.timezones);
+
+  @override
+  int get hashCode => Object.hash(
+        date,
+        time,
+        timezone,
+        format,
+        displayedTimezone,
+        countdown,
+        range,
+        fallbackText,
+        Object.hashAll(timezones),
+      );
+
+  @override
+  String toString() =>
+      'LocalDateRun($date${time == null ? "" : " $time"}'
+      '${timezone == null ? "" : " @$timezone"}'
+      '${countdown ? ", countdown" : ""})';
+}

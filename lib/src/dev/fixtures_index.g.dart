@@ -795,6 +795,34 @@ bullet marker (•) + padding-left 20。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''local_date/countdown.html''',
+    html: r'''<p>距离开抢还有 <span class="discourse-local-date" data-date="2026-10-01" data-time="00:00" data-timezone="Asia/Shanghai" data-countdown="true">3 小时</span>!</p>
+''',
+    notes: r'''倒计时 chip(data-countdown 属性存在)。
+fallback 渲染:时钟图标(schedule_rounded)+ 服务端预渲染 "3 小时"。''',
+    source: r'''https://example.com/t/sample/1/ld3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''local_date/date_only.html''',
+    html: r'''<p>仅日期:<span class="discourse-local-date" data-date="2026-12-25" data-format="LL">2026年12月25日</span> 圣诞节。</p>
+''',
+    notes: r'''仅日期 chip(无 data-time,format=LL)。
+fallback 渲染:服务端文本 "2026年12月25日"。''',
+    source: r'''https://example.com/t/sample/1/ld2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''local_date/meeting_with_timezones.html''',
+    html: r'''<p>会议时间:<span class="discourse-local-date" data-date="2026-08-15" data-time="14:30" data-timezone="Asia/Shanghai" data-timezones="Europe/Paris|America/Los_Angeles" data-format="LLL">2026年8月15日 下午2:30</span>,请提前 10 分钟到场。</p>
+''',
+    notes: r'''会议时间 chip(带时区 + 多时区预览 + LLL 格式)。
+子包 fallback:服务端预渲染文本 + 时钟图标。
+主项目接入 localDateBuilder 后会换成虚线下划线 + popover 多时区。''',
+    source: r'''https://example.com/t/sample/1/ld1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''mention/group_mention.html''',
     html: r'''<p>问题反馈给 <a class="mention" href="/u/team_support">@team_support</a> 组,而不是个人。</p>
 ''',
