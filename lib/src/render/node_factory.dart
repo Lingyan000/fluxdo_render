@@ -149,6 +149,7 @@ class NodeFactory {
       FootnotesSectionNode() => const SizedBox.shrink(),
       LazyVideoNode() => buildLazyVideo(context, node),
       IframeNode() => buildIframe(context, node),
+      TableNode() => buildTable(context, node),
     };
   }
 
@@ -776,6 +777,22 @@ class NodeFactory {
         }
       },
     );
+  }
+
+  /// 表格渲染 — `<table>`(对齐 legacy `table_builder.dart`)。
+  ///
+  /// 视觉:
+  ///   外:margin v8 + Container outline 边框 + 圆角 8
+  ///   水平 SingleChildScrollView(列宽超出屏幕宽时滚动)
+  ///   表头:surfaceContainerHighest 灰底 + 加粗
+  ///   每 cell:fixed 列宽(预算 60..200 clamp,前 10 行采样 TextPainter)
+  ///   + 8px padding + 列右 1px 分隔线
+  ///   每行:底部 1px 分隔线
+  ///   行数 > [_kVirtualizeThreshold]:ListView.builder 行虚拟化 + 显示总行数
+  ///
+  /// cell 内子节点走 _compactCopy 渲染(消除嵌套 paragraph 多余 margin)。
+  Widget buildTable(BuildContext context, TableNode node) {
+    return _TableWidget(node: node, childFactory: _compactCopy());
   }
 }
 
@@ -1922,5 +1939,280 @@ class _IframePlaceholderCard extends StatelessWidget {
     var host = uri.host;
     if (host.startsWith('www.')) host = host.substring(4);
     return host.isEmpty ? src : host;
+  }
+}
+
+/// 表格渲染常量,对齐 legacy table_builder.dart。
+const double _kTableMinColWidth = 60;
+const double _kTableMaxColWidth = 200;
+const EdgeInsets _kTableCellPadding = EdgeInsets.all(8);
+const double _kTableEstimatedRowHeight = 44;
+const int _kTableVirtualizeThreshold = 30;
+
+/// 表格 widget — 含列宽预算 + 水平滚动 + 表头特殊背景 + 大表格虚拟化。
+///
+/// childFactory 是 NodeFactory 的 compact 副本(消除 cell 内 paragraph
+/// 多余 margin),build cell 时用它递归 build cell.children。
+class _TableWidget extends StatelessWidget {
+  const _TableWidget({required this.node, required this.childFactory});
+  final TableNode node;
+  final NodeFactory childFactory;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final borderColor = scheme.outlineVariant;
+    final columnWidths = _computeColumnWidths(theme);
+    // 外框 width=1 会从 totalWidth 扣 2px 给子级,加回避免两列表格 Row 溢出 1px
+    final totalWidth = columnWidths.fold<double>(0, (s, w) => s + w) + 2;
+
+    // 分离 header / body
+    final headerRow = node.hasHeader && node.rows.isNotEmpty ? node.rows.first : null;
+    final bodyRows = node.hasHeader && node.rows.isNotEmpty
+        ? node.rows.sublist(1)
+        : node.rows;
+
+    Widget bodyWidget;
+    if (bodyRows.length > _kTableVirtualizeThreshold) {
+      // 大表格行虚拟化(避免一次性 build 数百行 RichText)
+      final maxHeight = MediaQuery.of(context).size.height * 0.5;
+      final estimatedHeight = bodyRows.length * _kTableEstimatedRowHeight;
+      bodyWidget = SizedBox(
+        height: estimatedHeight < maxHeight ? estimatedHeight : maxHeight,
+        child: ListView.builder(
+          itemCount: bodyRows.length,
+          itemExtent: _kTableEstimatedRowHeight,
+          itemBuilder: (ctx, i) => _buildRow(
+            ctx, theme, bodyRows[i], columnWidths, borderColor,
+            isHeader: false,
+          ),
+        ),
+      );
+    } else {
+      bodyWidget = Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final r in bodyRows)
+            _buildRow(context, theme, r, columnWidths, borderColor,
+                isHeader: false),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Container(
+          width: totalWidth,
+          decoration: BoxDecoration(
+            border: Border.all(color: borderColor, width: 1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (headerRow != null)
+                  _buildRow(context, theme, headerRow, columnWidths,
+                      borderColor,
+                      isHeader: true),
+                bodyWidget,
+                if (bodyRows.length > _kTableVirtualizeThreshold)
+                  _buildInfoBar(context, theme, borderColor, node.rows.length),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 用 TextPainter 采样前 10 行 cell.textContent 算列宽(对齐 legacy)。
+  /// TextPainter 比真 build 一次 widget 树快几个数量级,精度足够。
+  List<double> _computeColumnWidths(ThemeData theme) {
+    final widths = List<double>.filled(node.columnCount, _kTableMinColWidth);
+    final baseStyle = theme.textTheme.bodyMedium ??
+        const TextStyle(fontSize: 14);
+    final sampleCount = node.rows.length < 11 ? node.rows.length : 11;
+    for (var i = 0; i < sampleCount; i++) {
+      final row = node.rows[i];
+      for (var col = 0; col < row.length && col < node.columnCount; col++) {
+        final text = _cellText(row[col]);
+        if (text.isEmpty) continue;
+        final style = row[col].isHeader
+            ? baseStyle.copyWith(fontWeight: FontWeight.w600)
+            : baseStyle;
+        final painter = TextPainter(
+          text: TextSpan(text: text, style: style),
+          textDirection: TextDirection.ltr,
+          maxLines: 1,
+        )..layout();
+        final measured = painter.width + _kTableCellPadding.horizontal;
+        if (measured > widths[col]) widths[col] = measured;
+        painter.dispose();
+      }
+    }
+    // clamp
+    for (var i = 0; i < node.columnCount; i++) {
+      widths[i] = widths[i].clamp(_kTableMinColWidth, _kTableMaxColWidth);
+    }
+    return widths;
+  }
+
+  /// 从 cell.children 提纯文本(用于列宽测量,不参与实际渲染)
+  String _cellText(TableCellData cell) {
+    final buf = StringBuffer();
+    void scanInlines(List<InlineNode> nodes) {
+      for (final n in nodes) {
+        switch (n) {
+          case TextRun(:final text):
+            buf.write(text);
+          case EmRun(:final children):
+          case StrongRun(:final children):
+          case LinkRun(:final children):
+          case SpoilerRun(:final children):
+            scanInlines(children);
+          case InlineCodeRun(:final text):
+            buf.write(text);
+          case MentionRun(:final username):
+            buf.write('@$username');
+          case EmojiRun(:final name):
+            buf.write(':$name:');
+          case LocalDateRun(:final fallbackText):
+            buf.write(fallbackText);
+          case ImageRun() ||
+                LineBreakRun() ||
+                FootnoteRefRun():
+            break;
+        }
+      }
+    }
+
+    void scanBlock(BlockNode b) {
+      switch (b) {
+        case ParagraphNode(:final inlines):
+        case HeadingNode(:final inlines):
+          scanInlines(inlines);
+        case ListNode(:final items):
+          for (final item in items) {
+            scanInlines(item.inlines);
+          }
+        case BlockquoteNode(:final children):
+        case QuoteCardNode(:final children):
+        case SpoilerBlockNode(:final children):
+        case DetailsNode(:final children):
+        case CalloutNode(:final children):
+          for (final c in children) {
+            scanBlock(c);
+          }
+        case CodeBlockNode(:final code):
+          buf.write(code);
+        case _:
+          break;
+      }
+    }
+
+    for (final c in cell.children) {
+      scanBlock(c);
+    }
+    return buf.toString().trim();
+  }
+
+  Widget _buildRow(
+    BuildContext context,
+    ThemeData theme,
+    List<TableCellData> row,
+    List<double> columnWidths,
+    Color borderColor, {
+    required bool isHeader,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isHeader
+            ? theme.colorScheme.surfaceContainerHighest
+            : null,
+        border: Border(
+          bottom: BorderSide(color: borderColor, width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          for (var col = 0; col < node.columnCount; col++)
+            _buildCell(
+              context,
+              theme,
+              col < row.length ? row[col] : null,
+              columnWidths[col],
+              borderColor,
+              isLeftBorder: col > 0,
+              isHeaderRow: isHeader,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCell(
+    BuildContext context,
+    ThemeData theme,
+    TableCellData? cell,
+    double width,
+    Color borderColor, {
+    required bool isLeftBorder,
+    required bool isHeaderRow,
+  }) {
+    return Container(
+      width: width,
+      decoration: isLeftBorder
+          ? BoxDecoration(
+              border: Border(
+                left: BorderSide(color: borderColor, width: 1),
+              ),
+            )
+          : null,
+      padding: _kTableCellPadding,
+      child: cell == null
+          ? const SizedBox.shrink()
+          : DefaultTextStyle.merge(
+              style: (isHeaderRow || cell.isHeader)
+                  ? const TextStyle(fontWeight: FontWeight.w600)
+                  : const TextStyle(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final b in cell.children) childFactory.build(context, b),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _buildInfoBar(
+    BuildContext context,
+    ThemeData theme,
+    Color borderColor,
+    int totalRows,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        border: Border(
+          top: BorderSide(color: borderColor, width: 1),
+        ),
+      ),
+      child: Text(
+        'Table · $totalRows rows',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
   }
 }

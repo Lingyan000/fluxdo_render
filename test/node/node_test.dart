@@ -112,6 +112,7 @@ void main() {
         FootnotesSectionNode() => 'footnotesSection',
         LazyVideoNode() => 'lazyVideo',
         IframeNode() => 'iframe',
+        TableNode() => 'table',
       };
       expect(label, 'paragraph');
     });

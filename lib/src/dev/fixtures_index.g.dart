@@ -1205,4 +1205,68 @@ charlie:
     source: r'''https://example.com/t/sample/1/sp3''',
     edgeCase: true,
   ),
+  FixtureEntry(
+    relativePath: r'''table/no_thead_bare_tr.html''',
+    html: r'''<table>
+<tr><td>无表头</td><td>所有行都是 body</td></tr>
+<tr><td>第二行</td><td>简形态</td></tr>
+</table>
+''',
+    notes: r'''无 thead/tbody,裸 tr。验证 parser fallback:全部行当 body。
+hasHeader=false。''',
+    source: r'''https://example.com/t/sample/1/tb3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''table/rich_inline_cells.html''',
+    html: r'''<table>
+<thead>
+<tr><th>项目</th><th>说明</th><th>链接</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>加粗</strong>项</td><td>含 <em>斜体</em> 和 <code>code</code></td><td><a href="https://example.com">点这里</a></td></tr>
+<tr><td>普通文本</td><td>包含 <a href="/mention">@user</a> 引用</td><td>无</td></tr>
+</tbody>
+</table>
+''',
+    notes: r'''cell 含 strong/em/code/link 富 inline 内容。
+验证 cell.children 递归 _parseBlocks 保留全部样式。''',
+    source: r'''https://example.com/t/sample/1/tb2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''table/simple_2col.html''',
+    html: r'''<table>
+<thead>
+<tr><th>列名 A</th><th>列名 B</th></tr>
+</thead>
+<tbody>
+<tr><td>值 1</td><td>值 2</td></tr>
+<tr><td>值 3</td><td>值 4</td></tr>
+</tbody>
+</table>
+''',
+    notes: r'''最简 2 列 2 行表格,thead + tbody。
+渲染:灰底表头加粗 + 边框 + 圆角。''',
+    source: r'''https://example.com/t/sample/1/tb1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''table/uneven_columns.html''',
+    html: r'''<table>
+<thead>
+<tr><th>姓名</th><th>年龄</th></tr>
+</thead>
+<tbody>
+<tr><td>张三</td><td>30</td></tr>
+<tr><td>李四</td></tr>
+<tr><td>王五</td><td>25</td><td>额外列</td></tr>
+</tbody>
+</table>
+''',
+    notes: r'''行列数不齐:header 2 列,row1 2 列,row2 1 列(缺),row3 3 列(多)。
+columnCount = max = 3;缺列补空,多列正常显示。''',
+    source: r'''https://example.com/t/sample/1/tb4''',
+    edgeCase: false,
+  ),
 ];

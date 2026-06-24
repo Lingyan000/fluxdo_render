@@ -1039,6 +1039,116 @@ class IframeNode extends BlockNode {
   String toString() => 'IframeNode($id, $src)';
 }
 
+/// 表格单元格 — `<th>` / `<td>`。
+///
+/// [children] 是 cell 内 BlockNode 序列(parser 用 `_parseBlocks` 递归)。
+/// 绝大多数 cell 就是 inline 内容(一个 ParagraphNode),少数 cell 含
+/// list / quote 等块级 — children 模型一次性覆盖。
+///
+/// [isHeader] = `<th>` 或位于 `<thead>` 内的 cell。渲染时表头加粗 + 灰底。
+///
+/// 不是 BlockNode,只是 TableNode 内部数据结构(类似 ListItem)。
+@immutable
+class TableCellData {
+  const TableCellData({
+    required this.children,
+    this.isHeader = false,
+  });
+
+  /// cell 内的块级子节点(递归 parse)。
+  final List<BlockNode> children;
+
+  /// 是否为表头单元格(`<th>` 或 thead 内的 `<td>`)。
+  final bool isHeader;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TableCellData &&
+          runtimeType == other.runtimeType &&
+          isHeader == other.isHeader &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hash(isHeader, Object.hashAll(children));
+
+  @override
+  String toString() =>
+      'TableCellData(${children.length} children${isHeader ? ", header" : ""})';
+}
+
+/// 表格 — `<table>`,含可选 `<thead>` + `<tbody>` + 任意 `<tr>` 行。
+///
+/// HTML 形态(典型 markdown table cooked):
+/// ```html
+/// <table>
+///   <thead>
+///     <tr><th>列1</th><th>列2</th></tr>
+///   </thead>
+///   <tbody>
+///     <tr><td>值A</td><td>值B</td></tr>
+///   </tbody>
+/// </table>
+/// ```
+///
+/// 视觉对齐 legacy `table_builder.dart`:
+///   外:margin v8 + Container 灰边框 + 圆角 8 + 水平 SingleChildScrollView
+///   表头(若有):surfaceContainerHighest 灰底 + 加粗
+///   每 cell:fixed 列宽(预算 60..200 clamp)+ 8px padding + 列右 1px 分隔线
+///   每行:底部 1px 分隔线
+///   大表格(行数 > 30)用 ListView.builder 行虚拟化(子包简化:阈值
+///   作为 [virtualizeThreshold] 字段暴露,主项目可调)
+///
+/// **简化(相对 legacy)**:
+/// - 不实现 screenshotMode 分支(用 Table widget + FittedBox)— 主项目
+///   截图场景可单独走自定义渲染
+/// - 不持 `ScanBoundary`(主项目业务概念)
+@immutable
+class TableNode extends BlockNode {
+  const TableNode({
+    required super.id,
+    required this.rows,
+    required this.columnCount,
+    this.hasHeader = false,
+  });
+
+  /// 全部行(含 header 行)。`hasHeader=true` 时第一行就是 header,
+  /// 其余是 body;`hasHeader=false` 时全部 body。
+  ///
+  /// 这种"一锅烩"模型比拆 `headerRow + bodyRows` 简洁,渲染时按 index 0
+  /// + hasHeader 判断,且能保留无 thead/tbody 标签时的原始顺序。
+  final List<List<TableCellData>> rows;
+
+  /// 列数 = `max(row.length for row in rows)`。
+  /// 不够列数的行右侧补 SizedBox.shrink(legacy 同处理)。
+  final int columnCount;
+
+  /// 是否有表头行(`<thead>` 存在 或 第一行全 `<th>`)。
+  final bool hasHeader;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TableNode &&
+          runtimeType == other.runtimeType &&
+          columnCount == other.columnCount &&
+          hasHeader == other.hasHeader &&
+          listEquals(rows.map(List.unmodifiable).toList(),
+              other.rows.map(List.unmodifiable).toList());
+
+  @override
+  int get hashCode => Object.hash(
+        columnCount,
+        hasHeader,
+        Object.hashAll(rows.map(Object.hashAll)),
+      );
+
+  @override
+  String toString() =>
+      'TableNode($id, ${rows.length} rows × $columnCount cols'
+      '${hasHeader ? ", with header" : ""})';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -1128,6 +1238,15 @@ int countImageRuns(List<BlockNode> nodes) {
       case IframeNode():
         // iframe 内部由 webview 自管,子包不感知里头有几张图
         break;
+      case TableNode(:final rows):
+        // 表格内 cell 可能含图片 — 递归 cell.children
+        for (final row in rows) {
+          for (final cell in row) {
+            for (final c in cell.children) {
+              scanBlock(c);
+            }
+          }
+        }
     }
   }
 

@@ -266,6 +266,11 @@ class ParagraphParser {
                 // 嵌入 iframe — 子包不渲染 webview,只产 IframeNode 让主项目
                 // 通过 iframeBuilder 注入真实 widget,fallback 显示占位卡。
                 out.add(_parseIframe(node, nextId));
+              case 'table':
+                // 表格 — thead/tbody/tr/th/td 递归;cell 内 children
+                // 走 _parseBlocks(保留 inline 样式 + 嵌套块级)
+                final t = _parseTable(node, nextId, nextImageIndex);
+                if (t != null) out.add(t);
               // 注意:div.lightbox-wrapper 在块级 switch 之前已被截获
               // 走 pendingInlines 流(不会到达这里),目的是让连续多张
               // lightbox 图合并到同一 ParagraphNode,消除 1em+1em 段间距。
@@ -901,6 +906,86 @@ class ParagraphParser {
       lazyLoad: lazyLoad,
       cssClasses: el.classes.toSet(),
     );
+  }
+
+  /// 解析 `<table>` 为 TableNode。
+  ///
+  /// 形态:
+  /// - 含 `<thead><tr>...<th>...</th></tr></thead><tbody><tr>...</tr></tbody>`
+  /// - 或只有 `<tbody><tr>...</tr></tbody>`
+  /// - 或裸 `<tr>...</tr>`(无 thead/tbody)
+  ///
+  /// 处理:
+  /// - thead 内每个 tr → header 行(cell.isHeader=true)
+  /// - tbody / 裸 tr → body 行
+  /// - cell.children = _parseBlocks(td/th.nodes)(支持 cell 内 inline +
+  ///   嵌套 block;绝大多数 cell 就是单段 ParagraphNode)
+  /// - columnCount = max(row.length)
+  ///
+  /// 返回 null:无任何 tr。
+  TableNode? _parseTable(
+    dom.Element tableEl,
+    String Function() nextId,
+    int Function() nextImageIndex,
+  ) {
+    final rows = <List<TableCellData>>[];
+    var hasHeader = false;
+
+    final theads = tableEl.getElementsByTagName('thead');
+    if (theads.isNotEmpty) {
+      hasHeader = true;
+      for (final tr in theads.first.getElementsByTagName('tr')) {
+        rows.add(_parseTableRow(tr, nextId, nextImageIndex, forceHeader: true));
+      }
+    }
+
+    final tbodies = tableEl.getElementsByTagName('tbody');
+    if (tbodies.isNotEmpty) {
+      for (final tr in tbodies.first.getElementsByTagName('tr')) {
+        rows.add(_parseTableRow(tr, nextId, nextImageIndex));
+      }
+    } else if (theads.isEmpty) {
+      // 裸 tr(无 thead/tbody)— 全当 body
+      for (final tr in tableEl.getElementsByTagName('tr')) {
+        rows.add(_parseTableRow(tr, nextId, nextImageIndex));
+      }
+    }
+
+    if (rows.isEmpty) return null;
+
+    final columnCount =
+        rows.map((r) => r.length).reduce((a, b) => a > b ? a : b);
+    if (columnCount == 0) return null;
+
+    return TableNode(
+      id: nextId(),
+      rows: List.unmodifiable(rows.map(List<TableCellData>.unmodifiable)),
+      columnCount: columnCount,
+      hasHeader: hasHeader,
+    );
+  }
+
+  /// 解析 `<tr>` 内的 `<th>` / `<td>`,每个 cell 走 _parseBlocks 递归。
+  ///
+  /// [forceHeader]:thead 内的 tr,即使是 `<td>` 也算 header。
+  List<TableCellData> _parseTableRow(
+    dom.Element tr,
+    String Function() nextId,
+    int Function() nextImageIndex, {
+    bool forceHeader = false,
+  }) {
+    final cells = <TableCellData>[];
+    for (final child in tr.children) {
+      final tag = child.localName?.toLowerCase() ?? '';
+      if (tag != 'th' && tag != 'td') continue;
+      final isHeader = forceHeader || tag == 'th';
+      final children = _parseBlocks(child.nodes, nextId, nextImageIndex);
+      cells.add(TableCellData(
+        children: List.unmodifiable(children),
+        isHeader: isHeader,
+      ));
+    }
+    return cells;
   }
 
   /// 把一个 inline element 转成 InlineNode 加入 out。
