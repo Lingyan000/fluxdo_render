@@ -468,6 +468,9 @@ class InlineFlattener {
           final scheme = Theme.of(effectiveCtx).colorScheme;
           final fontSize = emojiBaseSize * 0.82;
           final statusEmojiSize = fontSize * 1.2;
+          // chip 高度锁定 = 正文行高(主项目正文统一 height:1.5),让 chip
+          // 填满整行、不矮浮也不撑高;小一号文字在内部垂直居中。
+          final lineHeight = emojiBaseSize * 1.5;
           return GestureDetector(
             onTap: () => mentionHandler(
               effectiveCtx,
@@ -475,7 +478,9 @@ class InlineFlattener {
               mention.href,
             ),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              height: lineHeight,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHigh,
                 borderRadius: BorderRadius.circular(10),
@@ -488,6 +493,7 @@ class InlineFlattener {
                     style: TextStyle(
                       color: scheme.primary,
                       fontSize: fontSize,
+                      height: 1.0,
                     ),
                   ),
                   if (mention.statusEmoji != null) ...[
