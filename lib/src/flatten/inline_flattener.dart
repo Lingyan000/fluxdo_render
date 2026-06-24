@@ -479,7 +479,6 @@ class InlineFlattener {
             ),
             child: Container(
               height: lineHeight,
-              alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(horizontal: 6),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHigh,
@@ -487,6 +486,7 @@ class InlineFlattener {
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Text(
                     '@${mention.username}',
