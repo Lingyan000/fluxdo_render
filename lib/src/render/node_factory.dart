@@ -25,6 +25,7 @@ import 'inline_span_text.dart';
 import 'lazy_video_handler.dart';
 import 'link_handler.dart';
 import 'local_date_handler.dart';
+import 'math_handler.dart';
 import 'mention_handler.dart';
 import 'onebox_handler.dart';
 import 'policy_handler.dart';
@@ -45,6 +46,8 @@ class NodeFactory {
     this.iframeBuilder,
     this.localDateBuilder,
     this.policyBuilder,
+    this.mathBlockBuilder,
+    this.mathInlineBuilder,
     this.totalImagesInPost = 0,
     this.compact = false,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
@@ -100,6 +103,14 @@ class NodeFactory {
   /// 用户列表)。返回 null 时子包 fallback 渲染 body + 静态 footer 占位。
   final PolicyBuilder? policyBuilder;
 
+  /// 块级数学公式 builder,主项目接入 flutter_math_fork。
+  /// 返回 null 时子包用 monospace `$latex$` 原文。
+  final MathBlockBuilder? mathBlockBuilder;
+
+  /// 行内数学公式 builder,主项目接入 flutter_math_fork。
+  /// 返回 null 时子包用 monospace `$latex$` 原文。
+  final MathInlineBuilder? mathInlineBuilder;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -133,6 +144,8 @@ class NodeFactory {
       iframeBuilder: iframeBuilder,
       localDateBuilder: localDateBuilder,
       policyBuilder: policyBuilder,
+      mathBlockBuilder: mathBlockBuilder,
+      mathInlineBuilder: mathInlineBuilder,
       totalImagesInPost: totalImagesInPost,
       compact: true,
     );
@@ -158,6 +171,7 @@ class NodeFactory {
       IframeNode() => buildIframe(context, node),
       TableNode() => buildTable(context, node),
       PolicyNode() => buildPolicy(context, node),
+      MathBlockNode() => buildMathBlock(context, node),
     };
   }
 
@@ -196,6 +210,8 @@ class NodeFactory {
         imageContentBuilder: imageContentBuilder,
         footnoteTapHandler: footnoteTapHandler,
         localDateBuilder: localDateBuilder,
+
+        mathInlineBuilder: mathInlineBuilder,
         totalImagesInPost: totalImagesInPost,
       ),
     );
@@ -229,6 +245,8 @@ class NodeFactory {
         imageContentBuilder: imageContentBuilder,
         footnoteTapHandler: footnoteTapHandler,
         localDateBuilder: localDateBuilder,
+
+        mathInlineBuilder: mathInlineBuilder,
         totalImagesInPost: totalImagesInPost,
       ),
     );
@@ -307,6 +325,8 @@ class NodeFactory {
                   imageContentBuilder: imageContentBuilder,
                   footnoteTapHandler: footnoteTapHandler,
                   localDateBuilder: localDateBuilder,
+
+                  mathInlineBuilder: mathInlineBuilder,
                   totalImagesInPost: totalImagesInPost,
                 ),
               ),
@@ -815,6 +835,36 @@ class NodeFactory {
     final custom = policyBuilder?.call(context, node);
     if (custom != null) return custom;
     return _PolicyFallbackCard(node: node, childFactory: _compactCopy());
+  }
+
+  /// 块级数学公式渲染 — `<div class="math">`(对齐 legacy
+  /// `math_builder.dart::buildMathBlock`)。
+  ///
+  /// 优先调主项目 [mathBlockBuilder](注入 flutter_math_fork.Math.tex);
+  /// 返回 null 时画 fallback:Padding v8 + Center + 水平 SingleChildScrollView
+  /// + monospace `$latex$` 原文(对齐 legacy onErrorFallback)。
+  Widget buildMathBlock(BuildContext context, MathBlockNode node) {
+    if (node.latex.isEmpty) return const SizedBox.shrink();
+    final custom = mathBlockBuilder?.call(context, node);
+    if (custom != null) return custom;
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Text(
+            r'$' + node.latex + r'$',
+            style: TextStyle(
+              fontFamily: 'FiraCode',
+              fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
+              fontSize: 16,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -2116,6 +2166,8 @@ class _TableWidget extends StatelessWidget {
             buf.write(fallbackText);
           case ClickCountRun(:final count):
             buf.write(count);
+          case MathInlineRun(:final latex):
+            buf.write(r'$' + latex + r'$');
           case ImageRun() ||
                 LineBreakRun() ||
                 FootnoteRefRun():

@@ -842,6 +842,36 @@ fallback 渲染:服务端文本 "2026年12月25日"。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''math/block_quadratic.html''',
+    html: r'''<div class="math">x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}</div>
+''',
+    notes: r'''块级数学公式:经典求根公式。
+子包 fallback:monospace 显示 "$x = \frac{...}$" 原文。
+主项目接 mathBlockBuilder 后会用 flutter_math_fork 渲染真公式。''',
+    source: r'''https://example.com/t/sample/1/mh1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''math/inline_in_paragraph.html''',
+    html: r'''<p>欧拉恒等式 <span class="math">e^{i\pi} + 1 = 0</span> 是数学中最美的公式之一。</p>
+''',
+    notes: r'''行内数学公式:欧拉恒等式嵌在段落中。
+子包 fallback:WidgetSpan + monospace "$e^{...}$" 原文。''',
+    source: r'''https://example.com/t/sample/1/mh2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''math/mixed_block_inline.html''',
+    html: r'''<p>勾股定理:对任意直角三角形,<span class="math">a^2 + b^2 = c^2</span>。</p>
+<div class="math">\sum_{i=1}^{n} i = \frac{n(n+1)}{2}</div>
+<p>求和公式上面已展示。</p>
+''',
+    notes: r'''混合 inline + block math 在同一帖子。
+验证两种节点都能正确识别 + 段间隔合理。''',
+    source: r'''https://example.com/t/sample/1/mh3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''mention/group_mention.html''',
     html: r'''<p>问题反馈给 <a class="mention" href="/u/team_support">@team_support</a> 组,而不是个人。</p>
 ''',

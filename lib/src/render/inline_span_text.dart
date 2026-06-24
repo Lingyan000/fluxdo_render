@@ -15,6 +15,7 @@ import 'footnote_handler.dart';
 import 'image_handler.dart';
 import 'link_handler.dart';
 import 'local_date_handler.dart';
+import 'math_handler.dart';
 import 'mention_handler.dart';
 
 class InlineSpanText extends StatefulWidget {
@@ -29,6 +30,7 @@ class InlineSpanText extends StatefulWidget {
     this.imageContentBuilder,
     this.footnoteTapHandler,
     this.localDateBuilder,
+    this.mathInlineBuilder,
     this.totalImagesInPost = 0,
     this.textAlign,
   });
@@ -42,6 +44,7 @@ class InlineSpanText extends StatefulWidget {
   final ImageContentBuilder? imageContentBuilder;
   final FootnoteTapHandler? footnoteTapHandler;
   final LocalDateBuilder? localDateBuilder;
+  final MathInlineBuilder? mathInlineBuilder;
   final int totalImagesInPost;
   final TextAlign? textAlign;
 
@@ -80,6 +83,7 @@ class _InlineSpanTextState extends State<InlineSpanText> {
       imageContentBuilder: widget.imageContentBuilder,
       footnoteTapHandler: widget.footnoteTapHandler,
       localDateBuilder: widget.localDateBuilder,
+      mathInlineBuilder: widget.mathInlineBuilder,
       totalImagesInPost: widget.totalImagesInPost,
       context: context,
     );

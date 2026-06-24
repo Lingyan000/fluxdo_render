@@ -560,3 +560,33 @@ class ClickCountRun extends InlineNode {
   @override
   String toString() => 'ClickCountRun($count)';
 }
+
+/// 行内数学公式 — `<span class="math">LaTeX 源码</span>`。
+///
+/// Discourse markdown-it-math 把 `$...$` / `\(...\)` 渲染成 span.math。
+/// 子包不绑 `flutter_math_fork`(对齐 [MathBlockNode]),通过
+/// [MathInlineBuilder] callback 让主项目接入;fallback 显示 monospace
+/// `$latex$` 原文。
+///
+/// 视觉对齐 legacy `math_builder.dart::buildInlineMath`:
+///   InlineCustomWidget(WidgetSpan)+ Math.tex 渲染
+@immutable
+class MathInlineRun extends InlineNode {
+  const MathInlineRun(this.latex);
+
+  /// LaTeX 源码(已 trim)。空 = 无效公式,渲染时显示空 SizedBox。
+  final String latex;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MathInlineRun &&
+          runtimeType == other.runtimeType &&
+          latex == other.latex;
+
+  @override
+  int get hashCode => latex.hashCode;
+
+  @override
+  String toString() => 'MathInlineRun(${latex.length} chars)';
+}

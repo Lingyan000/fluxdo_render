@@ -409,6 +409,8 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       for (final child in node.children) {
         _writeNode(buf, child, indent + 1);
       }
+    case MathBlockNode():
+      buf.writeln('$pad$node');
   }
 }
 
@@ -458,6 +460,8 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
     case LocalDateRun():
       buf.writeln('$pad$node');
     case ClickCountRun():
+      buf.writeln('$pad$node');
+    case MathInlineRun():
       buf.writeln('$pad$node');
   }
 }

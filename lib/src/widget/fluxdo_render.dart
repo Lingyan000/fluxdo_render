@@ -10,6 +10,7 @@ import '../render/image_handler.dart';
 import '../render/lazy_video_handler.dart';
 import '../render/link_handler.dart';
 import '../render/local_date_handler.dart';
+import '../render/math_handler.dart';
 import '../render/mention_handler.dart';
 import '../render/node_factory.dart';
 import '../render/onebox_handler.dart';
@@ -40,6 +41,8 @@ class FluxdoRender extends StatefulWidget {
     this.iframeBuilder,
     this.localDateBuilder,
     this.policyBuilder,
+    this.mathBlockBuilder,
+    this.mathInlineBuilder,
   });
 
   /// Discourse cooked HTML 内容。
@@ -101,6 +104,14 @@ class FluxdoRender extends StatefulWidget {
   /// 已接受用户列表)。返回 null 时子包 fallback 渲染 body + 静态 footer 占位。
   final PolicyBuilder? policyBuilder;
 
+  /// 块级数学公式 builder —— 主项目接入 flutter_math_fork。
+  /// 返回 null 时子包 fallback 用 monospace `$latex$` 原文。
+  final MathBlockBuilder? mathBlockBuilder;
+
+  /// 行内数学公式 builder —— 主项目接入 flutter_math_fork。
+  /// 返回 null 时子包 fallback 用 monospace `$latex$` 原文。
+  final MathInlineBuilder? mathInlineBuilder;
+
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
 }
@@ -146,6 +157,8 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           iframeBuilder: widget.iframeBuilder,
           localDateBuilder: widget.localDateBuilder,
           policyBuilder: widget.policyBuilder,
+          mathBlockBuilder: widget.mathBlockBuilder,
+          mathInlineBuilder: widget.mathInlineBuilder,
           totalImagesInPost: _totalImagesInPost,
         );
     if (_nodes.isEmpty) {

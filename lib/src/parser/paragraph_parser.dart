@@ -141,6 +141,16 @@ class ParagraphParser {
             out.add(_parsePolicy(node, nextId, nextImageIndex));
             continue;
           }
+          // div.math:块级数学公式(markdown-it-math)。
+          // 优先于 d-image-grid 是因为两者都是 div 块级,但 math 只取 text。
+          if (tag == 'div' && node.classes.contains('math')) {
+            flushInlines();
+            final latex = node.text.trim();
+            if (latex.isNotEmpty) {
+              out.add(MathBlockNode(id: nextId(), latex: latex));
+            }
+            continue;
+          }
           // div.d-image-grid:多图网格(Discourse 原生 image-grid 组件)。
           // 优先于 lightbox-wrapper 检测,因为 grid 内可能含多个 lightbox-wrapper。
           if (tag == 'div' && node.classes.contains('d-image-grid')) {
@@ -1214,6 +1224,14 @@ class ParagraphParser {
           final count = raw.replaceAll(RegExp(r'^ | $'), '').trim();
           if (count.isNotEmpty) {
             out.add(ClickCountRun(count));
+            return;
+          }
+        }
+        // span.math → MathInlineRun(行内数学公式,markdown-it-math)
+        if (el.classes.contains('math')) {
+          final latex = el.text.trim();
+          if (latex.isNotEmpty) {
+            out.add(MathInlineRun(latex));
             return;
           }
         }

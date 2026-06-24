@@ -32,6 +32,7 @@ import '../render/footnote_handler.dart';
 import '../render/image_handler.dart';
 import '../render/link_handler.dart';
 import '../render/local_date_handler.dart';
+import '../render/math_handler.dart';
 import '../render/mention_handler.dart';
 
 /// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers。
@@ -70,6 +71,8 @@ class InlineFlattener {
     ImageContentBuilder? imageContentBuilder,
     FootnoteTapHandler? footnoteTapHandler,
     LocalDateBuilder? localDateBuilder,
+
+    MathInlineBuilder? mathInlineBuilder,
     int totalImagesInPost = 0,
     BuildContext? context,
   }) {
@@ -90,6 +93,8 @@ class InlineFlattener {
         imageBuilder,
         footnoteHandler,
         localDateBuilder,
+
+        mathInlineBuilder,
         emojiBaseSize,
         totalImagesInPost,
         context,
@@ -110,6 +115,8 @@ class InlineFlattener {
     ImageContentBuilder imageBuilder,
     FootnoteTapHandler footnoteHandler,
     LocalDateBuilder? localDateBuilder,
+
+    MathInlineBuilder? mathInlineBuilder,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -127,6 +134,9 @@ class InlineFlattener {
           footnoteHandler,
 
           localDateBuilder,
+
+
+          mathInlineBuilder,
           emojiBaseSize,
           totalImagesInPost,
           context,
@@ -144,6 +154,8 @@ class InlineFlattener {
     ImageContentBuilder imageBuilder,
     FootnoteTapHandler footnoteHandler,
     LocalDateBuilder? localDateBuilder,
+
+    MathInlineBuilder? mathInlineBuilder,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -166,6 +178,9 @@ class InlineFlattener {
             footnoteHandler,
 
             localDateBuilder,
+
+
+            mathInlineBuilder,
             emojiBaseSize,
             totalImagesInPost,
             context,
@@ -184,6 +199,9 @@ class InlineFlattener {
             footnoteHandler,
 
             localDateBuilder,
+
+
+            mathInlineBuilder,
             emojiBaseSize,
             totalImagesInPost,
             context,
@@ -205,6 +223,9 @@ class InlineFlattener {
           footnoteHandler,
 
           localDateBuilder,
+
+
+          mathInlineBuilder,
           emojiBaseSize,
           totalImagesInPost,
           context,
@@ -244,6 +265,9 @@ class InlineFlattener {
           footnoteHandler,
 
           localDateBuilder,
+
+
+          mathInlineBuilder,
           emojiBaseSize,
           totalImagesInPost,
           context,
@@ -259,6 +283,7 @@ class InlineFlattener {
           localDateBuilder,
         ),
       ClickCountRun() => _buildClickCountSpan(node),
+      MathInlineRun() => _buildMathInlineSpan(node, mathInlineBuilder),
     };
   }
 
@@ -271,6 +296,8 @@ class InlineFlattener {
     ImageContentBuilder imageBuilder,
     FootnoteTapHandler footnoteHandler,
     LocalDateBuilder? localDateBuilder,
+
+    MathInlineBuilder? mathInlineBuilder,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -305,6 +332,9 @@ class InlineFlattener {
         footnoteHandler,
 
         localDateBuilder,
+
+
+        mathInlineBuilder,
         emojiBaseSize,
         totalImagesInPost,
         context,
@@ -529,6 +559,8 @@ class InlineFlattener {
     ImageContentBuilder imageBuilder,
     FootnoteTapHandler footnoteHandler,
     LocalDateBuilder? localDateBuilder,
+
+    MathInlineBuilder? mathInlineBuilder,
     double emojiBaseSize,
     int totalImagesInPost,
     BuildContext? context,
@@ -545,6 +577,9 @@ class InlineFlattener {
       footnoteHandler,
 
       localDateBuilder,
+
+
+      mathInlineBuilder,
       emojiBaseSize,
       totalImagesInPost,
       context,
@@ -751,6 +786,48 @@ class _ClickCountWidget extends StatelessWidget {
       child: Text(
         count,
         style: TextStyle(color: textColor, fontSize: 10),
+      ),
+    );
+  }
+}
+
+extension on InlineFlattener {
+  /// 行内数学公式渲染 — 优先调主项目 [mathInlineBuilder](接 flutter_math_fork);
+  /// fallback 用 monospace `$latex$` 原文(对齐 legacy onErrorFallback)。
+  WidgetSpan _buildMathInlineSpan(
+    MathInlineRun node,
+    MathInlineBuilder? mathInlineBuilder,
+  ) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: Builder(
+        builder: (context) {
+          final custom = mathInlineBuilder?.call(context, node);
+          if (custom != null) return custom;
+          return _MathInlineFallbackWidget(node: node);
+        },
+      ),
+    );
+  }
+}
+
+/// 行内数学公式 fallback widget — monospace `$latex$` 原文(主项目接
+/// mathInlineBuilder 后替换)。
+class _MathInlineFallbackWidget extends StatelessWidget {
+  const _MathInlineFallbackWidget({required this.node});
+  final MathInlineRun node;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final fontSize = theme.textTheme.bodyMedium?.fontSize ?? 14;
+    return Text(
+      r'$' + node.latex + r'$',
+      style: TextStyle(
+        fontFamily: 'FiraCode',
+        fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
+        fontSize: fontSize,
+        color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
       ),
     );
   }

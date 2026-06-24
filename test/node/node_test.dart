@@ -114,6 +114,7 @@ void main() {
         IframeNode() => 'iframe',
         TableNode() => 'table',
         PolicyNode() => 'policy',
+        MathBlockNode() => 'mathBlock',
       };
       expect(label, 'paragraph');
     });
@@ -147,6 +148,7 @@ void main() {
               FootnoteRefRun() => 'footnoteRef',
               LocalDateRun() => 'localDate',
               ClickCountRun() => 'clickCount',
+              MathInlineRun() => 'mathInline',
             },
           )
           .toList();

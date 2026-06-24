@@ -1249,6 +1249,42 @@ class PolicyNode extends BlockNode {
       '${groups == null ? "" : ", groups=$groups"})';
 }
 
+/// 块级数学公式 — `<div class="math">LaTeX 源码</div>`。
+///
+/// Discourse 用 markdown-it-math 插件渲染:
+/// - 块级:`$$...$$` 或 `\[...\]` → `<div class="math">`
+/// - 行内:`$...$` 或 `\(...\)` → `<span class="math">`(行内见 MathInlineRun)
+///
+/// 子包**不绑** `flutter_math_fork`(依赖大,跨场景包体压力):
+/// 通过 [MathBlockBuilder] callback 让主项目接入。fallback 显示
+/// monospace `$latex$` 原文(对齐 legacy `onErrorFallback`)。
+///
+/// 视觉对齐 legacy `math_builder.dart::buildMathBlock`:
+///   Padding v8 + Center + 水平 SingleChildScrollView(超长公式可滑)
+@immutable
+class MathBlockNode extends BlockNode {
+  const MathBlockNode({
+    required super.id,
+    required this.latex,
+  });
+
+  /// LaTeX 源码(已 trim)。空 = 无效公式,渲染时显示空 SizedBox。
+  final String latex;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MathBlockNode &&
+          runtimeType == other.runtimeType &&
+          latex == other.latex;
+
+  @override
+  int get hashCode => latex.hashCode;
+
+  @override
+  String toString() => 'MathBlockNode($id, ${latex.length} chars)';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -1276,9 +1312,10 @@ int countImageRuns(List<BlockNode> nodes) {
         case FootnoteRefRun():
         case LocalDateRun():
         case ClickCountRun():
+        case MathInlineRun():
           // 这些 inline 节点不会含 ImageRun(MentionRun 的 statusEmoji 是
           // EmojiRun 不是 ImageRun;FootnoteRefRun 只持 content HTML;
-          // LocalDateRun / ClickCountRun 只持字符串)
+          // LocalDateRun / ClickCountRun / MathInlineRun 只持字符串)
           break;
       }
     }
@@ -1353,6 +1390,9 @@ int countImageRuns(List<BlockNode> nodes) {
         for (final c in children) {
           scanBlock(c);
         }
+      case MathBlockNode():
+        // 公式无图
+        break;
     }
   }
 
