@@ -34,6 +34,7 @@ import '../render/link_handler.dart';
 import '../render/local_date_handler.dart';
 import '../render/math_handler.dart';
 import '../render/mention_handler.dart';
+import '../render/selectable_adapter.dart';
 
 /// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers。
 class FlattenResult {
@@ -427,14 +428,22 @@ class InlineFlattener {
     final margin = emoji.isOnlyEmoji
         ? EdgeInsets.symmetric(horizontal: 1.0, vertical: emojiBaseSize * 0.5)
         : const EdgeInsets.symmetric(horizontal: 2.0);
+    // 选区文本对齐原始 cooked:Discourse `<img class="emoji" title=":heart:">`
+    // 的 textContent 投影是 `:heart:`(HtmlTextMapper 用 title)。EmojiRun.name
+    // 已去冒号(`heart`),这里补回 `:` 让选区纯文本与 cooked 一致;name 空
+    // 时给空串(SelectableAdapter 不贡献文本,emoji 在选区里被静默跳过)。
+    final selectionText = emoji.name.isEmpty ? '' : ':${emoji.name}:';
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: Padding(
         padding: margin,
-        child: Builder(
-          builder: (ctx) {
-            return emojiBuilder(context ?? ctx, emoji, size);
-          },
+        child: SelectableAdapter(
+          selectedText: selectionText,
+          child: Builder(
+            builder: (ctx) {
+              return emojiBuilder(context ?? ctx, emoji, size);
+            },
+          ),
         ),
       ),
     );
@@ -765,7 +774,13 @@ extension on InlineFlattener {
   WidgetSpan _buildClickCountSpan(ClickCountRun node) {
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
-      child: _ClickCountWidget(count: node.count),
+      // click-count 是主项目 preprocess 注入的(`_injectClickCounts`),原始
+      // post.cooked 里没有这段文本。若让它进选区,选中链接周围文字时纯文本
+      // 会混入数字,HtmlTextMapper 在 cooked 里就匹配不到 → 引用降级失败。
+      // 用 SelectionContainer.disabled 把它排除出选区(实测:选区跳过它)。
+      child: SelectionContainer.disabled(
+        child: _ClickCountWidget(count: node.count),
+      ),
     );
   }
 }
