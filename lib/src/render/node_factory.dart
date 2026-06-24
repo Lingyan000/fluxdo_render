@@ -1946,7 +1946,6 @@ class _IframePlaceholderCard extends StatelessWidget {
 const double _kTableMinColWidth = 60;
 const double _kTableMaxColWidth = 200;
 const EdgeInsets _kTableCellPadding = EdgeInsets.all(8);
-const double _kTableEstimatedRowHeight = 44;
 const int _kTableVirtualizeThreshold = 30;
 
 /// 表格 widget — 含列宽预算 + 水平滚动 + 表头特殊背景 + 大表格虚拟化。
@@ -1975,14 +1974,16 @@ class _TableWidget extends StatelessWidget {
 
     Widget bodyWidget;
     if (bodyRows.length > _kTableVirtualizeThreshold) {
-      // 大表格行虚拟化(避免一次性 build 数百行 RichText)
-      final maxHeight = MediaQuery.of(context).size.height * 0.5;
-      final estimatedHeight = bodyRows.length * _kTableEstimatedRowHeight;
+      // 大表格行虚拟化(viewport 外的行不构建)。
+      // 不设 itemExtent —— cell 内容多行(bullet 列表 / 多段)时被固定
+      // 高度强裁是 legacy 的 bug,这里让每行按 Text 自然撑高。
+      // 缺点:大表初始化时每个可见行都要 measure,但 60..200px 列宽下
+      // measure 成本可控(单 cell TextPainter 1ms 级)。
+      final maxHeight = MediaQuery.of(context).size.height * 0.6;
       bodyWidget = SizedBox(
-        height: estimatedHeight < maxHeight ? estimatedHeight : maxHeight,
+        height: maxHeight,
         child: ListView.builder(
           itemCount: bodyRows.length,
-          itemExtent: _kTableEstimatedRowHeight,
           itemBuilder: (ctx, i) => _buildRow(
             ctx, theme, bodyRows[i], columnWidths, borderColor,
             isHeader: false,
