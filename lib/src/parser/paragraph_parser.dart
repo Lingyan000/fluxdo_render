@@ -912,6 +912,7 @@ class ParagraphParser {
       renewalStart: optStr('data-renewal-start'),
       reminder: optStr('data-reminder'),
       isPrivate: attrs['data-private'] == 'true',
+      rawHtml: divEl.outerHtml,
     );
   }
 

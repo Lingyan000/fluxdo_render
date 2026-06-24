@@ -1185,6 +1185,7 @@ class PolicyNode extends BlockNode {
     this.renewalStart,
     this.reminder,
     this.isPrivate = false,
+    this.rawHtml = '',
   });
 
   /// policy 正文 BlockNode(parser 已剥可选 .policy-body 外层 div)。
@@ -1214,6 +1215,16 @@ class PolicyNode extends BlockNode {
   /// `data-private`,是否私密(只本人能看接受列表)。
   final bool isPrivate;
 
+  /// 原始 cooked HTML 片段(`<div class="policy">...</div>` outerHtml)。
+  /// 给主项目 [PolicyBuilder] 兜底用:legacy `_PolicyWidget` 通过
+  /// `element.innerHtml` 走 DiscourseHtmlContent 完整渲染富文本 body(链接 /
+  /// strong / em 等)。子包 BlockNode 无法精确反构造完整 HTML,所以
+  /// rawHtml 是唯一干净路径。
+  ///
+  /// 主项目 PolicyBuilder 不强制使用,可选 children(BlockNode)走子包
+  /// fallback 渲染(简化版,fixture 自检足够)。
+  final String rawHtml;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1227,6 +1238,7 @@ class PolicyNode extends BlockNode {
           renewalStart == other.renewalStart &&
           reminder == other.reminder &&
           isPrivate == other.isPrivate &&
+          rawHtml == other.rawHtml &&
           listEquals(children, other.children);
 
   @override
@@ -1239,6 +1251,7 @@ class PolicyNode extends BlockNode {
         renewalStart,
         reminder,
         isPrivate,
+        rawHtml,
         Object.hashAll(children),
       );
 
