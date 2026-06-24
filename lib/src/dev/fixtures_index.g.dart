@@ -1289,6 +1289,26 @@ charlie:
     edgeCase: true,
   ),
   FixtureEntry(
+    relativePath: r'''table/md_table_wrapper.html''',
+    html: r'''<div class="md-table">
+<table>
+<thead>
+<tr><th>序号</th><th>名称</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>GitHub 学生包</td></tr>
+<tr><td>2</td><td>Azure for Students</td></tr>
+</tbody>
+</table>
+</div>
+''',
+    notes: r'''Discourse markdown 真实 cooked 形态:<div class="md-table"><table>。
+parser 必须透明拆壳 md-table 包裹层,否则整表被展平成纯文本。
+(这是实机 dogfood 发现的 bug:EDU 邮箱长帖表格被展平。)''',
+    source: r'''https://example.com/t/sample/1/tb5''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''table/no_thead_bare_tr.html''',
     html: r'''<table>
 <tr><td>无表头</td><td>所有行都是 body</td></tr>

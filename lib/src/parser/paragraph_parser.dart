@@ -282,6 +282,10 @@ class ParagraphParser {
                 // 嵌入 iframe — 子包不渲染 webview,只产 IframeNode 让主项目
                 // 通过 iframeBuilder 注入真实 widget,fallback 显示占位卡。
                 out.add(_parseIframe(node, nextId));
+              case 'div' when node.classes.contains('md-table'):
+                // Discourse markdown 表格包裹层 <div class="md-table"><table>。
+                // 透明拆壳:递归内部节点(里头就是 <table>),命中 table case。
+                out.addAll(_parseBlocks(node.nodes, nextId, nextImageIndex));
               case 'table':
                 // 表格 — thead/tbody/tr/th/td 递归;cell 内 children
                 // 走 _parseBlocks(保留 inline 样式 + 嵌套块级)

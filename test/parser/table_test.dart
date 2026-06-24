@@ -144,5 +144,24 @@ void main() {
       expect(t.rows[1].length, 1);
       expect(t.columnCount, 2);
     });
+
+    test('div.md-table 包裹层透明拆壳 → 内部 table 正常识别', () {
+      // Discourse markdown 真实 cooked 形态:<div class="md-table"><table>
+      final result = parser.parse(
+        '<div class="md-table">'
+        '<table>'
+        '<thead><tr><th>序号</th><th>名称</th></tr></thead>'
+        '<tbody><tr><td>1</td><td>GitHub</td></tr></tbody>'
+        '</table>'
+        '</div>',
+      );
+      // 必须产出 TableNode,而不是被展平成纯文本 ParagraphNode
+      expect(result.whereType<TableNode>(), hasLength(1));
+      expect(result.whereType<ParagraphNode>(), isEmpty);
+      final t = result.whereType<TableNode>().single;
+      expect(t.hasHeader, isTrue);
+      expect(t.columnCount, 2);
+      expect(t.rows, hasLength(2));
+    });
   });
 }
