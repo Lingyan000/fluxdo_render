@@ -1972,8 +1972,10 @@ class _TableWidget extends StatelessWidget {
         ? node.rows.sublist(1)
         : node.rows;
 
+    final showInfoBar = bodyRows.length > _kTableVirtualizeThreshold;
+
     Widget bodyWidget;
-    if (bodyRows.length > _kTableVirtualizeThreshold) {
+    if (showInfoBar) {
       // 大表格行虚拟化(viewport 外的行不构建)。
       // 不设 itemExtent —— cell 内容多行(bullet 列表 / 多段)时被固定
       // 高度强裁是 legacy 的 bug,这里让每行按 Text 自然撑高。
@@ -1987,6 +1989,9 @@ class _TableWidget extends StatelessWidget {
           itemBuilder: (ctx, i) => _buildRow(
             ctx, theme, bodyRows[i], columnWidths, borderColor,
             isHeader: false,
+            // 虚拟化分支下方有 infoBar,行永远不当 last;infoBar 自有
+            // top border 作为分隔
+            isLastRow: false,
           ),
         ),
       );
@@ -1994,9 +1999,12 @@ class _TableWidget extends StatelessWidget {
       bodyWidget = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (final r in bodyRows)
-            _buildRow(context, theme, r, columnWidths, borderColor,
-                isHeader: false),
+          for (var i = 0; i < bodyRows.length; i++)
+            _buildRow(
+              context, theme, bodyRows[i], columnWidths, borderColor,
+              isHeader: false,
+              isLastRow: i == bodyRows.length - 1,
+            ),
         ],
       );
     }
@@ -2021,7 +2029,7 @@ class _TableWidget extends StatelessWidget {
                       borderColor,
                       isHeader: true),
                 bodyWidget,
-                if (bodyRows.length > _kTableVirtualizeThreshold)
+                if (showInfoBar)
                   _buildInfoBar(context, theme, borderColor, node.rows.length),
               ],
             ),
@@ -2129,15 +2137,21 @@ class _TableWidget extends StatelessWidget {
     List<double> columnWidths,
     Color borderColor, {
     required bool isHeader,
+    bool isLastRow = false,
   }) {
     return Container(
       decoration: BoxDecoration(
         color: isHeader
             ? theme.colorScheme.surfaceContainerHighest
             : null,
-        border: Border(
-          bottom: BorderSide(color: borderColor, width: 1),
-        ),
+        // 最后一行不画 bottom — 外层 Container 的 Border.all 已经有底边,
+        // 否则会出现双线毛刺。header 因为下方必有 body/infoBar,需要保留
+        // bottom 作为分隔。
+        border: isLastRow
+            ? null
+            : Border(
+                bottom: BorderSide(color: borderColor, width: 1),
+              ),
       ),
       child: IntrinsicHeight(
         child: Row(
