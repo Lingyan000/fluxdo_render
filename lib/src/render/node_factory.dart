@@ -19,6 +19,7 @@ import '../node/node.dart';
 import 'code_block_handler.dart';
 import 'emoji_handler.dart';
 import 'footnote_handler.dart';
+import 'iframe_handler.dart';
 import 'image_handler.dart';
 import 'inline_span_text.dart';
 import 'lazy_video_handler.dart';
@@ -39,6 +40,7 @@ class NodeFactory {
     this.oneboxBuilder,
     this.footnoteTapHandler,
     this.lazyVideoBuilder,
+    this.iframeBuilder,
     this.totalImagesInPost = 0,
     this.compact = false,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
@@ -82,6 +84,10 @@ class NodeFactory {
   /// 返回 null 时子包用内置缩略图卡片(点击 → linkHandler 跳浏览器)。
   final LazyVideoBuilder? lazyVideoBuilder;
 
+  /// 嵌入 iframe builder,主项目注入 webview 真实渲染。
+  /// 返回 null 时子包用内置占位卡(图标 + 域名 + 打开按钮)。
+  final IframeBuilder? iframeBuilder;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -112,6 +118,7 @@ class NodeFactory {
       oneboxBuilder: oneboxBuilder,
       footnoteTapHandler: footnoteTapHandler,
       lazyVideoBuilder: lazyVideoBuilder,
+      iframeBuilder: iframeBuilder,
       totalImagesInPost: totalImagesInPost,
       compact: true,
     );
@@ -134,6 +141,7 @@ class NodeFactory {
       ImageGridNode() => buildImageGrid(context, node),
       FootnotesSectionNode() => const SizedBox.shrink(),
       LazyVideoNode() => buildLazyVideo(context, node),
+      IframeNode() => buildIframe(context, node),
     };
   }
 
@@ -737,6 +745,24 @@ class NodeFactory {
         final url = node.url;
         if (url.isNotEmpty && linkHandler != null) {
           linkHandler!(context, url);
+        }
+      },
+    );
+  }
+
+  /// iframe 渲染。优先调主项目 [iframeBuilder](注入真实 webview),
+  /// 返回 null 时画内置占位卡(图标 + 域名 + "打开链接" 按钮,
+  /// 点击通过 [linkHandler] 跳浏览器)。
+  ///
+  /// 子包不依赖 webview_flutter / flutter_inappwebview(平台插件量大)。
+  Widget buildIframe(BuildContext context, IframeNode node) {
+    final custom = iframeBuilder?.call(context, node);
+    if (custom != null) return custom;
+    return _IframePlaceholderCard(
+      node: node,
+      onTap: () {
+        if (node.src.isNotEmpty && linkHandler != null) {
+          linkHandler!(context, node.src);
         }
       },
     );
@@ -1795,5 +1821,96 @@ class _FoldableCalloutWidgetState extends State<_FoldableCalloutWidget>
         ],
       ),
     );
+  }
+}
+
+/// 子包内置 iframe 占位卡(主项目不注入 iframeBuilder 时的 fallback)。
+///
+/// 视觉:Container 灰底 + 圆角 8 + outline,内部:
+///   左:Icon(open_in_new_rounded)
+///   中:Text(域名 / "嵌入内容")标题 + src 灰色副标
+///   右:箭头图标(暗示可点)
+class _IframePlaceholderCard extends StatelessWidget {
+  const _IframePlaceholderCard({required this.node, required this.onTap});
+  final IframeNode node;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final host = _extractHost(node.src);
+    final title = node.title?.isNotEmpty == true ? node.title! : host;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Material(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: scheme.outlineVariant, width: 1),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.open_in_new_rounded,
+                  size: 22,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title.isEmpty ? '嵌入内容' : title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (node.src.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          node.src,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 从 url 提 host(`https://www.example.com/path` → `example.com`),
+  /// 失败兜底显示原 src。
+  static String _extractHost(String src) {
+    if (src.isEmpty) return '';
+    final uri = Uri.tryParse(src);
+    if (uri == null) return src;
+    var host = uri.host;
+    if (host.startsWith('www.')) host = host.substring(4);
+    return host.isEmpty ? src : host;
   }
 }

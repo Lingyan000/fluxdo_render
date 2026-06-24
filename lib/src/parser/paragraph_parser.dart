@@ -262,6 +262,10 @@ class ParagraphParser {
                 // 脚注列表区(隐藏占位 — 真正的脚注内容已在 _collectFootnoteContents
                 // 提前 inline 到 FootnoteRefRun)
                 out.add(FootnotesSectionNode(id: nextId()));
+              case 'iframe':
+                // 嵌入 iframe — 子包不渲染 webview,只产 IframeNode 让主项目
+                // 通过 iframeBuilder 注入真实 widget,fallback 显示占位卡。
+                out.add(_parseIframe(node, nextId));
               // 注意:div.lightbox-wrapper 在块级 switch 之前已被截获
               // 走 pendingInlines 流(不会到达这里),目的是让连续多张
               // lightbox 图合并到同一 ParagraphNode,消除 1em+1em 段间距。
@@ -833,6 +837,69 @@ class ParagraphParser {
       thumbnailUrl: thumbnailUrl,
       startTime: startTime,
       url: url,
+    );
+  }
+
+  /// 解析 `<iframe>` 为 IframeNode(对齐 legacy
+  /// `IframeAttributes.fromElement`)。
+  ///
+  /// - src 优先 `src`,fallback `data-src`(lazy 形态)
+  /// - width/height tryParse
+  /// - sandbox / allow 按空白 / 分号拆分
+  /// - allowfullscreen:属性存在 / 值为 true / "" / allow 含 fullscreen
+  /// - loading="lazy" → lazyLoad=true
+  IframeNode _parseIframe(dom.Element el, String Function() nextId) {
+    final attrs = el.attributes;
+
+    final src = (attrs['src']?.trim().isNotEmpty == true
+            ? attrs['src']
+            : attrs['data-src']) ??
+        '';
+    final width = double.tryParse(attrs['width'] ?? '');
+    final height = double.tryParse(attrs['height'] ?? '');
+    final title = attrs['title']?.trim();
+
+    final sandboxRaw = attrs['sandbox'];
+    final sandboxFlags = sandboxRaw == null
+        ? <String>{}
+        : sandboxRaw
+            .split(RegExp(r'\s+'))
+            .where((s) => s.isNotEmpty)
+            .toSet();
+
+    final allowRaw = attrs['allow'];
+    final allowFlags = allowRaw == null
+        ? <String>{}
+        : allowRaw
+            .split(';')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toSet();
+
+    final fullscreenAttr = attrs['allowfullscreen'];
+    final allowFullscreen = attrs.containsKey('allowfullscreen') &&
+            (fullscreenAttr == null ||
+                fullscreenAttr == 'true' ||
+                fullscreenAttr == '' ||
+                fullscreenAttr == 'allowfullscreen') ||
+        allowFlags.any((p) => p.startsWith('fullscreen'));
+
+    final referrerPolicy = attrs['referrerpolicy']?.trim();
+    final lazyLoad = attrs['loading']?.trim() == 'lazy';
+
+    return IframeNode(
+      id: nextId(),
+      src: src,
+      width: width,
+      height: height,
+      title: (title == null || title.isEmpty) ? null : title,
+      sandboxFlags: sandboxFlags,
+      allowFlags: allowFlags,
+      allowFullscreen: allowFullscreen,
+      referrerPolicy:
+          (referrerPolicy == null || referrerPolicy.isEmpty) ? null : referrerPolicy,
+      lazyLoad: lazyLoad,
+      cssClasses: el.classes.toSet(),
     );
   }
 

@@ -457,6 +457,35 @@ hr 自带 12 上下 padding,叠加不会塌缩(Column 不折叠 margin)。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''iframe/codepen_sandboxed.html''',
+    html: r'''<iframe src="https://codepen.io/team/codepen/embed/PNaGbb" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer" loading="lazy" width="600" height="400"></iframe>
+''',
+    notes: r'''CodePen 嵌入(带 sandbox + referrerpolicy + loading=lazy)。
+验证多属性 parse:sandboxFlags={allow-scripts, allow-same-origin}
++ lazyLoad=true + referrerPolicy="no-referrer"。''',
+    source: r'''https://example.com/t/sample/1/if2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''iframe/lazy_data_src.html''',
+    html: r'''<iframe data-src="https://player.bilibili.com/player.html?bvid=BVxxx" width="800" height="450"></iframe>
+''',
+    notes: r'''lazy 形态:`src` 缺失,`data-src` 提供真实 URL(Discourse 懒加载常见)。
+parser 应该 fallback 到 data-src。''',
+    source: r'''https://example.com/t/sample/1/if3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''iframe/youtube_embed.html''',
+    html: r'''<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ" width="560" height="315" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="嵌入的 YouTube 视频"></iframe>
+''',
+    notes: r'''YouTube 嵌入 iframe(典型 16:9 + allowfullscreen + allow Permissions Policy)。
+渲染:子包占位卡(图标 + youtube.com 域名 + 完整 src + 箭头)。
+主项目接 iframeBuilder 后会替换为真实 webview。''',
+    source: r'''https://example.com/t/sample/1/if1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''image/inside_link.html''',
     html: r'''<p>点击查看大图:<a href="https://example.com/lightbox/foo"><img src="https://example.com/upload/thumb.png" alt="thumbnail" width="100" height="100"></a></p>
 ''',

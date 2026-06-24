@@ -111,6 +111,7 @@ void main() {
         ImageGridNode() => 'imageGrid',
         FootnotesSectionNode() => 'footnotesSection',
         LazyVideoNode() => 'lazyVideo',
+        IframeNode() => 'iframe',
       };
       expect(label, 'paragraph');
     });

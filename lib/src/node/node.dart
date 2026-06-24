@@ -932,6 +932,113 @@ class LazyVideoNode extends BlockNode {
       '${title.isEmpty ? "" : ", \"$title\""})';
 }
 
+/// 嵌入 iframe — `<iframe src="..." width="..." height="...">`。
+///
+/// 形态(legacy `iframe_builder.dart::IframeAttributes` 同结构):
+/// ```html
+/// <iframe src="https://www.youtube.com/embed/..."
+///         width="560" height="315"
+///         allowfullscreen
+///         allow="autoplay; encrypted-media"
+///         sandbox="allow-scripts allow-same-origin"
+///         referrerpolicy="no-referrer"
+///         loading="lazy"
+///         title="嵌入视频">
+/// </iframe>
+/// ```
+///
+/// **子包不实现 webview 渲染**(无 webview_flutter 依赖,跨平台插件量大)。
+/// 渲染策略:
+/// - 主项目通过 `iframeBuilder` callback 注入真实 webview widget
+/// - 不传 builder 时子包用内置占位卡(图标 + 域名 + "打开链接" 按钮,
+///   点击调 [linkHandler] 跳浏览器)
+///
+/// [src] / [width] / [height] / [title] 是主项目 webview 的核心入参;
+/// [sandboxFlags] / [allowFlags] / [allowFullscreen] / [referrerPolicy]
+/// 主项目按 webview_flutter 的 settings 映射。
+@immutable
+class IframeNode extends BlockNode {
+  const IframeNode({
+    required super.id,
+    required this.src,
+    this.width,
+    this.height,
+    this.title,
+    this.sandboxFlags = const {},
+    this.allowFlags = const {},
+    this.allowFullscreen = false,
+    this.referrerPolicy,
+    this.lazyLoad = false,
+    this.cssClasses = const {},
+  });
+
+  /// iframe 真实 URL(`src` 或 `data-src` 提取,`data-src` 是 lazy load 形态)。
+  /// 空字符串 = 渲染时降级显示"无效 iframe"。
+  final String src;
+
+  /// `width` 属性,缺失时 null(主项目应用 layout 默认值,如 16:9)。
+  final double? width;
+
+  /// `height` 属性,缺失时 null。
+  final double? height;
+
+  /// `title` 属性 — webview 头部 / accessibility。
+  final String? title;
+
+  /// `sandbox="..."` 属性 split 后的集合(如 `{allow-scripts, allow-same-origin}`)。
+  final Set<String> sandboxFlags;
+
+  /// `allow="..."` Permissions Policy split 后的集合(如
+  /// `{autoplay, encrypted-media, picture-in-picture}`)。
+  final Set<String> allowFlags;
+
+  /// `allowfullscreen` 属性或 `allow="fullscreen ..."`(legacy 同处理)。
+  final bool allowFullscreen;
+
+  /// `referrerpolicy` 属性(如 `no-referrer`)。
+  final String? referrerPolicy;
+
+  /// `loading="lazy"` — 主项目可挂 visibility_detector 控制 webview 加载时机。
+  final bool lazyLoad;
+
+  /// iframe 元素的 class(如 `{tiktok-onebox, embed}`),主项目按 class
+  /// 做平台特定处理。
+  final Set<String> cssClasses;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is IframeNode &&
+          runtimeType == other.runtimeType &&
+          src == other.src &&
+          width == other.width &&
+          height == other.height &&
+          title == other.title &&
+          allowFullscreen == other.allowFullscreen &&
+          referrerPolicy == other.referrerPolicy &&
+          lazyLoad == other.lazyLoad &&
+          setEquals(sandboxFlags, other.sandboxFlags) &&
+          setEquals(allowFlags, other.allowFlags) &&
+          setEquals(cssClasses, other.cssClasses);
+
+  @override
+  int get hashCode => Object.hash(
+        src,
+        width,
+        height,
+        title,
+        allowFullscreen,
+        referrerPolicy,
+        lazyLoad,
+        Object.hashAll(sandboxFlags),
+        Object.hashAll(allowFlags),
+        Object.hashAll(cssClasses),
+      );
+
+  @override
+  String toString() => 'IframeNode($id, $src)';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -1015,6 +1122,9 @@ int countImageRuns(List<BlockNode> nodes) {
         break;
       case LazyVideoNode():
         // 视频缩略图不计入 gallery viewer(它是视频海报不是用户图片)
+        break;
+      case IframeNode():
+        // iframe 内部由 webview 自管,子包不感知里头有几张图
         break;
     }
   }

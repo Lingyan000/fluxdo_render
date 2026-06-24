@@ -400,6 +400,8 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       buf.writeln('$pad$node');
     case LazyVideoNode():
       buf.writeln('$pad$node');
+    case IframeNode():
+      buf.writeln('$pad$node');
   }
 }
 

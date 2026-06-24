@@ -5,6 +5,7 @@ import '../parser/paragraph_parser.dart';
 import '../render/code_block_handler.dart';
 import '../render/emoji_handler.dart';
 import '../render/footnote_handler.dart';
+import '../render/iframe_handler.dart';
 import '../render/image_handler.dart';
 import '../render/lazy_video_handler.dart';
 import '../render/link_handler.dart';
@@ -34,6 +35,7 @@ class FluxdoRender extends StatefulWidget {
     this.oneboxBuilder,
     this.footnoteTapHandler,
     this.lazyVideoBuilder,
+    this.iframeBuilder,
   });
 
   /// Discourse cooked HTML 内容。
@@ -83,6 +85,10 @@ class FluxdoRender extends StatefulWidget {
   /// 返回 null 时子包用内置缩略图卡片(点击 → linkHandler 跳浏览器)。
   final LazyVideoBuilder? lazyVideoBuilder;
 
+  /// 嵌入 iframe builder —— 主项目注入 webview 真实渲染。
+  /// 返回 null 时子包用内置占位卡(图标 + 域名 + 打开按钮)。
+  final IframeBuilder? iframeBuilder;
+
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
 }
@@ -125,6 +131,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           oneboxBuilder: widget.oneboxBuilder,
           footnoteTapHandler: widget.footnoteTapHandler,
           lazyVideoBuilder: widget.lazyVideoBuilder,
+          iframeBuilder: widget.iframeBuilder,
           totalImagesInPost: _totalImagesInPost,
         );
     if (_nodes.isEmpty) {
