@@ -644,6 +644,45 @@ HTML5 不允许 p 含 div,package:html 会自动闭合 p,所以 wrapper 实际
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''lazy_video/tiktok_no_title.html''',
+    html: r'''<div class="lazy-video-container" data-video-id="7234567890123456789" data-video-title="" data-video-start-time="" data-provider-name="tiktok">
+<a class="title-link" href="https://www.tiktok.com/@user/video/7234567890123456789">
+<img src="https://example.com/tt-thumb.jpg" alt="">
+</a>
+</div>
+''',
+    notes: r'''TikTok 无标题(标题栏不渲染),验证空 title 边界。
+品牌色近黑(#010101)。''',
+    source: r'''https://example.com/t/sample/1/lv3''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''lazy_video/vimeo_with_start_time.html''',
+    html: r'''<div class="lazy-video-container" data-video-id="123456789" data-video-title="A Vimeo Sample" data-video-start-time="1m30s" data-provider-name="vimeo">
+<a class="title-link" href="https://vimeo.com/123456789">
+<img src="https://i.vimeocdn.com/video/123456789.jpg" alt="缩略图">
+</a>
+</div>
+''',
+    notes: r'''Vimeo 视频 + start-time "1m30s" 偏移。
+品牌色蓝青(#1AB7EA)。''',
+    source: r'''https://example.com/t/sample/1/lv2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''lazy_video/youtube_basic.html''',
+    html: r'''<div class="lazy-video-container" data-video-id="dQw4w9WgXcQ" data-video-title="Sample YouTube Video" data-video-start-time="0" data-provider-name="youtube">
+<a class="title-link" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+<img src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" alt="缩略图">
+</a>
+</div>
+''',
+    notes: r'''YouTube 懒加载视频(无 start-time)。
+渲染:16:9 缩略图 + 红色播放按钮 + 标题栏(可点跳 youtube url)。''',
+    source: r'''https://example.com/t/sample/1/lv1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''list/nested_ul_ol.html''',
     html: r'''<ul>
 <li>外层第一项

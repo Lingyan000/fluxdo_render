@@ -823,6 +823,115 @@ class FootnotesSectionNode extends BlockNode {
   String toString() => 'FootnotesSectionNode($id)';
 }
 
+/// 懒加载视频的视频源平台 — 对齐 legacy `data-provider-name`。
+///
+/// 子包不实现真 embed iframe(需要 webview_flutter,跨平台依赖重)。
+/// 主项目通过 [lazyVideoBuilder] callback 注入 IframeWidget;不传 callback
+/// 时子包只画缩略图卡片,点击降级为打开 url。
+enum LazyVideoProvider {
+  /// `data-provider-name="youtube"` — 品牌色 #FF0000
+  youtube,
+
+  /// `data-provider-name="vimeo"` — 品牌色 #1AB7EA
+  vimeo,
+
+  /// `data-provider-name="tiktok"` — 品牌色 #010101
+  tiktok,
+
+  /// 其他 / 缺失 provider — 灰色兜底
+  other;
+
+  static LazyVideoProvider fromName(String name) => switch (name) {
+        'youtube' => LazyVideoProvider.youtube,
+        'vimeo' => LazyVideoProvider.vimeo,
+        'tiktok' => LazyVideoProvider.tiktok,
+        _ => LazyVideoProvider.other,
+      };
+}
+
+/// 懒加载视频 — `<div class="lazy-video-container">`。
+///
+/// HTML 形态:
+/// ```html
+/// <div class="lazy-video-container"
+///      data-provider-name="youtube"
+///      data-video-id="abc123"
+///      data-video-title="..."
+///      data-video-start-time="1m30s">
+///   <a class="title-link" href="https://youtube.com/watch?v=abc123">
+///     <img src="缩略图.jpg" />
+///   </a>
+/// </div>
+/// ```
+///
+/// 视觉对齐 legacy `lazy_video_builder.dart::_buildThumbnail`:
+///   Padding vertical 8 + ClipRRect 圆角 8 + 黑底
+///   AspectRatio 16:9 缩略图 + 中央播放按钮(品牌色 60x42)
+///   底部标题栏(可点跳 url + onSurfaceVariant 灰底 0.5)
+///
+/// **简化**:
+/// - 子包不嵌 iframe(无 webview 依赖),点击缩略图调 [lazyVideoTapHandler]
+///   或 [linkHandler](fallback)
+/// - 主项目通过 `lazyVideoBuilder` 注入自定义 iframe widget(替换默认卡片)
+@immutable
+class LazyVideoNode extends BlockNode {
+  const LazyVideoNode({
+    required super.id,
+    required this.provider,
+    required this.videoId,
+    this.title = '',
+    this.thumbnailUrl = '',
+    this.startTime = '',
+    this.url = '',
+  });
+
+  /// 视频源(youtube / vimeo / tiktok / other)。
+  final LazyVideoProvider provider;
+
+  /// `data-video-id`,主项目 builder 用它拼 embed URL。
+  final String videoId;
+
+  /// `data-video-title`(可空)。
+  final String title;
+
+  /// 缩略图 src(典型为 youtube/vimeo CDN 的预览图)。
+  final String thumbnailUrl;
+
+  /// `data-video-start-time`,形如 `"1h30m45s"` 或纯秒(主项目拼 embed 用)。
+  final String startTime;
+
+  /// 真实视频链接(典型为 https://youtube.com/watch?v=...)。
+  /// 子包点击缩略图时降级:tap → linkHandler(url) 跳浏览器。
+  final String url;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LazyVideoNode &&
+          runtimeType == other.runtimeType &&
+          provider == other.provider &&
+          videoId == other.videoId &&
+          title == other.title &&
+          thumbnailUrl == other.thumbnailUrl &&
+          startTime == other.startTime &&
+          url == other.url;
+
+  @override
+  int get hashCode => Object.hash(
+        provider,
+        videoId,
+        title,
+        thumbnailUrl,
+        startTime,
+        url,
+      );
+
+  @override
+  String toString() =>
+      'LazyVideoNode($id, $provider/$videoId'
+      '${title.isEmpty ? "" : ", \"$title\""})';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -903,6 +1012,9 @@ int countImageRuns(List<BlockNode> nodes) {
         count += images.length;
       case FootnotesSectionNode():
         // 脚注区块已被隐藏,不计图
+        break;
+      case LazyVideoNode():
+        // 视频缩略图不计入 gallery viewer(它是视频海报不是用户图片)
         break;
     }
   }

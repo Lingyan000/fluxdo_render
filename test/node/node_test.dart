@@ -110,6 +110,7 @@ void main() {
         CalloutNode() => 'callout',
         ImageGridNode() => 'imageGrid',
         FootnotesSectionNode() => 'footnotesSection',
+        LazyVideoNode() => 'lazyVideo',
       };
       expect(label, 'paragraph');
     });

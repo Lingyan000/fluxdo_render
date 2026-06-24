@@ -379,6 +379,8 @@ void _writeNode(StringBuffer buf, BlockNode node, int indent) {
       buf.writeln('$pad$node');
     case FootnotesSectionNode():
       buf.writeln('$pad$node');
+    case LazyVideoNode():
+      buf.writeln('$pad$node');
   }
 }
 

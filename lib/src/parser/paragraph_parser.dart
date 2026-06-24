@@ -129,6 +129,12 @@ class ParagraphParser {
           // markdown 段间格式残留(浏览器里因为 block 之间已有 margin 而
           // 几乎不可见),不能让它单起一行 ParagraphNode 占额外高度。
           if (tag == 'br' && pendingInlines.isEmpty) continue;
+          // div.lazy-video-container:懒加载视频卡片(youtube / vimeo / tiktok)
+          if (tag == 'div' && node.classes.contains('lazy-video-container')) {
+            flushInlines();
+            out.add(_parseLazyVideo(node, nextId));
+            continue;
+          }
           // div.d-image-grid:多图网格(Discourse 原生 image-grid 组件)。
           // 优先于 lightbox-wrapper 检测,因为 grid 内可能含多个 lightbox-wrapper。
           if (tag == 'div' && node.classes.contains('d-image-grid')) {
@@ -778,6 +784,56 @@ class ParagraphParser {
         classes.contains('avatar') ||
         classes.contains('thumbnail') ||
         classes.contains('ytp-thumbnail-image');
+  }
+
+  /// 解析 `<div class="lazy-video-container">` 为 LazyVideoNode。
+  ///
+  /// 形态(legacy lazy_video_builder.dart 同结构):
+  /// ```html
+  /// <div class="lazy-video-container"
+  ///      data-provider-name="youtube"
+  ///      data-video-id="abc"
+  ///      data-video-title="标题"
+  ///      data-video-start-time="1m30s">
+  ///   <a class="title-link" href="https://youtube.com/watch?v=abc">
+  ///     <img src="缩略图.jpg" />
+  ///   </a>
+  /// </div>
+  /// ```
+  ///
+  /// 处理:
+  /// - data-provider-name → LazyVideoProvider.fromName
+  /// - data-video-id / data-video-title / data-video-start-time 直接提
+  /// - 缩略图:取 div 内 `<img>` 的 src
+  /// - 链接:取 `a.title-link` 的 href,fallback 到第一个 `<a>` 的 href
+  LazyVideoNode _parseLazyVideo(
+    dom.Element divEl,
+    String Function() nextId,
+  ) {
+    final attrs = divEl.attributes;
+    final provider = LazyVideoProvider.fromName(
+      attrs['data-provider-name']?.trim() ?? '',
+    );
+    final videoId = attrs['data-video-id']?.trim() ?? '';
+    final title = attrs['data-video-title']?.trim() ?? '';
+    final startTime = attrs['data-video-start-time']?.trim() ?? '';
+
+    final img = divEl.querySelector('img');
+    final thumbnailUrl = img?.attributes['src']?.trim() ?? '';
+
+    final titleA = divEl.querySelector('a.title-link') ??
+        divEl.querySelector('a');
+    final url = titleA?.attributes['href']?.trim() ?? '';
+
+    return LazyVideoNode(
+      id: nextId(),
+      provider: provider,
+      videoId: videoId,
+      title: title,
+      thumbnailUrl: thumbnailUrl,
+      startTime: startTime,
+      url: url,
+    );
   }
 
   /// 把一个 inline element 转成 InlineNode 加入 out。

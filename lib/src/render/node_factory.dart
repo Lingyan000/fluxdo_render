@@ -21,6 +21,7 @@ import 'emoji_handler.dart';
 import 'footnote_handler.dart';
 import 'image_handler.dart';
 import 'inline_span_text.dart';
+import 'lazy_video_handler.dart';
 import 'link_handler.dart';
 import 'mention_handler.dart';
 import 'onebox_handler.dart';
@@ -37,6 +38,7 @@ class NodeFactory {
     this.quoteAvatarBuilder,
     this.oneboxBuilder,
     this.footnoteTapHandler,
+    this.lazyVideoBuilder,
     this.totalImagesInPost = 0,
     this.compact = false,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
@@ -76,6 +78,10 @@ class NodeFactory {
   /// 不传时用 [defaultFootnoteTapHandler](仅 debugPrint)。
   final FootnoteTapHandler? footnoteTapHandler;
 
+  /// 懒加载视频 builder,主项目注入 webview iframe 嵌入。
+  /// 返回 null 时子包用内置缩略图卡片(点击 → linkHandler 跳浏览器)。
+  final LazyVideoBuilder? lazyVideoBuilder;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -105,6 +111,7 @@ class NodeFactory {
       quoteAvatarBuilder: quoteAvatarBuilder,
       oneboxBuilder: oneboxBuilder,
       footnoteTapHandler: footnoteTapHandler,
+      lazyVideoBuilder: lazyVideoBuilder,
       totalImagesInPost: totalImagesInPost,
       compact: true,
     );
@@ -126,6 +133,7 @@ class NodeFactory {
       CalloutNode() => buildCallout(context, node),
       ImageGridNode() => buildImageGrid(context, node),
       FootnotesSectionNode() => const SizedBox.shrink(),
+      LazyVideoNode() => buildLazyVideo(context, node),
     };
   }
 
@@ -705,6 +713,134 @@ class NodeFactory {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// 懒加载视频渲染 — `<div class="lazy-video-container">`(对齐 legacy
+  /// `lazy_video_builder.dart::_buildThumbnail`)。
+  ///
+  /// 视觉:
+  ///   Padding vertical 8 + ClipRRect 圆角 8 + 黑底容器
+  ///   主体:AspectRatio 16:9 缩略图 + 中央播放按钮(品牌色 60×42 圆角 8)
+  ///   底部:标题栏(灰底 surfaceContainerHighest @ 0.5,可点跳 url)
+  ///
+  /// **优先调 [lazyVideoBuilder]**(主项目注入 webview iframe);
+  /// 返回 null 时画内置缩略图卡片,点击通过 [linkHandler] 跳浏览器。
+  Widget buildLazyVideo(BuildContext context, LazyVideoNode node) {
+    final custom = lazyVideoBuilder?.call(context, node);
+    if (custom != null) return custom;
+    return _LazyVideoThumbnailCard(
+      node: node,
+      onTap: () {
+        // 没注入 lazyVideoBuilder → 降级走 linkHandler 跳浏览器
+        final url = node.url;
+        if (url.isNotEmpty && linkHandler != null) {
+          linkHandler!(context, url);
+        }
+      },
+    );
+  }
+}
+
+/// 懒加载视频品牌色(对齐 legacy `_LazyVideoAttributes.brandColor`)。
+Color _brandColorFor(LazyVideoProvider p) => switch (p) {
+      LazyVideoProvider.youtube => const Color(0xFFFF0000),
+      LazyVideoProvider.vimeo => const Color(0xFF1AB7EA),
+      LazyVideoProvider.tiktok => const Color(0xFF010101),
+      LazyVideoProvider.other => const Color(0xFF666666),
+    };
+
+/// 子包内置懒加载视频缩略图卡片(主项目不注入 lazyVideoBuilder 时的
+/// fallback)。
+class _LazyVideoThumbnailCard extends StatelessWidget {
+  const _LazyVideoThumbnailCard({required this.node, required this.onTap});
+  final LazyVideoNode node;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final brand = _brandColorFor(node.provider);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          color: Colors.black,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 缩略图 + 中央播放按钮
+              GestureDetector(
+                onTap: onTap,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: node.thumbnailUrl.isNotEmpty
+                          ? Image.network(
+                              node.thumbnailUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => const _VideoPlaceholder(),
+                            )
+                          : const _VideoPlaceholder(),
+                    ),
+                    Container(
+                      width: 60,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: brand.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (node.title.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                  child: Text(
+                    node.title,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: node.url.isNotEmpty ? scheme.primary : null,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoPlaceholder extends StatelessWidget {
+  const _VideoPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: Icon(
+          Icons.video_library_outlined,
+          size: 48,
+          color: Colors.white54,
+        ),
       ),
     );
   }
