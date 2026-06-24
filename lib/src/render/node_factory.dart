@@ -2138,19 +2138,22 @@ class _TableWidget extends StatelessWidget {
           bottom: BorderSide(color: borderColor, width: 1),
         ),
       ),
-      child: Row(
-        children: [
-          for (var col = 0; col < node.columnCount; col++)
-            _buildCell(
-              context,
-              theme,
-              col < row.length ? row[col] : null,
-              columnWidths[col],
-              borderColor,
-              isLeftBorder: col > 0,
-              isHeaderRow: isHeader,
-            ),
-        ],
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var col = 0; col < node.columnCount; col++)
+              _buildCell(
+                context,
+                theme,
+                col < row.length ? row[col] : null,
+                columnWidths[col],
+                borderColor,
+                isLeftBorder: col > 0,
+                isHeaderRow: isHeader,
+              ),
+          ],
+        ),
       ),
     );
   }
