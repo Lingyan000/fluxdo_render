@@ -1429,13 +1429,21 @@ class ChatTranscriptNode extends BlockNode {
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
 /// ImageContentBuilder,主项目用这个数构造 gallery viewer 的 totalCount。
-int countImageRuns(List<BlockNode> nodes) {
-  var count = 0;
+int countImageRuns(List<BlockNode> nodes) => collectImageRuns(nodes).length;
+
+/// 按出现顺序收集一份 BlockNode 树里所有 [ImageRun](顺序 = parser 赋的
+/// indexInPost 顺序)。
+///
+/// 给主项目构造画廊(gallery viewer)左右切换列表用:第 i 个 ImageRun
+/// 的 indexInPost == i。遍历范围与 [countImageRuns] 完全一致(后者 =
+/// 本函数结果的长度)。
+List<ImageRun> collectImageRuns(List<BlockNode> nodes) {
+  final out = <ImageRun>[];
   void scanInlines(List<InlineNode> inlines) {
     for (final n in inlines) {
       switch (n) {
         case ImageRun():
-          count++;
+          out.add(n);
         case EmRun(:final children):
           scanInlines(children);
         case StrongRun(:final children):
@@ -1453,9 +1461,6 @@ int countImageRuns(List<BlockNode> nodes) {
         case LocalDateRun():
         case ClickCountRun():
         case MathInlineRun():
-          // 这些 inline 节点不会含 ImageRun(MentionRun 的 statusEmoji 是
-          // EmojiRun 不是 ImageRun;FootnoteRefRun 只持 content HTML;
-          // LocalDateRun / ClickCountRun / MathInlineRun 只持字符串)
           break;
       }
     }
@@ -1504,20 +1509,16 @@ int countImageRuns(List<BlockNode> nodes) {
           scanBlock(c);
         }
       case ImageGridNode(:final images):
-        // 网格内 ImageRun 直接计数(它们也是有效的 post 图片,跟 gallery
+        // 网格内 ImageRun 直接收(它们也是有效的 post 图片,跟 gallery
         // viewer 协作)
-        count += images.length;
+        out.addAll(images);
       case FootnotesSectionNode():
-        // 脚注区块已被隐藏,不计图
         break;
       case LazyVideoNode():
-        // 视频缩略图不计入 gallery viewer(它是视频海报不是用户图片)
         break;
       case IframeNode():
-        // iframe 内部由 webview 自管,子包不感知里头有几张图
         break;
       case TableNode(:final rows):
-        // 表格内 cell 可能含图片 — 递归 cell.children
         for (final row in rows) {
           for (final cell in row) {
             for (final c in cell.children) {
@@ -1526,18 +1527,14 @@ int countImageRuns(List<BlockNode> nodes) {
           }
         }
       case PolicyNode(:final children):
-        // policy 正文可能含图
         for (final c in children) {
           scanBlock(c);
         }
       case MathBlockNode():
-        // 公式无图
         break;
       case PollNode():
-        // poll 数据在 API,cooked 里的 poll div 不含正文图
         break;
       case ChatTranscriptNode():
-        // 消息图在 messagesHtml(未解析成 ImageRun),主项目 builder 递归渲染
         break;
     }
   }
@@ -1545,5 +1542,5 @@ int countImageRuns(List<BlockNode> nodes) {
   for (final b in nodes) {
     scanBlock(b);
   }
-  return count;
+  return out;
 }
