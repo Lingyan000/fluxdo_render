@@ -1298,6 +1298,52 @@ class MathBlockNode extends BlockNode {
   String toString() => 'MathBlockNode($id, ${latex.length} chars)';
 }
 
+/// 投票块 — `<div class="poll" data-poll-name="...">`(Discourse poll 插件)。
+///
+/// **数据全在 API 不在 cooked**:cooked 里的 poll div 只提供 [pollName]
+/// (+ 标题文本 fallback)用来从 `post.polls` match 出真实数据(选项 /
+/// 票数 / 状态 / 用户投票)。投票交互要调后端 API。
+///
+/// 子包不持 poll 数据 / 不依赖业务 service:只产轻量节点(pollName +
+/// title + rawHtml),整个渲染+交互由主项目 [PollBuilder] 接 legacy
+/// `buildPoll(post: post)`。不传 builder 时 fallback 占位卡。
+@immutable
+class PollNode extends BlockNode {
+  const PollNode({
+    required super.id,
+    required this.pollName,
+    this.title,
+    this.rawHtml = '',
+  });
+
+  /// `data-poll-name`(默认 "poll"),主项目用它从 post.polls match。
+  final String pollName;
+
+  /// poll 标题(data-poll-question / data-poll-title / .poll-title 文本),
+  /// 可空。fallback 占位卡显示用。
+  final String? title;
+
+  /// 原始 cooked 片段(`<div class="poll">...</div>` outerHtml)。
+  /// 给主项目 PollBuilder 喂给 legacy buildPoll(它读 data-poll-name 等)。
+  final String rawHtml;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PollNode &&
+          runtimeType == other.runtimeType &&
+          pollName == other.pollName &&
+          title == other.title &&
+          rawHtml == other.rawHtml;
+
+  @override
+  int get hashCode => Object.hash(pollName, title, rawHtml);
+
+  @override
+  String toString() =>
+      'PollNode($id, name=$pollName${title == null ? "" : ", \"$title\""})';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -1405,6 +1451,9 @@ int countImageRuns(List<BlockNode> nodes) {
         }
       case MathBlockNode():
         // 公式无图
+        break;
+      case PollNode():
+        // poll 数据在 API,cooked 里的 poll div 不含正文图
         break;
     }
   }

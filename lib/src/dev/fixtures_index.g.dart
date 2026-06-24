@@ -1145,6 +1145,44 @@ bold + italic 样式应该被保留,link 的下划线也应该有。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''poll/poll_with_title.html''',
+    html: r'''<div class="poll" data-poll-name="favorite" data-poll-question="你最喜欢哪个?" data-poll-type="multiple">
+<div class="poll-container">
+<div class="poll-title">你最喜欢哪个?</div>
+<ul>
+<li data-poll-option-id="x">Flutter</li>
+<li data-poll-option-id="y">React Native</li>
+</ul>
+</div>
+</div>
+''',
+    notes: r'''带标题 poll(data-poll-question + .poll-title + data-poll-name=favorite)。
+验证 parser 标题提取优先级 + 自定义 pollName。''',
+    source: r'''https://example.com/t/sample/1/pl-poll2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''poll/regular_poll.html''',
+    html: r'''<div class="poll" data-poll-name="poll" data-poll-type="regular" data-poll-status="open">
+<div class="poll-container">
+<ul>
+<li data-poll-option-id="aaa">选项 A</li>
+<li data-poll-option-id="bbb">选项 B</li>
+<li data-poll-option-id="ccc">选项 C</li>
+</ul>
+</div>
+<div class="poll-info">
+<p><span class="info-number">12</span> 人投票</p>
+</div>
+</div>
+''',
+    notes: r'''最简 regular poll(data-poll-name=poll)。poll 数据全在 API,
+子包只提 pollName + rawHtml,fallback 占位卡显示。
+主项目接 pollBuilder 后 legacy buildPoll 从 post.polls 渲染真实选项/票数。''',
+    source: r'''https://example.com/t/sample/1/pl-poll1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''quote_card/nested_quote.html''',
     html: r'''<aside class="quote" data-username="outer_user" data-post="2" data-topic="111">
 <div class="title">

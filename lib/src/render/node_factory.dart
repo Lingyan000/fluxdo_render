@@ -29,6 +29,7 @@ import 'math_handler.dart';
 import 'mention_handler.dart';
 import 'onebox_handler.dart';
 import 'policy_handler.dart';
+import 'poll_handler.dart';
 import 'quote_avatar_handler.dart';
 
 class NodeFactory {
@@ -46,6 +47,7 @@ class NodeFactory {
     this.iframeBuilder,
     this.localDateBuilder,
     this.policyBuilder,
+    this.pollBuilder,
     this.mathBlockBuilder,
     this.mathInlineBuilder,
     this.totalImagesInPost = 0,
@@ -103,6 +105,10 @@ class NodeFactory {
   /// 用户列表)。返回 null 时子包 fallback 渲染 body + 静态 footer 占位。
   final PolicyBuilder? policyBuilder;
 
+  /// 投票块 builder,主项目接 legacy buildPoll(选项/票数/投票交互 + API)。
+  /// 返回 null 时子包 fallback 占位卡(标题 + 接入提示)。
+  final PollBuilder? pollBuilder;
+
   /// 块级数学公式 builder,主项目接入 flutter_math_fork。
   /// 返回 null 时子包用 monospace `$latex$` 原文。
   final MathBlockBuilder? mathBlockBuilder;
@@ -144,6 +150,7 @@ class NodeFactory {
       iframeBuilder: iframeBuilder,
       localDateBuilder: localDateBuilder,
       policyBuilder: policyBuilder,
+      pollBuilder: pollBuilder,
       mathBlockBuilder: mathBlockBuilder,
       mathInlineBuilder: mathInlineBuilder,
       totalImagesInPost: totalImagesInPost,
@@ -171,6 +178,7 @@ class NodeFactory {
       IframeNode() => buildIframe(context, node),
       TableNode() => buildTable(context, node),
       PolicyNode() => buildPolicy(context, node),
+      PollNode() => buildPoll(context, node),
       MathBlockNode() => buildMathBlock(context, node),
     };
   }
@@ -835,6 +843,16 @@ class NodeFactory {
     final custom = policyBuilder?.call(context, node);
     if (custom != null) return custom;
     return _PolicyFallbackCard(node: node, childFactory: _compactCopy());
+  }
+
+  /// 投票块渲染 — `<div class="poll">`。
+  ///
+  /// **优先 [pollBuilder]** — 主项目接 legacy buildPoll(选项/票数/投票
+  /// 交互 + API);返回 null 时画 fallback 占位卡(标题 + 接入提示)。
+  Widget buildPoll(BuildContext context, PollNode node) {
+    final custom = pollBuilder?.call(context, node);
+    if (custom != null) return custom;
+    return _PollFallbackCard(node: node);
   }
 
   /// 块级数学公式渲染 — `<div class="math">`(对齐 legacy
@@ -2390,6 +2408,56 @@ class _PolicyFallbackCard extends StatelessWidget {
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 投票块 fallback 占位卡(主项目不注入 pollBuilder 时)。
+///
+/// poll 数据在 API,子包拿不到,只能显示标题 + 接入提示。主项目接
+/// pollBuilder 后会替换为带选项/票数/投票交互的真实 widget。
+class _PollFallbackCard extends StatelessWidget {
+  const _PollFallbackCard({required this.node});
+  final PollNode node;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.outlineVariant, width: 1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.bar_chart_rounded, size: 20, color: scheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (node.title != null && node.title!.isNotEmpty)
+                  Text(
+                    node.title!,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                Text(
+                  'Poll · 接入主项目后显示选项与投票',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],

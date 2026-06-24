@@ -151,6 +151,12 @@ class ParagraphParser {
             }
             continue;
           }
+          // div.poll:Discourse 投票块(数据在 API,这里只提 name + 标题)
+          if (tag == 'div' && node.classes.contains('poll')) {
+            flushInlines();
+            out.add(_parsePoll(node, nextId));
+            continue;
+          }
           // div.d-image-grid:多图网格(Discourse 原生 image-grid 组件)。
           // 优先于 lightbox-wrapper 检测,因为 grid 内可能含多个 lightbox-wrapper。
           if (tag == 'div' && node.classes.contains('d-image-grid')) {
@@ -916,6 +922,38 @@ class ParagraphParser {
       renewalStart: optStr('data-renewal-start'),
       reminder: optStr('data-reminder'),
       isPrivate: attrs['data-private'] == 'true',
+      rawHtml: divEl.outerHtml,
+    );
+  }
+
+  /// 解析 `<div class="poll">` 为 PollNode。
+  ///
+  /// poll 数据全在 API(post.polls),cooked 只给 data-poll-name + 标题。
+  /// 标题优先级对齐 legacy `_extractPollTitle`:
+  ///   data-poll-question > data-poll-title > .poll-title 文本 >
+  ///   .poll-question 文本。
+  PollNode _parsePoll(dom.Element divEl, String Function() nextId) {
+    final attrs = divEl.attributes;
+    final pollName = attrs['data-poll-name']?.trim().isNotEmpty == true
+        ? attrs['data-poll-name']!.trim()
+        : 'poll';
+
+    String? title;
+    final attrTitle =
+        attrs['data-poll-question']?.trim() ?? attrs['data-poll-title']?.trim();
+    if (attrTitle != null && attrTitle.isNotEmpty) {
+      title = attrTitle;
+    } else {
+      final titleEl = divEl.querySelector('.poll-title') ??
+          divEl.querySelector('.poll-question');
+      final t = titleEl?.text.trim();
+      if (t != null && t.isNotEmpty) title = t;
+    }
+
+    return PollNode(
+      id: nextId(),
+      pollName: pollName,
+      title: title,
       rawHtml: divEl.outerHtml,
     );
   }

@@ -115,6 +115,7 @@ void main() {
         TableNode() => 'table',
         PolicyNode() => 'policy',
         MathBlockNode() => 'mathBlock',
+        PollNode() => 'poll',
       };
       expect(label, 'paragraph');
     });

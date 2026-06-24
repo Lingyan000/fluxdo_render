@@ -15,6 +15,7 @@ import '../render/mention_handler.dart';
 import '../render/node_factory.dart';
 import '../render/onebox_handler.dart';
 import '../render/policy_handler.dart';
+import '../render/poll_handler.dart';
 import '../render/quote_avatar_handler.dart';
 
 /// 帖子渲染入口 widget。
@@ -41,6 +42,7 @@ class FluxdoRender extends StatefulWidget {
     this.iframeBuilder,
     this.localDateBuilder,
     this.policyBuilder,
+    this.pollBuilder,
     this.mathBlockBuilder,
     this.mathInlineBuilder,
   });
@@ -104,6 +106,10 @@ class FluxdoRender extends StatefulWidget {
   /// 已接受用户列表)。返回 null 时子包 fallback 渲染 body + 静态 footer 占位。
   final PolicyBuilder? policyBuilder;
 
+  /// 投票块 builder —— 主项目接 legacy buildPoll(选项/票数/投票 + API)。
+  /// 返回 null 时子包 fallback 占位卡。
+  final PollBuilder? pollBuilder;
+
   /// 块级数学公式 builder —— 主项目接入 flutter_math_fork。
   /// 返回 null 时子包 fallback 用 monospace `$latex$` 原文。
   final MathBlockBuilder? mathBlockBuilder;
@@ -157,6 +163,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           iframeBuilder: widget.iframeBuilder,
           localDateBuilder: widget.localDateBuilder,
           policyBuilder: widget.policyBuilder,
+          pollBuilder: widget.pollBuilder,
           mathBlockBuilder: widget.mathBlockBuilder,
           mathInlineBuilder: widget.mathInlineBuilder,
           totalImagesInPost: _totalImagesInPost,
