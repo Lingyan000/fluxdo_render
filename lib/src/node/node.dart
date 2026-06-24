@@ -1149,6 +1149,106 @@ class TableNode extends BlockNode {
       '${hasHeader ? ", with header" : ""})';
 }
 
+/// Discourse policy 区块 — `<div class="policy" data-*="...">正文</div>`。
+///
+/// Discourse `discourse-policy` 插件渲染:
+/// ```html
+/// <div class="policy" data-version="1" data-groups="staff"
+///      data-accept="我已阅读" data-revoke="取消"
+///      data-renewal-days="30" data-renewal-start="..."
+///      data-reminder="weekly" data-private="false">
+///   <p>请阅读此政策...</p>
+///   <ul><li>条款 1</li><li>条款 2</li></ul>
+/// </div>
+/// ```
+///
+/// 渲染对齐 legacy `policy_builder.dart::_PolicyWidget`:
+///   外:边框容器(灰底 outline + 圆角 8 + margin v8)
+///   body:子 BlockNode 递归渲染(走 compact factory)
+///   footer:接受/撤销 按钮 + "X 人已接受" 状态
+///
+/// **子包不实现交互**:接受/撤销 涉及后端 API + 当前 post 状态,业务强
+/// 耦合。子包只产 PolicyNode + 暴露 [PolicyBuilder] callback,主项目
+/// 自己渲染整个 widget(含按钮 + 头像 + 接口调用)。
+/// 不传 builder 时子包 fallback 渲染 body + 静态 footer 占位
+/// (acceptLabel 按钮,无作用)。
+@immutable
+class PolicyNode extends BlockNode {
+  const PolicyNode({
+    required super.id,
+    required this.children,
+    this.version,
+    this.groups,
+    this.acceptLabel,
+    this.revokeLabel,
+    this.renewalDays,
+    this.renewalStart,
+    this.reminder,
+    this.isPrivate = false,
+  });
+
+  /// policy 正文 BlockNode(parser 已剥可选 .policy-body 外层 div)。
+  final List<BlockNode> children;
+
+  /// `data-version`(任意字符串,主项目按需 parse 成 int)。
+  final String? version;
+
+  /// `data-groups`,逗号分隔的允许接受的用户组。
+  final String? groups;
+
+  /// `data-accept`,自定义接受按钮文案(空时主项目用默认 "接受")。
+  final String? acceptLabel;
+
+  /// `data-revoke`,自定义撤销按钮文案(空时主项目用默认 "撤销")。
+  final String? revokeLabel;
+
+  /// `data-renewal-days`,接受后多少天需要重新确认。
+  final String? renewalDays;
+
+  /// `data-renewal-start`,重新确认起始时间(ISO 字符串)。
+  final String? renewalStart;
+
+  /// `data-reminder`,提醒频率(daily/weekly 等)。
+  final String? reminder;
+
+  /// `data-private`,是否私密(只本人能看接受列表)。
+  final bool isPrivate;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PolicyNode &&
+          runtimeType == other.runtimeType &&
+          version == other.version &&
+          groups == other.groups &&
+          acceptLabel == other.acceptLabel &&
+          revokeLabel == other.revokeLabel &&
+          renewalDays == other.renewalDays &&
+          renewalStart == other.renewalStart &&
+          reminder == other.reminder &&
+          isPrivate == other.isPrivate &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hash(
+        version,
+        groups,
+        acceptLabel,
+        revokeLabel,
+        renewalDays,
+        renewalStart,
+        reminder,
+        isPrivate,
+        Object.hashAll(children),
+      );
+
+  @override
+  String toString() =>
+      'PolicyNode($id, ${children.length} children'
+      '${version == null ? "" : ", v$version"}'
+      '${groups == null ? "" : ", groups=$groups"})';
+}
+
 /// 数一份 BlockNode 树里所有 [ImageRun] 的总数。
 ///
 /// FluxdoRender 在 parse 完成后调用一次,把结果通过 NodeFactory 传到
@@ -1247,6 +1347,11 @@ int countImageRuns(List<BlockNode> nodes) {
               scanBlock(c);
             }
           }
+        }
+      case PolicyNode(:final children):
+        // policy 正文可能含图
+        for (final c in children) {
+          scanBlock(c);
         }
     }
   }

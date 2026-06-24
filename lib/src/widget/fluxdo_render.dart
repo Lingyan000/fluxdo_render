@@ -13,6 +13,7 @@ import '../render/local_date_handler.dart';
 import '../render/mention_handler.dart';
 import '../render/node_factory.dart';
 import '../render/onebox_handler.dart';
+import '../render/policy_handler.dart';
 import '../render/quote_avatar_handler.dart';
 
 /// 帖子渲染入口 widget。
@@ -38,6 +39,7 @@ class FluxdoRender extends StatefulWidget {
     this.lazyVideoBuilder,
     this.iframeBuilder,
     this.localDateBuilder,
+    this.policyBuilder,
   });
 
   /// Discourse cooked HTML 内容。
@@ -95,6 +97,10 @@ class FluxdoRender extends StatefulWidget {
   /// 返回 null 时子包用内置 fallback(服务端预渲染文本 + 时钟图标)。
   final LocalDateBuilder? localDateBuilder;
 
+  /// Discourse policy builder —— 主项目注入完整交互(接受/撤销 + API +
+  /// 已接受用户列表)。返回 null 时子包 fallback 渲染 body + 静态 footer 占位。
+  final PolicyBuilder? policyBuilder;
+
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
 }
@@ -139,6 +145,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           lazyVideoBuilder: widget.lazyVideoBuilder,
           iframeBuilder: widget.iframeBuilder,
           localDateBuilder: widget.localDateBuilder,
+          policyBuilder: widget.policyBuilder,
           totalImagesInPost: _totalImagesInPost,
         );
     if (_nodes.isEmpty) {

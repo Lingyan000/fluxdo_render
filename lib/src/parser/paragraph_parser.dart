@@ -135,6 +135,12 @@ class ParagraphParser {
             out.add(_parseLazyVideo(node, nextId));
             continue;
           }
+          // div.policy:Discourse policy 插件区块
+          if (tag == 'div' && node.classes.contains('policy')) {
+            flushInlines();
+            out.add(_parsePolicy(node, nextId, nextImageIndex));
+            continue;
+          }
           // div.d-image-grid:多图网格(Discourse 原生 image-grid 组件)。
           // 优先于 lightbox-wrapper 检测,因为 grid 内可能含多个 lightbox-wrapper。
           if (tag == 'div' && node.classes.contains('d-image-grid')) {
@@ -842,6 +848,60 @@ class ParagraphParser {
       thumbnailUrl: thumbnailUrl,
       startTime: startTime,
       url: url,
+    );
+  }
+
+  /// 解析 `<div class="policy">` 为 PolicyNode(对齐 legacy
+  /// `policy_builder.dart::buildPolicy`)。
+  ///
+  /// HTML 形态:
+  /// ```html
+  /// <div class="policy" data-version="1" data-groups="staff"
+  ///      data-accept="..." data-revoke="..." ...>
+  ///   <div class="policy-body">  <!-- 可选包裹 -->
+  ///     <p>正文</p>
+  ///   </div>
+  /// </div>
+  /// ```
+  ///
+  /// 处理:
+  /// - 如果有 `<div class="policy-body">` 单层包裹,递归它的子节点;
+  ///   否则直接递归 div.policy 自身的子节点
+  /// - 提全部 data-* 属性(version/groups/accept/revoke/renewalDays 等)
+  /// - data-private = "true" → isPrivate
+  PolicyNode _parsePolicy(
+    dom.Element divEl,
+    String Function() nextId,
+    int Function() nextImageIndex,
+  ) {
+    // 找 .policy-body 子 div(单层包裹,legacy 同处理)
+    dom.Element bodyEl = divEl;
+    for (final c in divEl.children) {
+      if (c.localName?.toLowerCase() == 'div' &&
+          c.classes.contains('policy-body')) {
+        bodyEl = c;
+        break;
+      }
+    }
+    final children = _parseBlocks(bodyEl.nodes, nextId, nextImageIndex);
+
+    final attrs = divEl.attributes;
+    String? optStr(String key) {
+      final v = attrs[key]?.trim();
+      return (v == null || v.isEmpty) ? null : v;
+    }
+
+    return PolicyNode(
+      id: nextId(),
+      children: children,
+      version: optStr('data-version'),
+      groups: optStr('data-groups'),
+      acceptLabel: optStr('data-accept'),
+      revokeLabel: optStr('data-revoke'),
+      renewalDays: optStr('data-renewal-days'),
+      renewalStart: optStr('data-renewal-start'),
+      reminder: optStr('data-reminder'),
+      isPrivate: attrs['data-private'] == 'true',
     );
   }
 

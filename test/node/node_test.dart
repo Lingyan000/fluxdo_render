@@ -113,6 +113,7 @@ void main() {
         LazyVideoNode() => 'lazyVideo',
         IframeNode() => 'iframe',
         TableNode() => 'table',
+        PolicyNode() => 'policy',
       };
       expect(label, 'paragraph');
     });

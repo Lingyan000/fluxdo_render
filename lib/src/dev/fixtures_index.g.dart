@@ -1081,6 +1081,40 @@ bold + italic 样式应该被保留,link 的下划线也应该有。''',
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''policy/custom_labels.html''',
+    html: r'''<div class="policy" data-version="2" data-groups="trust_level_1,staff" data-accept="我已阅读并同意" data-revoke="我反悔了" data-renewal-days="90" data-reminder="weekly">
+<div class="policy-body">
+<p>这是一份带自定义按钮文案、续约设置的 policy。</p>
+<blockquote>
+<p>引用块也能正常嵌套渲染。</p>
+</blockquote>
+</div>
+</div>
+''',
+    notes: r'''自定义按钮文案 + .policy-body 内层包裹 + 多种属性
+(renewal-days, reminder, 多 groups)。
+验证 parser 剥 .policy-body + 全 data-* 字段。''',
+    source: r'''https://example.com/t/sample/1/pl2''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
+    relativePath: r'''policy/simple_with_list.html''',
+    html: r'''<div class="policy" data-version="1" data-groups="staff">
+<p>请仔细阅读以下规则后再接受:</p>
+<ul>
+<li>禁止恶意刷帖</li>
+<li>禁止灌水</li>
+<li>禁止人身攻击</li>
+</ul>
+</div>
+''',
+    notes: r'''最简 policy:含 paragraph + ul 列表正文。
+渲染:边框卡 + body + 静态 footer(默认 "接受" 按钮)。
+主项目接 policyBuilder 后会替换为带后端 API 的真实交互。''',
+    source: r'''https://example.com/t/sample/1/pl1''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''quote_card/nested_quote.html''',
     html: r'''<aside class="quote" data-username="outer_user" data-post="2" data-topic="111">
 <div class="title">

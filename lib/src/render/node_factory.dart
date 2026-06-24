@@ -27,6 +27,7 @@ import 'link_handler.dart';
 import 'local_date_handler.dart';
 import 'mention_handler.dart';
 import 'onebox_handler.dart';
+import 'policy_handler.dart';
 import 'quote_avatar_handler.dart';
 
 class NodeFactory {
@@ -43,6 +44,7 @@ class NodeFactory {
     this.lazyVideoBuilder,
     this.iframeBuilder,
     this.localDateBuilder,
+    this.policyBuilder,
     this.totalImagesInPost = 0,
     this.compact = false,
   }) : _inlineFlattener = inlineFlattener ?? const InlineFlattener();
@@ -94,6 +96,10 @@ class NodeFactory {
   /// 返回 null 时子包用内置 fallback(直接显示服务端预渲染文本 + 时钟图标)。
   final LocalDateBuilder? localDateBuilder;
 
+  /// Discourse policy builder,主项目注入完整交互(接受/撤销 + API + 已接受
+  /// 用户列表)。返回 null 时子包 fallback 渲染 body + 静态 footer 占位。
+  final PolicyBuilder? policyBuilder;
+
   /// 当前 post 内 ImageRun 总数,由 FluxdoRender 在 parse 完成后算出
   /// 并传入。透传到 ImageContentBuilder,主项目用于构造 gallery viewer。
   ///
@@ -126,6 +132,7 @@ class NodeFactory {
       lazyVideoBuilder: lazyVideoBuilder,
       iframeBuilder: iframeBuilder,
       localDateBuilder: localDateBuilder,
+      policyBuilder: policyBuilder,
       totalImagesInPost: totalImagesInPost,
       compact: true,
     );
@@ -150,6 +157,7 @@ class NodeFactory {
       LazyVideoNode() => buildLazyVideo(context, node),
       IframeNode() => buildIframe(context, node),
       TableNode() => buildTable(context, node),
+      PolicyNode() => buildPolicy(context, node),
     };
   }
 
@@ -793,6 +801,20 @@ class NodeFactory {
   /// cell 内子节点走 _compactCopy 渲染(消除嵌套 paragraph 多余 margin)。
   Widget buildTable(BuildContext context, TableNode node) {
     return _TableWidget(node: node, childFactory: _compactCopy());
+  }
+
+  /// Discourse policy 渲染 — `<div class="policy">`(对齐 legacy
+  /// `policy_builder.dart::_PolicyWidget`)。
+  ///
+  /// **优先 [policyBuilder]** — 主项目注入完整交互(接受/撤销按钮 +
+  /// API 调用 + 已接受用户列表);返回 null 时画 fallback 卡片:
+  ///   外:边框容器 + 圆角 8 + margin v8
+  ///   body:子节点走 _compactCopy
+  ///   footer:横分隔线 + 静态 acceptLabel 按钮(占位,无作用)
+  Widget buildPolicy(BuildContext context, PolicyNode node) {
+    final custom = policyBuilder?.call(context, node);
+    if (custom != null) return custom;
+    return _PolicyFallbackCard(node: node, childFactory: _compactCopy());
   }
 }
 
@@ -2232,6 +2254,96 @@ class _TableWidget extends StatelessWidget {
           color: theme.colorScheme.onSurfaceVariant,
         ),
         textAlign: TextAlign.center,
+      ),
+    );
+  }
+}
+
+/// Discourse policy 区块 fallback 卡(主项目不注入 policyBuilder 时)。
+///
+/// 视觉对齐 legacy `_PolicyWidget`:
+///   外:Container outline 边框 + 圆角 8 + margin v8
+///   body padding 12,子节点走 compactCopy
+///   footer:横分隔线 + Padding 12 + 静态 acceptLabel 按钮(无交互)
+///
+/// 主项目接 policyBuilder 后会替换整个 widget。
+class _PolicyFallbackCard extends StatelessWidget {
+  const _PolicyFallbackCard({required this.node, required this.childFactory});
+  final PolicyNode node;
+  final NodeFactory childFactory;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final accept = node.acceptLabel?.isNotEmpty == true
+        ? node.acceptLabel!
+        : '接受';
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.outlineVariant, width: 1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // body
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final c in node.children) childFactory.build(context, c),
+              ],
+            ),
+          ),
+          // 分隔线
+          Container(
+            height: 1,
+            color: scheme.outlineVariant.withValues(alpha: 0.5),
+          ),
+          // footer:静态按钮(占位,主项目通过 policyBuilder 替换)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                // 模拟"按钮"形态(轻度强调,无交互)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    accept,
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Policy · 接入主项目后显示完整交互',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
