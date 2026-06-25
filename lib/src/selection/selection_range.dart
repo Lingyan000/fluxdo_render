@@ -21,7 +21,7 @@ class BlockRange {
 ///
 /// 单块选区:返回该块一段(start/end 按 renderOffset 排序)。
 /// 跨块选区:首块 [startOffset, len)、中间块整段、末块 [0, endOffset)。
-/// registry 里取不到端点块几何(未 mount)时返回空列表(第一版取舍)。
+/// 取不到端点块几何(details 折叠/spoiler 未揭示的子块未 mount)时返回空列表。
 List<BlockRange> expandSelection(
   SelectionRegistry registry,
   DocumentSelection selection,
