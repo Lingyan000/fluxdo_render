@@ -225,13 +225,20 @@ class _FluxdoRenderState extends State<FluxdoRender> {
 
     // 选区树:Scope 下传 controller 给各 InlineSpanText(注册 + 高亮),
     // 顶层手势层管长按选区,toolbar 弹复制/引用浮层。
-    return SelectionScope(
-      controller: controller,
-      child: SelectionContentLayer(
+    //
+    // 关键:用 SelectionContainer.disabled 把内容从**外层系统 SelectionArea**
+    // (主项目 topic_post_list 包了一层)里排除——否则 Text.rich 会自动参与
+    // 外层系统选区,系统高亮抢先接管拖拽,自研手势层/toolbar 永远触发不了。
+    // 自研选区直接用 RenderParagraph,不依赖 SelectionContainer,disabled 不影响它。
+    return SelectionContainer.disabled(
+      child: SelectionScope(
         controller: controller,
-        onQuoteRequest: widget.onQuoteRequest,
-        onCopyToast: widget.onCopyToast,
-        child: column,
+        child: SelectionContentLayer(
+          controller: controller,
+          onQuoteRequest: widget.onQuoteRequest,
+          onCopyToast: widget.onCopyToast,
+          child: column,
+        ),
       ),
     );
   }
