@@ -20,11 +20,35 @@ abstract class SelectableBlockHandle {
   RenderTextProjection get projection;
 
   /// 块在全局坐标系的矩形(用于视觉序排序 + 命中)。null = 不可用。
+  ///
+  /// 若块在内部滚动容器里(如代码块的双层 SingleChildScrollView),
+  /// RenderParagraph.size 是**完整内容尺寸**(远超可视区)、localToGlobal 随
+  /// 滚动偏移跑到 viewport 外 → 直接用会让命中框溢出可视区,误命中相邻块。
+  /// 故与最近祖先 viewport 的可视区求交,裁剪到真正可见的部分。
   Rect? globalRect() {
     final p = paragraph;
     if (p == null || !p.attached || !p.hasSize) return null;
-    final topLeft = p.localToGlobal(Offset.zero);
-    return topLeft & p.size;
+    final raw = p.localToGlobal(Offset.zero) & p.size;
+    final clip = _nearestViewportClip(p);
+    if (clip == null) return raw;
+    final r = raw.intersect(clip);
+    return (r.width <= 0 || r.height <= 0) ? null : r;
+  }
+
+  /// 从 [from] 向上找最近的滚动 viewport,返回其可视区全局矩形;无则 null。
+  static Rect? _nearestViewportClip(RenderObject from) {
+    RenderObject? node = from.parent;
+    while (node != null) {
+      if (node is RenderAbstractViewport && node is RenderBox) {
+        final box = node as RenderBox;
+        if (box.attached && box.hasSize) {
+          return box.localToGlobal(Offset.zero) & box.size;
+        }
+        return null;
+      }
+      node = node.parent;
+    }
+    return null;
   }
 }
 

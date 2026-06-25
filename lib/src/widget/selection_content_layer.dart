@@ -116,7 +116,10 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
               widget.onCopyQuoteRequest!.call(plainText);
               widget.controller.clear();
             },
-      onCopied: widget.onCopyToast,
+      onCopied: () {
+        widget.onCopyToast?.call();
+        widget.controller.clear(); // 复制后清选区(与引用/复制引用一致)
+      },
     );
   }
 
