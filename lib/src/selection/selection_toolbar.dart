@@ -14,7 +14,6 @@ class SelectionToolbar {
     required this.context,
     required this.onQuote,
     required this.onCopied,
-    this.topBoundaryGlobal,
     this.copyLabel = '复制',
     this.quoteLabel = '引用',
   });
@@ -22,12 +21,6 @@ class SelectionToolbar {
   final BuildContext context;
   final void Function(String plainText) onQuote;
   final VoidCallback? onCopied;
-
-  /// 顶部安全边界(**全局** y 坐标)getter —— 通常 = 祖先 Scrollable 视口
-  /// 上边缘(它本就在 AppBar 下方)。toolbar 放选区上方会越过这条线时,翻到
-  /// 选区下方(避免遮挡 AppBar)。子包不知道 AppBar 高度,由内容层注入视口
-  /// 上边缘;返回 null / 不传则退化为 overlay 顶(0)。
-  final double? Function()? topBoundaryGlobal;
 
   final String copyLabel;
   final String quoteLabel;
@@ -87,14 +80,15 @@ class SelectionToolbar {
     final selTop = tl.dy;
     final selBottom = tl.dy + bounds.height;
 
-    // 顶部安全边界转 overlay 局部坐标(全局视口上边缘 → 局部)。
-    final boundaryGlobal = topBoundaryGlobal?.call();
-    final topInset = boundaryGlobal == null
-        ? 0.0
-        : overlayBox.globalToLocal(Offset(0, boundaryGlobal)).dy;
+    // 顶部安全线(overlay 局部坐标):状态栏 + 一个标准 AppBar 高度。
+    // 用 MediaQuery,不猜具体 AppBar/标题位置 —— 上方放不下(toolbar 会越过
+    // 这条线)就翻到选区下方。overlay 通常铺满屏幕,其局部 0 == 屏幕顶,故
+    // 直接用 padding.top + kToolbarHeight 作局部 y 安全线。
+    final mq = MediaQuery.maybeOf(ctx);
+    final topInset =
+        (mq?.viewPadding.top ?? 0) + kToolbarHeight;
 
-    // 默认放选区上方;若上方放不下(会越过 topInset 安全线,如 AppBar 视口
-    // 上缘)则翻到选区下方(对齐系统 toolbar 的 flip 行为)。
+    // 默认放选区上方;上方放不下则翻到选区下方(对齐系统 toolbar flip)。
     final aboveTop = selTop - _toolbarHeight - _gap;
     final top = aboveTop >= topInset ? aboveTop : selBottom + _gap;
 

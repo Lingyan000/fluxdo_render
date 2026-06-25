@@ -77,7 +77,7 @@ void main() {
     expect(quoted, 'hello');
   });
 
-  testWidgets('上方放不下(越过 topBoundary)→ toolbar 翻到选区下方', (tester) async {
+  testWidgets('上方放不下(越过安全线)→ toolbar 翻到选区下方', (tester) async {
     late BuildContext ctx;
     await tester.pumpWidget(
       MaterialApp(
@@ -89,20 +89,16 @@ void main() {
         ),
       ),
     );
-    // topBoundary 全局 y=100(模拟 AppBar 下沿)。选区在 y=110,上方放不下。
-    final t = SelectionToolbar(
-      context: ctx,
-      onQuote: (_) {},
-      onCopied: null,
-      topBoundaryGlobal: () => 100,
-    );
-    t.show(dataAt(const Rect.fromLTWH(100, 110, 80, 20)));
+    // 测试环境 padding.top=0,安全线 = kToolbarHeight(56)。
+    // 选区在 y=60:上方 60-40-8=12 < 56 → 放不下 → 翻下方。
+    final t = SelectionToolbar(context: ctx, onQuote: (_) {}, onCopied: null);
+    t.show(dataAt(const Rect.fromLTWH(100, 60, 80, 20)));
     await tester.pump();
 
-    // toolbar 应在选区下方(top > 选区 bottom=130),而非上方(会 < 100 遮挡)。
+    // toolbar 应在选区下方(top > 选区 bottom=80),不遮挡顶部。
     final pos = tester.getTopLeft(find.text('复制'));
-    expect(pos.dy, greaterThan(110),
-        reason: '上方放不下应翻到选区下方,不遮挡 topBoundary 以上');
+    expect(pos.dy, greaterThan(60),
+        reason: '上方放不下应翻到选区下方,不遮挡安全线以上');
     t.hide();
   });
 
@@ -118,12 +114,7 @@ void main() {
         ),
       ),
     );
-    final t = SelectionToolbar(
-      context: ctx,
-      onQuote: (_) {},
-      onCopied: null,
-      topBoundaryGlobal: () => 100,
-    );
+    final t = SelectionToolbar(context: ctx, onQuote: (_) {}, onCopied: null);
     // 选区在 y=400,上方空间充足。
     t.show(dataAt(const Rect.fromLTWH(100, 400, 80, 20)));
     await tester.pump();
