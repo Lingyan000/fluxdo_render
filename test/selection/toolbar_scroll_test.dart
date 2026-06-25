@@ -141,13 +141,17 @@ void main() {
     t.show(dataAt(Rect.fromLTWH(screenW - 30, 400, 20, 20)));
     await tester.pump();
     // toolbar 整体不应超出右边界(右沿 ≤ 屏宽)。
-    final tr = tester.getTopRight(find.byType(Material).first);
+    final tbMaterial = find.ancestor(
+      of: find.text('复制'),
+      matching: find.byType(Material),
+    );
+    final tr = tester.getTopRight(tbMaterial.first);
     expect(tr.dx, lessThanOrEqualTo(screenW),
         reason: 'shift 应把 toolbar 夹回视口内,不超右边界');
     t.hide();
   });
 
-  testWidgets('选区靠屏幕左边 → toolbar 左沿 ≥ 0(shift)', (tester) async {
+  testWidgets('左对齐选区起点(top-start,非居中)', (tester) async {
     late BuildContext ctx;
     await tester.pumpWidget(
       MaterialApp(
@@ -160,11 +164,22 @@ void main() {
       ),
     );
     final t = SelectionToolbar(context: ctx, onQuote: (_) {}, onCopied: null);
-    t.show(dataAt(const Rect.fromLTWH(2, 400, 20, 20)));
+    // 屏幕中部一个很宽的选区(left=100,宽 200)。
+    t.show(SelectionData(
+      plainText: 'x',
+      globalBounds: const Rect.fromLTWH(100, 400, 200, 20),
+      globalRects: const [Rect.fromLTWH(100, 400, 200, 20)],
+    ));
     await tester.pump();
-    final tl = tester.getTopLeft(find.byType(Material).first);
-    expect(tl.dx, greaterThanOrEqualTo(0),
-        reason: 'shift 应把 toolbar 夹回视口内,左沿不为负');
+    // 定位 toolbar 自身的 Material(含「复制」文字的那个,非 Scaffold 外层)。
+    final toolbarMaterial = find.ancestor(
+      of: find.text('复制'),
+      matching: find.byType(Material),
+    );
+    final tlx = tester.getTopLeft(toolbarMaterial.first).dx;
+    // 左对齐选区起点(≈100),而非居中(居中会是 100+100-w/2 ≈ 120 偏右)。
+    expect((tlx - 100).abs(), lessThan(8),
+        reason: 'toolbar 应左对齐选区起点 100,不是居中');
     t.hide();
   });
 }

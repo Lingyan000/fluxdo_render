@@ -81,7 +81,14 @@ class SelectionToolbar {
     if (!overlayBox.paintBounds.overlaps(selRectLocal)) {
       return const SizedBox.shrink();
     }
-    final anchorCenterX = tl.dx + bounds.width / 2;
+
+    // 对齐 Discourse fk-d-menu 的 `top-start`(桌面)/`bottom-start`(移动):
+    // toolbar **左对齐选区起点**(不是居中)。锚点 = 选区视觉首行框的左上角。
+    // 首行框 = globalRects 第一个(exporter 按视觉序产出);退化用 bounds。
+    final firstRect = data.globalRects.isNotEmpty
+        ? overlayBox.globalToLocal(data.globalRects.first.topLeft)
+        : tl;
+    final anchorStartX = firstRect.dx;
     final selTop = tl.dy;
     final selBottom = tl.dy + bounds.height;
 
@@ -93,20 +100,18 @@ class SelectionToolbar {
     final topInset =
         (mq?.viewPadding.top ?? 0) + kToolbarHeight;
 
-    // 默认放选区上方;上方放不下则翻到选区下方(对齐系统 toolbar flip /
-    // Floating UI 的 flip middleware)。
+    // 默认放选区上方;上方放不下则翻到选区下方(对齐 fk-d-menu flip:
+    // top-start → bottom-start)。
     final aboveTop = selTop - _toolbarHeight - _gap;
     final top = aboveTop >= topInset ? aboveTop : selBottom + _gap;
 
-    // 水平:居中于选区,但夹回视口内(对齐 fk-d-menu / Floating UI 的 shift
-    // middleware:crossAxis 越界平移回可视区,留 [_edgePadding] 边距)。
-    // toolbar 实际宽动态(中英文按钮),用估算宽 + clamp 近似 shift。
+    // 水平:左对齐选区起点(-start),再 shift 夹回视口内(对齐 fk-d-menu
+    // 的 shift middleware:越界平移回可视区,留 [_edgePadding] 边距)。
     final screenW = mq?.size.width ?? overlayBox.size.width;
-    final rawLeft = anchorCenterX - _estimatedWidth / 2;
     final maxLeft = screenW - _estimatedWidth - _edgePadding;
     final left = maxLeft <= _edgePadding
         ? _edgePadding // 屏幕比 toolbar 还窄的极端情况
-        : rawLeft.clamp(_edgePadding, maxLeft);
+        : anchorStartX.clamp(_edgePadding, maxLeft);
 
     return Positioned(
       left: left,
