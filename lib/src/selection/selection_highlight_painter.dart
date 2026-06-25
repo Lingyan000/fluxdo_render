@@ -6,6 +6,8 @@
 /// RenderParagraph.getBoxesForSelection 取矩形(本地坐标)直接画。
 library;
 
+import 'dart:ui' show BoxHeightStyle;
+
 import 'package:flutter/widgets.dart';
 
 import 'selectable_block_handle.dart';
@@ -84,13 +86,15 @@ class _HighlightPainter extends CustomPainter {
     }
     if (mine == null || mine.isEmpty) return;
 
-    // 用默认 tight box:各 box 是「每行选中部分」的真实矩形,**行间天然有
-    // 间隙**(实测 line1 底 19.6 vs line2 顶 26.6,差 7px)→ 按行分组绝不
-    // 跨行误并,杜绝整段过选。
-    // (曾错用 BoxHeightStyle.max:max 把相邻行 box 撑到亚像素紧贴 → 被
-    //  mergeSelectionBoxesByLine 误判同行合并成跨两行整块 → 整段高亮 bug。)
+    // BoxHeightStyle.max:每个 box 取**整行固有最大高度**(含该行最高字形/emoji),
+    // **与选中了哪些字无关** —— 这是修「先矮后高」的关键:同行字符高度本就参差
+    // (实测 14/16/20),若用 tight 各 box 真实高度 + union,选区往左右扩纳入更高
+    // box 时整条会逐步变高;max 让行高恒定,扩选不跳变。
+    // 跨行不误并:max 让相邻行 box 紧贴(非重叠),mergeSelectionBoxesByLine 的
+    // 「重叠过半」阈值挡住(实测窄宽 5 行 → 仍 5 个独立矩形,不合并)。
     final boxes = paragraph.getBoxesForSelection(
       TextSelection(baseOffset: mine.start, extentOffset: mine.end),
+      boxHeightStyle: BoxHeightStyle.max,
     );
     if (boxes.isEmpty) return;
 
@@ -113,12 +117,12 @@ class _HighlightPainter extends CustomPainter {
 
 typedef DocumentSelectionGetter = DocumentSelection? Function();
 
-/// 把 getBoxesForSelection(**tight**)返回的 box 按「行」(y 区间重叠)分组,
-/// 每行合并成一个矩形:同行内 emoji(偏高)与文字 box 取 union(整行等高,
-/// 消除 emoji 处参差),水平铺满该行左到右(去相邻 box 亚像素缝隙)。
+/// 把 getBoxesForSelection 返回的 box 按「行」分组,每行合并成一个矩形:
+/// 同行 box 取 union(水平铺满该行左到右,去相邻 box 亚像素缝隙)。
 ///
-/// 必须喂 tight box:tight 行间有真实间隙,分组按 y 重叠**绝不跨行**;若喂
-/// BoxHeightStyle.max,相邻行 box 亚像素紧贴会被误判同行 → 合并成跨两行整块。
+/// 同行判定用「垂直重叠**过半**」:相邻行 box 仅紧贴(重叠≈0)不会被误判同行,
+/// 即使喂 BoxHeightStyle.max(相邻行紧贴)也绝不跨行合并(实测窄宽 5 行仍 5 个
+/// 独立矩形)。配合 max(行高与选区无关)修「先矮后高」。
 List<Rect> mergeSelectionBoxesByLine(List<TextBox> boxes) {
   final rows = <List<Rect>>[];
   for (final b in boxes) {
