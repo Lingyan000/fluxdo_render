@@ -32,8 +32,13 @@ class SelectionHighlight extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 用 foregroundPainter(画在 child **上层**)而非 painter(下层):
+    // emoji 图片 / mention chip / 内容图片是不透明的,画在文字层之上 —— 若高亮
+    // 在下层会被它们完全盖住,占位符处看不到选中态。改画上层 + 半透明主题色
+    // (selectionColor ~0.3 alpha)→ 文字和占位符都被涂一层选中色,范围连贯,
+    // 内容仍透出可见(对齐系统选区思路)。
     return CustomPaint(
-      painter: _HighlightPainter(
+      foregroundPainter: _HighlightPainter(
         repaint: controller,
         registry: controller.registry,
         selectionOf: () => controller.selection,

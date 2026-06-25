@@ -119,7 +119,10 @@ class _SelectableTextBoxState extends State<SelectableTextBox> {
     final keyedChild = KeyedSubtree(key: _childKey, child: widget.child);
     final controller = _controller;
     if (controller == null) return keyedChild;
-    final highlightColor = DefaultSelectionStyle.of(context).selectionColor ??
+    // 高亮画在内容**上层**(盖 emoji/图片),必须用低透明度主题色,不能用
+    // DefaultSelectionStyle.selectionColor —— 后者透明度不可控(某些主题接近
+    // 不透明),画上层会糊住文字。统一用 primary @0.3,可控且文字/占位符透出。
+    final highlightColor =
         Theme.of(context).colorScheme.primary.withValues(alpha: 0.3);
     return SelectionHighlight(
       controller: controller,
