@@ -142,16 +142,34 @@ class _ToolbarBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    const radius = Radius.circular(8);
     return Material(
       elevation: 4,
       borderRadius: BorderRadius.circular(8),
       color: scheme.inverseSurface,
+      clipBehavior: Clip.antiAlias,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _btn(context, copyLabel, onCopy, scheme),
-          Container(width: 0.5, height: 24, color: scheme.onInverseSurface.withValues(alpha: 0.3)),
-          _btn(context, quoteLabel, onQuote, scheme),
+          _btn(
+            context,
+            copyLabel,
+            onCopy,
+            scheme,
+            const BorderRadius.only(topLeft: radius, bottomLeft: radius),
+          ),
+          Container(
+            width: 0.5,
+            height: 24,
+            color: scheme.onInverseSurface.withValues(alpha: 0.3),
+          ),
+          _btn(
+            context,
+            quoteLabel,
+            onQuote,
+            scheme,
+            const BorderRadius.only(topRight: radius, bottomRight: radius),
+          ),
         ],
       ),
     );
@@ -162,14 +180,22 @@ class _ToolbarBody extends StatelessWidget {
     String label,
     VoidCallback onTap,
     ColorScheme scheme,
+    BorderRadius radius,
   ) {
+    // 深色 inverseSurface 背景上,InkWell 默认水波纹对比度太低,几乎看不见。
+    // 显式用 onInverseSurface 派生的半透明色,hover / pressed 才有可见反馈。
+    final fg = scheme.onInverseSurface;
     return InkWell(
       onTap: onTap,
+      borderRadius: radius,
+      hoverColor: fg.withValues(alpha: 0.08),
+      highlightColor: fg.withValues(alpha: 0.12),
+      splashColor: fg.withValues(alpha: 0.16),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Text(
           label,
-          style: TextStyle(color: scheme.onInverseSurface, fontSize: 14),
+          style: TextStyle(color: fg, fontSize: 14),
         ),
       ),
     );
