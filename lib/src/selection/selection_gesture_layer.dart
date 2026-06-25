@@ -44,10 +44,13 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
   SelectionExporter get _exporter =>
       SelectionExporter(widget.controller.registry);
 
+  /// 本次选区是否由触摸/长按产生(决定上层是否显示移动端拖拽手柄)。
+  bool _lastInputWasTouch = false;
+
   void _clear() {
     if (widget.controller.selection != null) {
       widget.controller.clear();
-      widget.onSelectionChanged(null);
+      widget.onSelectionChanged(null, fromTouch: _lastInputWasTouch);
     }
   }
 
@@ -114,12 +117,14 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
       _clear();
       return;
     }
-    widget.onSelectionChanged(_exporter.export(sel));
+    widget.onSelectionChanged(_exporter.export(sel), fromTouch: _lastInputWasTouch);
   }
 
   // ── 触摸:长按 ──────────────────────────────────────────────
-  void _onLongPressStart(LongPressStartDetails d) =>
-      _startWordAt(d.globalPosition);
+  void _onLongPressStart(LongPressStartDetails d) {
+    _lastInputWasTouch = true;
+    _startWordAt(d.globalPosition);
+  }
 
   void _onLongPressMoveUpdate(LongPressMoveUpdateDetails d) =>
       _extendTo(d.globalPosition);
@@ -129,6 +134,7 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
   // tap-down 按连击数分发:1=折叠定位,2=选词,3=选段。drag 起点已由
   // tap-down 定位,drag-update 扩展,drag-end 定选。
   void _onMouseTapDown(TapDragDownDetails d) {
+    _lastInputWasTouch = false;
     final count = math.min(d.consecutiveTapCount, 3);
     switch (count) {
       case 1:

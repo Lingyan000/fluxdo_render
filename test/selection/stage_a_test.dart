@@ -171,7 +171,7 @@ class _GestureHost extends StatelessWidget {
       controller: controller,
       child: SelectionGestureLayer(
         controller: controller,
-        onSelectionChanged: onResult,
+        onSelectionChanged: (data, {bool fromTouch = false}) => onResult(data),
         child: InlineSpanText(
           inlines: inlines,
           baseStyle: const TextStyle(fontSize: 20),

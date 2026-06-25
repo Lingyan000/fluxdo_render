@@ -19,7 +19,7 @@ void main() {
           controller: c,
           child: SelectionGestureLayer(
             controller: c,
-            onSelectionChanged: (_) {},
+            onSelectionChanged: (_, {bool fromTouch = false}) {},
             child: InlineSpanText(
               inlines: inlines,
               baseStyle: const TextStyle(fontSize: 20),
@@ -51,7 +51,7 @@ void main() {
             controller: c,
             child: SelectionGestureLayer(
               controller: c,
-              onSelectionChanged: (d) => result = d,
+              onSelectionChanged: (d, {bool fromTouch = false}) => result = d,
               child: InlineSpanText(
                 inlines: const [TextRun('Hello world selection test')],
                 baseStyle: const TextStyle(fontSize: 20),

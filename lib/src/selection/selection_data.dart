@@ -61,7 +61,11 @@ class SelectionData {
 }
 
 /// 选区变化回调(选区稳定/清除时触发,null = 清除)。
-typedef SelectionResultCallback = void Function(SelectionData? data);
+/// [fromTouch] = 本次选区是否由触摸产生(决定是否显示移动端拖拽手柄)。
+typedef SelectionResultCallback = void Function(
+  SelectionData? data, {
+  bool fromTouch,
+});
 
 /// 引用请求回调 —— toolbar 点「引用」时调,把选区 plainText 交回主项目。
 typedef QuoteRequestCallback = void Function(String plainText);
