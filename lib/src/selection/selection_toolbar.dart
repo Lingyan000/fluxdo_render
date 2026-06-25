@@ -28,6 +28,11 @@ class SelectionToolbar {
   // toolbar 估算高度(Material vertical padding 10×2 + 文本 ~20)+ 选区间距。
   static const double _toolbarHeight = 40;
   static const double _gap = 8;
+  // 估算宽度(复制|引用 两按钮:各 h16 padding + 文本 + 分隔线,中英文兼顾)。
+  // 仅用于水平 shift 夹边的近似;Positioned 不限宽,真实宽由内容撑。
+  static const double _estimatedWidth = 160;
+  // 视口左右安全边距(对齐 fk-d-menu 的 padding.left/right = 10)。
+  static const double _edgePadding = 10;
 
   OverlayEntry? _entry;
 
@@ -88,12 +93,23 @@ class SelectionToolbar {
     final topInset =
         (mq?.viewPadding.top ?? 0) + kToolbarHeight;
 
-    // 默认放选区上方;上方放不下则翻到选区下方(对齐系统 toolbar flip)。
+    // 默认放选区上方;上方放不下则翻到选区下方(对齐系统 toolbar flip /
+    // Floating UI 的 flip middleware)。
     final aboveTop = selTop - _toolbarHeight - _gap;
     final top = aboveTop >= topInset ? aboveTop : selBottom + _gap;
 
+    // 水平:居中于选区,但夹回视口内(对齐 fk-d-menu / Floating UI 的 shift
+    // middleware:crossAxis 越界平移回可视区,留 [_edgePadding] 边距)。
+    // toolbar 实际宽动态(中英文按钮),用估算宽 + clamp 近似 shift。
+    final screenW = mq?.size.width ?? overlayBox.size.width;
+    final rawLeft = anchorCenterX - _estimatedWidth / 2;
+    final maxLeft = screenW - _estimatedWidth - _edgePadding;
+    final left = maxLeft <= _edgePadding
+        ? _edgePadding // 屏幕比 toolbar 还窄的极端情况
+        : rawLeft.clamp(_edgePadding, maxLeft);
+
     return Positioned(
-      left: anchorCenterX - 80,
+      left: left,
       top: top,
       child: _ToolbarBody(
         copyLabel: copyLabel,

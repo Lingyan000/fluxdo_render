@@ -122,4 +122,49 @@ void main() {
     expect(pos.dy, lessThan(400), reason: '上方放得下应在选区上方');
     t.hide();
   });
+
+  testWidgets('选区靠屏幕右边 → toolbar 夹回视口内(shift)', (tester) async {
+    late BuildContext ctx;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(builder: (c) {
+            ctx = c;
+            return const SizedBox.expand();
+          }),
+        ),
+      ),
+    );
+    final screenW = tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    final t = SelectionToolbar(context: ctx, onQuote: (_) {}, onCopied: null);
+    // 选区贴右边缘
+    t.show(dataAt(Rect.fromLTWH(screenW - 30, 400, 20, 20)));
+    await tester.pump();
+    // toolbar 整体不应超出右边界(右沿 ≤ 屏宽)。
+    final tr = tester.getTopRight(find.byType(Material).first);
+    expect(tr.dx, lessThanOrEqualTo(screenW),
+        reason: 'shift 应把 toolbar 夹回视口内,不超右边界');
+    t.hide();
+  });
+
+  testWidgets('选区靠屏幕左边 → toolbar 左沿 ≥ 0(shift)', (tester) async {
+    late BuildContext ctx;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(builder: (c) {
+            ctx = c;
+            return const SizedBox.expand();
+          }),
+        ),
+      ),
+    );
+    final t = SelectionToolbar(context: ctx, onQuote: (_) {}, onCopied: null);
+    t.show(dataAt(const Rect.fromLTWH(2, 400, 20, 20)));
+    await tester.pump();
+    final tl = tester.getTopLeft(find.byType(Material).first);
+    expect(tl.dx, greaterThanOrEqualTo(0),
+        reason: 'shift 应把 toolbar 夹回视口内,左沿不为负');
+    t.hide();
+  });
 }
