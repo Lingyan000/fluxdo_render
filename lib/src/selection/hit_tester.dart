@@ -79,4 +79,11 @@ class SelectionHitTester {
     final wb = p.getWordBoundary(TextPosition(offset: pos.renderOffset));
     return (start: wb.start, end: wb.end);
   }
+
+  /// 块的渲染总长度(三击选段用)。块已注销返回 null。
+  int? renderLengthOf(SelectableBlockId blockId) {
+    final h = registry.byId(blockId);
+    if (h == null) return null;
+    return h.projection.renderLength;
+  }
 }

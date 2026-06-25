@@ -26,47 +26,76 @@ class SelectionToolbar {
 
   OverlayEntry? _entry;
 
+  /// 当前选区数据(可变)—— 滚动时由 [reposition] 更新,builder 内读最新值
+  /// 实时算坐标,markNeedsBuild 即重定位。
+  SelectionData? _data;
+
   /// 在选区上方显示 toolbar。
   void show(SelectionData data) {
-    hide();
+    _data = data;
+    if (_entry != null) {
+      _entry!.markNeedsBuild();
+      return;
+    }
     final overlay = Overlay.maybeOf(context);
     if (overlay == null) return;
 
-    final bounds = data.globalBounds;
-    // 转成 overlay 局部坐标。
-    final overlayBox = overlay.context.findRenderObject() as RenderBox?;
-    if (overlayBox == null) return;
-    final topLeft = overlayBox.globalToLocal(bounds.topLeft);
-    final anchorCenterX = topLeft.dx + bounds.width / 2;
-    final anchorTopY = topLeft.dy;
-
-    _entry = OverlayEntry(
-      builder: (ctx) {
-        return Positioned(
-          // 居中于选区上方,稍微抬起。
-          left: anchorCenterX - 80,
-          top: (anchorTopY - 48).clamp(0.0, double.infinity),
-          child: _ToolbarBody(
-            copyLabel: copyLabel,
-            quoteLabel: quoteLabel,
-            onCopy: () {
-              _copy(data);
-              hide();
-            },
-            onQuote: () {
-              onQuote(data.plainText);
-              hide();
-            },
-          ),
-        );
-      },
-    );
+    _entry = OverlayEntry(builder: _build);
     overlay.insert(_entry!);
+  }
+
+  /// 滚动时调:更新选区几何并重定位(滚出视口则隐藏内容但保留 entry)。
+  void reposition(SelectionData? data) {
+    if (_entry == null) return;
+    if (data == null) {
+      hide();
+      return;
+    }
+    _data = data;
+    _entry!.markNeedsBuild();
+  }
+
+  Widget _build(BuildContext ctx) {
+    final data = _data;
+    if (data == null) return const SizedBox.shrink();
+    final overlay = Overlay.maybeOf(context);
+    final overlayBox =
+        overlay?.context.findRenderObject() as RenderBox?;
+    if (overlayBox == null) return const SizedBox.shrink();
+
+    // 选区外接框转 overlay 局部坐标(实时,跟随滚动)。
+    final bounds = data.globalBounds;
+    final tl = overlayBox.globalToLocal(bounds.topLeft);
+    final selRectLocal = tl & bounds.size;
+    // 选区完全滚出 overlay 可视区 → 隐藏(对齐系统视口隐藏行为)。
+    if (!overlayBox.paintBounds.overlaps(selRectLocal)) {
+      return const SizedBox.shrink();
+    }
+    final anchorCenterX = tl.dx + bounds.width / 2;
+    final anchorTopY = tl.dy;
+
+    return Positioned(
+      left: anchorCenterX - 80,
+      top: (anchorTopY - 48).clamp(0.0, double.infinity),
+      child: _ToolbarBody(
+        copyLabel: copyLabel,
+        quoteLabel: quoteLabel,
+        onCopy: () {
+          _copy(data);
+          hide();
+        },
+        onQuote: () {
+          onQuote(data.plainText);
+          hide();
+        },
+      ),
+    );
   }
 
   void hide() {
     _entry?.remove();
     _entry = null;
+    _data = null;
   }
 
   void _copy(SelectionData data) {

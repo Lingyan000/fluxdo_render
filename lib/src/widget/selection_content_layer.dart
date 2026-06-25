@@ -7,6 +7,7 @@ library;
 import 'package:flutter/widgets.dart';
 
 import '../selection/selection_data.dart';
+import '../selection/selection_exporter.dart';
 import '../selection/selection_gesture_layer.dart';
 import '../selection/selection_registry.dart';
 import '../selection/selection_toolbar.dart';
@@ -32,6 +33,9 @@ class SelectionContentLayer extends StatefulWidget {
 class _SelectionContentLayerState extends State<SelectionContentLayer> {
   SelectionToolbar? _toolbar;
 
+  SelectionExporter get _exporter =>
+      SelectionExporter(widget.controller.registry);
+
   void _onSelectionChanged(SelectionData? data) {
     _toolbar?.hide();
     _toolbar = null;
@@ -47,6 +51,16 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
     _toolbar!.show(data);
   }
 
+  /// 滚动时:toolbar 在屏 → 用当前选区重算几何并重定位(滚出视口自动隐藏)。
+  bool _onScroll(ScrollNotification n) {
+    final toolbar = _toolbar;
+    if (toolbar == null) return false;
+    final sel = widget.controller.selection;
+    if (sel == null) return false;
+    toolbar.reposition(_exporter.export(sel));
+    return false;
+  }
+
   @override
   void dispose() {
     _toolbar?.hide();
@@ -55,10 +69,13 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
 
   @override
   Widget build(BuildContext context) {
-    return SelectionGestureLayer(
-      controller: widget.controller,
-      onSelectionChanged: _onSelectionChanged,
-      child: widget.child,
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onScroll,
+      child: SelectionGestureLayer(
+        controller: widget.controller,
+        onSelectionChanged: _onSelectionChanged,
+        child: widget.child,
+      ),
     );
   }
 }

@@ -1,8 +1,15 @@
-/// 自研选区手势层 —— 顶层 RawGestureDetector,管长按起选 + 拖拽扩展 + 点空白清除。
+/// 自研选区手势层 —— 顶层 RawGestureDetector,按设备分流:
+/// - 触摸/触控笔:LongPress 起选 + 拖拽扩展(移动端)。
+/// - 鼠标:TapAndPan(tap-down 定位 + 双击选词 / 三击选段 + drag 扩展)。
+/// - Tap:点空白清除。
 ///
-/// 已探针实测(Flutter 3.44):长按 vs tap 天然分流到不同 recognizer,
-/// link/mention 短点正常、空白长按起选、image 子树长按子赢 —— 零冲突,无需豁免。
+/// 设计依据 Flutter SDK SelectableRegion(selectable_region.dart):桌面鼠标
+/// 用 TapAndPanGestureRecognizer(一个 recognizer 管 tap 连击 + drag),按
+/// supportedDevices 与触摸 LongPress 分流;鼠标不进 Scrollable 拖拽竞技场
+/// (默认 dragDevices 不含 mouse),零冲突。
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
@@ -44,38 +51,64 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
     }
   }
 
-  void _onLongPressStart(LongPressStartDetails d) {
-    final pos = _hit.positionAt(d.globalPosition);
+  // ── 设备无关的核心动作(触摸/鼠标共用)──────────────────────────
+
+  /// 起选:选中所在「词」(￼ 上则整颗 emoji/mention)。返回是否成功起选。
+  bool _startWordAt(Offset global) {
+    final pos = _hit.positionAt(global);
+    if (pos == null) {
+      _clear();
+      return false;
+    }
+    final wb = _hit.wordBoundaryAt(pos);
+    widget.controller.selection = (wb != null && wb.start < wb.end)
+        ? DocumentSelection(
+            base: pos.copyWith(renderOffset: wb.start),
+            extent: pos.copyWith(renderOffset: wb.end),
+          )
+        : DocumentSelection.collapsed(pos);
+    return true;
+  }
+
+  /// 折叠定位(鼠标单击 / drag 起点):光标态,后续 drag 扩展。
+  void _collapseAt(Offset global) {
+    final pos = _hit.positionAt(global);
     if (pos == null) {
       _clear();
       return;
     }
-    // 长按起选:选中所在「词」(￼ 上则整颗 emoji/mention)。
-    final wb = _hit.wordBoundaryAt(pos);
-    final DocumentSelection sel;
-    if (wb != null && wb.start < wb.end) {
-      sel = DocumentSelection(
-        base: pos.copyWith(renderOffset: wb.start),
-        extent: pos.copyWith(renderOffset: wb.end),
-      );
-    } else {
-      sel = DocumentSelection.collapsed(pos);
-    }
-    widget.controller.selection = sel;
-    // 起选不立刻弹 toolbar(等松手),避免拖拽中频繁重定位。
+    widget.controller.selection = DocumentSelection.collapsed(pos);
   }
 
-  void _onLongPressMoveUpdate(LongPressMoveUpdateDetails d) {
+  /// 整段选中(鼠标三击)。
+  void _selectParagraphAt(Offset global) {
+    final pos = _hit.positionAt(global);
+    if (pos == null) {
+      _clear();
+      return;
+    }
+    final len = _hit.renderLengthOf(pos.blockId);
+    if (len == null) {
+      _startWordAt(global);
+      return;
+    }
+    widget.controller.selection = DocumentSelection(
+      base: pos.copyWith(renderOffset: 0),
+      extent: pos.copyWith(renderOffset: len),
+    );
+  }
+
+  /// 扩展 extent(base 锚不动)。
+  void _extendTo(Offset global) {
     final current = widget.controller.selection;
     if (current == null) return;
-    final pos = _hit.positionAt(d.globalPosition);
+    final pos = _hit.positionAt(global);
     if (pos == null) return;
-    // 扩展 extent,base(起选词的锚)不动。
-    widget.controller.selection =
-        current.copyWith(extent: pos);
+    widget.controller.selection = current.copyWith(extent: pos);
   }
 
-  void _onLongPressEnd(LongPressEndDetails d) {
+  /// 松手定选:有实际选区则导出弹 toolbar,否则清除。
+  void _finish() {
     final sel = widget.controller.selection;
     if (sel == null || sel.isCollapsed) {
       _clear();
@@ -84,19 +117,78 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
     widget.onSelectionChanged(_exporter.export(sel));
   }
 
-  void _onTapUp(TapUpDetails d) {
-    // 点击落在选区外 → 清除。落在选区内 → 保留(让上层 toolbar 处理)。
-    _clear();
+  // ── 触摸:长按 ──────────────────────────────────────────────
+  void _onLongPressStart(LongPressStartDetails d) => _startWordAt(d.globalPosition);
+  void _onLongPressMoveUpdate(LongPressMoveUpdateDetails d) =>
+      _extendTo(d.globalPosition);
+  void _onLongPressEnd(LongPressEndDetails d) => _finish();
+
+  // ── 鼠标:TapAndPan ────────────────────────────────────────
+  // tap-down 按连击数分发:1=折叠定位,2=选词,3=选段。drag 起点已由
+  // tap-down 定位,drag-update 扩展,drag-end 定选。
+  void _onMouseTapDown(TapDragDownDetails d) {
+    final count = math.min(d.consecutiveTapCount, 3);
+    switch (count) {
+      case 1:
+        _collapseAt(d.globalPosition);
+      case 2:
+        _startWordAt(d.globalPosition);
+      default:
+        _selectParagraphAt(d.globalPosition);
+    }
   }
+
+  void _onMouseTapUp(TapDragUpDetails d) {
+    // 单击(无 drag)落定:折叠选区无内容 → 清除 + 收 toolbar;
+    // 双击/三击已选中内容 → 导出弹 toolbar。
+    final count = math.min(d.consecutiveTapCount, 3);
+    if (count == 1) {
+      _clear();
+    } else {
+      _finish();
+    }
+  }
+
+  void _onMouseDragUpdate(TapDragUpdateDetails d) =>
+      _extendTo(d.globalPosition);
+
+  void _onMouseDragEnd(TapDragEndDetails d) => _finish();
+
+  // ── 触摸:点空白清除 ───────────────────────────────────────
+  void _onTapUp(TapUpDetails d) => _clear();
 
   @override
   Widget build(BuildContext context) {
     return RawGestureDetector(
       behavior: HitTestBehavior.translucent,
       gestures: {
+        // 鼠标:tap 连击 + drag 选区
+        TapAndPanGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<TapAndPanGestureRecognizer>(
+          () => TapAndPanGestureRecognizer(
+            debugOwner: this,
+            supportedDevices: const {PointerDeviceKind.mouse},
+          ),
+          (r) {
+            r
+              ..onTapDown = _onMouseTapDown
+              ..onTapUp = _onMouseTapUp
+              ..onDragUpdate = _onMouseDragUpdate
+              ..onDragEnd = _onMouseDragEnd
+              ..dragStartBehavior = DragStartBehavior.down;
+          },
+        ),
+        // 触摸/触控笔:长按起选 + 拖拽扩展
         LongPressGestureRecognizer:
             GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
-          () => LongPressGestureRecognizer(),
+          () => LongPressGestureRecognizer(
+            debugOwner: this,
+            supportedDevices: const {
+              PointerDeviceKind.touch,
+              PointerDeviceKind.stylus,
+              PointerDeviceKind.invertedStylus,
+            },
+          ),
           (r) {
             r
               ..onLongPressStart = _onLongPressStart
@@ -104,9 +196,17 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
               ..onLongPressEnd = _onLongPressEnd;
           },
         ),
+        // 触摸点空白清除(鼠标走 TapAndPan 的 tap)
         TapGestureRecognizer:
             GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
-          () => TapGestureRecognizer(),
+          () => TapGestureRecognizer(
+            debugOwner: this,
+            supportedDevices: const {
+              PointerDeviceKind.touch,
+              PointerDeviceKind.stylus,
+              PointerDeviceKind.invertedStylus,
+            },
+          ),
           (r) {
             r.onTapUp = _onTapUp;
           },
