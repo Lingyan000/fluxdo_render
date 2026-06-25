@@ -19,36 +19,22 @@ abstract class SelectableBlockHandle {
   /// 渲染偏移 ↔ 逻辑投影 映射表(随块内容更新)。
   RenderTextProjection get projection;
 
+  /// 可选的「可视区裁剪矩形」getter(全局坐标)。块在内部滚动容器里时
+  /// (如代码块的 SizedBox 限高 + SingleChildScrollView),RenderParagraph.size
+  /// 是完整内容尺寸(可达上万 px),直接用会让命中框溢出、误命中相邻块。
+  /// 由块自身注入其可视外框(如代码块的限高 SizedBox)→ globalRect 与之求交。
+  /// null = 不裁剪(普通段落)。
+  Rect? Function()? get clipBoundsGetter => null;
+
   /// 块在全局坐标系的矩形(用于视觉序排序 + 命中)。null = 不可用。
-  ///
-  /// 若块在内部滚动容器里(如代码块的双层 SingleChildScrollView),
-  /// RenderParagraph.size 是**完整内容尺寸**(远超可视区)、localToGlobal 随
-  /// 滚动偏移跑到 viewport 外 → 直接用会让命中框溢出可视区,误命中相邻块。
-  /// 故与最近祖先 viewport 的可视区求交,裁剪到真正可见的部分。
   Rect? globalRect() {
     final p = paragraph;
     if (p == null || !p.attached || !p.hasSize) return null;
     final raw = p.localToGlobal(Offset.zero) & p.size;
-    final clip = _nearestViewportClip(p);
+    final clip = clipBoundsGetter?.call();
     if (clip == null) return raw;
     final r = raw.intersect(clip);
     return (r.width <= 0 || r.height <= 0) ? null : r;
-  }
-
-  /// 从 [from] 向上找最近的滚动 viewport,返回其可视区全局矩形;无则 null。
-  static Rect? _nearestViewportClip(RenderObject from) {
-    RenderObject? node = from.parent;
-    while (node != null) {
-      if (node is RenderAbstractViewport && node is RenderBox) {
-        final box = node as RenderBox;
-        if (box.attached && box.hasSize) {
-          return box.localToGlobal(Offset.zero) & box.size;
-        }
-        return null;
-      }
-      node = node.parent;
-    }
-    return null;
   }
 }
 
@@ -58,18 +44,24 @@ class CallbackBlockHandle extends SelectableBlockHandle {
     required this.id,
     required RenderParagraph? Function() paragraphGetter,
     required RenderTextProjection Function() projectionGetter,
+    Rect? Function()? clipBoundsGetter,
   })  : _paragraphGetter = paragraphGetter,
-        _projectionGetter = projectionGetter;
+        _projectionGetter = projectionGetter,
+        _clipBoundsGetter = clipBoundsGetter;
 
   @override
   final SelectableBlockId id;
 
   final RenderParagraph? Function() _paragraphGetter;
   final RenderTextProjection Function() _projectionGetter;
+  final Rect? Function()? _clipBoundsGetter;
 
   @override
   RenderParagraph? get paragraph => _paragraphGetter();
 
   @override
   RenderTextProjection get projection => _projectionGetter();
+
+  @override
+  Rect? Function()? get clipBoundsGetter => _clipBoundsGetter;
 }

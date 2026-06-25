@@ -1248,6 +1248,9 @@ class _CodeBlockBodyState extends State<_CodeBlockBody> {
   final _vController = ScrollController();
   final _hController = ScrollController();
   final _lineNumberVController = ScrollController();
+  // 代码块可视外框(限高 SizedBox)的 key —— 给选区命中裁剪用(代码内容在
+  // 内部滚动容器里,RenderParagraph 是完整内容尺寸,命中需裁到这个可视框)。
+  final _viewportKey = GlobalKey();
 
   @override
   void initState() {
@@ -1302,6 +1305,7 @@ class _CodeBlockBodyState extends State<_CodeBlockBody> {
         .withValues(alpha: 0.15);
 
     return SizedBox(
+      key: _viewportKey,
       height: estimatedHeight,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1369,6 +1373,7 @@ class _CodeBlockBodyState extends State<_CodeBlockBody> {
                       ),
                     ]),
                     codeLanguage: widget.language,
+                    clipBoundsKey: _viewportKey,
                     debugLabel: 'codeBlock',
                     child: widget.highlighter(
                       context,

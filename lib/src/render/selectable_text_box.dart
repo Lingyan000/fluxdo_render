@@ -28,6 +28,7 @@ class SelectableTextBox extends StatefulWidget {
     required this.projectionGetter,
     required this.child,
     this.codeLanguage,
+    this.clipBoundsKey,
     this.debugLabel,
   });
 
@@ -39,6 +40,11 @@ class SelectableTextBox extends StatefulWidget {
 
   /// 非 null = 代码块,导出选区带此 language。
   final String? codeLanguage;
+
+  /// 可视区裁剪边界的 GlobalKey(代码块传其限高 SizedBox 的 key)。块内有独立
+  /// 滚动时,RenderParagraph.size 是完整内容尺寸 → 命中框溢出;用此 key 的
+  /// RenderBox 全局矩形把命中框裁到可视区。null = 不裁剪(普通段落)。
+  final GlobalKey? clipBoundsKey;
 
   final String? debugLabel;
 
@@ -79,22 +85,34 @@ class _SelectableTextBoxState extends State<SelectableTextBox> {
     _register();
   }
 
+  /// 可视区裁剪矩形(代码块用 clipBoundsKey 指向的限高 SizedBox 的全局框)。
+  Rect? _clipBounds() {
+    final key = widget.clipBoundsKey;
+    if (key == null) return null;
+    final ro = key.currentContext?.findRenderObject();
+    if (ro is! RenderBox || !ro.attached || !ro.hasSize) return null;
+    return ro.localToGlobal(Offset.zero) & ro.size;
+  }
+
   void _register() {
     final controller = _controller;
     if (controller == null) return;
     final seq = controller.registry.allocSeq();
     final id = SelectableBlockId(seq, debugLabel: widget.debugLabel);
+    final clipGetter = widget.clipBoundsKey != null ? _clipBounds : null;
     _handle = widget.codeLanguage != null
         ? _CodeBlockHandle(
             id: id,
             paragraphGetter: _findParagraph,
             projectionGetter: widget.projectionGetter,
+            clipBoundsGetter: clipGetter,
             language: widget.codeLanguage,
           )
         : CallbackBlockHandle(
             id: id,
             paragraphGetter: _findParagraph,
             projectionGetter: widget.projectionGetter,
+            clipBoundsGetter: clipGetter,
           );
     controller.registry.register(_handle!);
   }
@@ -139,6 +157,7 @@ class _CodeBlockHandle extends CallbackBlockHandle implements CodeBlockHandleInf
     required super.id,
     required super.paragraphGetter,
     required super.projectionGetter,
+    super.clipBoundsGetter,
     required this.language,
   });
 
