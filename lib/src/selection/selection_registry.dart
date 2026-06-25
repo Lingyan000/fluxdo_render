@@ -34,10 +34,14 @@ class SelectionRegistry {
 
   /// 按视觉顺序(全局 y,再 x)排序的块列表。
   ///
-  /// **实时按几何排序,不用注册序**:Column rebuild 下注册顺序不可靠。
+  /// **实时按几何排序,不用注册序**:虚拟化/Column rebuild 下注册顺序不可靠。
   /// 只收 globalRect 可用(已 mount)的块;未 mount 块取不到几何,跳过。
-  /// 注:单 post 是一次性 Column(无虚拟化),块全 mount;唯一未 mount 的是
-  /// details 折叠/spoiler 未揭示的子块 —— 看不见本就不该可选,跳过即正确。
+  ///
+  /// 当前未 mount 的来源:details 折叠 / spoiler 未揭示的子块(看不见本就
+  /// 不该可选,跳过即正确)。
+  /// **TODO(虚拟化)**:未来块级虚拟化后,滚出视口的块会被回收 → 跨越这些
+  /// 块的选区端点取不到几何。届时需要为未 mount 块缓存最后一次几何 / 逻辑
+  /// 偏移,支持"跨未 mount 块"的完整选区(见 plan 已知取舍)。
   List<SelectableBlockHandle> visualOrder() {
     final withRect = <(SelectableBlockHandle, Rect)>[];
     for (final h in _blocks.values) {
