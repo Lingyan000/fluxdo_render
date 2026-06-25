@@ -40,6 +40,21 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
       SelectionExporter(widget.controller.registry);
 
   @override
+  void initState() {
+    super.initState();
+    // 监听 controller:被全局协调器(其他帖起选)外部清空时,收掉本帖 toolbar
+    // + 高亮(高亮由 controller.notifyListeners 自行刷新,这里只管 toolbar)。
+    widget.controller.addListener(_onControllerChanged);
+  }
+
+  void _onControllerChanged() {
+    if (widget.controller.selection == null && _toolbar != null) {
+      _toolbar!.hide();
+      _toolbar = null;
+    }
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     // 监听**祖先** Scrollable —— 不能用 NotificationListener(实测:祖先
@@ -79,6 +94,7 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
     _scrollPosition?.removeListener(_onScroll);
     _toolbar?.hide();
     super.dispose();

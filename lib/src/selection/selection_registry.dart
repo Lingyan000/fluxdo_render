@@ -7,6 +7,7 @@ library;
 import 'package:flutter/widgets.dart';
 
 import 'selectable_block_handle.dart';
+import 'selection_coordinator.dart';
 import 'selection_geometry.dart';
 
 /// 注册表。每个 FluxdoRender 实例一个(随 SelectionScope 下传)。
@@ -66,8 +67,20 @@ class SelectionController extends ChangeNotifier {
   set selection(DocumentSelection? value) {
     if (_selection == value) return;
     _selection = value;
+    // 全局唯一活动选区:起选时清掉其他帖的选区;自己清空时注销活动者。
+    if (value != null) {
+      SelectionCoordinator.instance.activate(this);
+    } else {
+      SelectionCoordinator.instance.deactivate(this);
+    }
     notifyListeners();
   }
 
   void clear() => selection = null;
+
+  @override
+  void dispose() {
+    SelectionCoordinator.instance.deactivate(this);
+    super.dispose();
+  }
 }
