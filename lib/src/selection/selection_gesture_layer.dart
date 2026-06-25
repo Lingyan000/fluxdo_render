@@ -149,6 +149,14 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
     }
   }
 
+  void _onMouseDragStart(TapDragStartDetails d) {
+    // 拖拽必须从拖拽起点重新锚定 base —— 否则上一次点击残留的连击计数
+    // (consecutiveTapCount=2/3,触控板/快速点击极易累积)会让 tapDown 先
+    // 选了词/整段,drag 再 extend 就变成「从段首拖 = 整段」。collapse 到起点
+    // 保证拖拽永远是 [起点 → 当前] 的干净子区间。
+    _collapseAt(d.globalPosition);
+  }
+
   void _onMouseDragUpdate(TapDragUpdateDetails d) =>
       _extendTo(d.globalPosition);
 
@@ -162,17 +170,21 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
     return RawGestureDetector(
       behavior: HitTestBehavior.translucent,
       gestures: {
-        // 鼠标:tap 连击 + drag 选区
+        // 鼠标 / 触控板:tap 连击 + drag 选区
         TapAndPanGestureRecognizer:
             GestureRecognizerFactoryWithHandlers<TapAndPanGestureRecognizer>(
           () => TapAndPanGestureRecognizer(
             debugOwner: this,
-            supportedDevices: const {PointerDeviceKind.mouse},
+            supportedDevices: const {
+              PointerDeviceKind.mouse,
+              PointerDeviceKind.trackpad,
+            },
           ),
           (r) {
             r
               ..onTapDown = _onMouseTapDown
               ..onTapUp = _onMouseTapUp
+              ..onDragStart = _onMouseDragStart
               ..onDragUpdate = _onMouseDragUpdate
               ..onDragEnd = _onMouseDragEnd
               ..dragStartBehavior = DragStartBehavior.down;
