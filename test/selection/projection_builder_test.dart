@@ -119,14 +119,16 @@ void main() {
       expect(p.projectAll(), '正文1 2026年6月25日');
     });
 
-    test('mathInline 第一版空投影', () {
+    test('mathInline 投影 latex(对齐 cooked textContent)', () {
       final p = buildInlineProjection(const [
         TextRun('公式'),
         MathInlineRun('x^2'),
         TextRun('完'),
       ]);
-      expect(p.projectAll(), '公式完');
-      expect(p.renderLength, 4); // 公 式 ￼(math占位仍占1) 完
+      expect(p.projectAll(), '公式x^2完');
+      expect(p.renderLength, 4); // 公 式 ￼(math占1) 完
+      // 只选 math ￼ → 整条 latex
+      expect(p.project(2, 3), 'x^2');
     });
   });
 

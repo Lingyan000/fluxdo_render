@@ -17,7 +17,7 @@
 /// - SpoilerRun → 子节点投影全文(渲染层占 1 ￼,但投影成真实文本,对齐 cooked)
 /// - FootnoteRefRun → number(对齐 cooked `<sup>N`)
 /// - LocalDateRun → fallbackText(服务端预渲染文本)
-/// - MathInlineRun → `''`(第一版,待 dogfood 校准)
+/// - MathInlineRun → latex(= cooked 里 span.math 的 textContent)
 /// - ClickCountRun → `''`(注入的,cooked 没有,必须排除)
 library;
 
@@ -86,9 +86,11 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
         case ClickCountRun():
           // 注入的,原始 cooked 没有 → 排除(空投影)。
           addPlaceholder('', ProjectionKind.clickCount);
-        case MathInlineRun():
-          // 第一版不投影(待 dogfood 校准)。
-          addPlaceholder('', ProjectionKind.mathInline);
+        case MathInlineRun(:final latex):
+          // 投影 = latex(= cooked 里 span.math 的 textContent,parser 用
+          // el.text.trim() 取的)。这样选区含行内公式时,投影文本能在原始
+          // cooked 里被 HtmlTextMapper 匹配上(空投影会断裂导致引用降级)。
+          addPlaceholder(latex, ProjectionKind.mathInline);
       }
     }
   }
