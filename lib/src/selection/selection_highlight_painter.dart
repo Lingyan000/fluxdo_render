@@ -87,10 +87,11 @@ class _HighlightPainter extends CustomPainter {
     final paint = Paint()
       ..style = PaintingStyle.fill
       ..color = color;
-    // CustomPaint 的坐标系 == child(Text.rich)本地坐标系,box 已是本地坐标,
-    // 直接画。
-    for (final b in boxes) {
-      canvas.drawRect(b.toRect(), paint);
+    // CustomPaint 的坐标系 == child(Text.rich)本地坐标系,box 已是本地坐标。
+    // 不逐 box 直接画 —— emoji/mention 等 WidgetSpan 的 box 比纯文字行高,
+    // 逐个画会高低参差。改为**按行合并成统一高度矩形**(见 mergeSelectionBoxesByLine)。
+    for (final rowRect in mergeSelectionBoxesByLine(boxes)) {
+      canvas.drawRect(rowRect, paint);
     }
   }
 
@@ -102,3 +103,41 @@ class _HighlightPainter extends CustomPainter {
 }
 
 typedef DocumentSelectionGetter = DocumentSelection? Function();
+
+/// 把 getBoxesForSelection 返回的 box 按「行」(y 区间重叠)分组,每行合并成
+/// 一个**统一高度**矩形,消除 emoji/mention 等 WidgetSpan box 比文字行高导致的
+/// 高低参差。
+///
+/// 行高基准:取行内**最矮** box 的上下边(纯文字行高)——emoji 偏高、上标偏矮
+/// 都不会撑歪;水平方向铺满该行最左到最右。跨行各自独立矩形。
+List<Rect> mergeSelectionBoxesByLine(List<TextBox> boxes) {
+  final rows = <List<Rect>>[];
+  for (final b in boxes) {
+    final r = b.toRect();
+    if (r.isEmpty && r.width == 0 && r.height == 0) continue;
+    bool placed = false;
+    for (final row in rows) {
+      final ref = row.first;
+      if (r.top < ref.bottom && r.bottom > ref.top) {
+        row.add(r);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) rows.add([r]);
+  }
+
+  final result = <Rect>[];
+  for (final row in rows) {
+    double minLeft = double.infinity;
+    double maxRight = -double.infinity;
+    Rect base = row.first;
+    for (final r in row) {
+      if (r.left < minLeft) minLeft = r.left;
+      if (r.right > maxRight) maxRight = r.right;
+      if (r.height < base.height) base = r;
+    }
+    result.add(Rect.fromLTRB(minLeft, base.top, maxRight, base.bottom));
+  }
+  return result;
+}
