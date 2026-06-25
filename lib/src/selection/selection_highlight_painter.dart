@@ -6,8 +6,6 @@
 /// RenderParagraph.getBoxesForSelection 取矩形(本地坐标)直接画。
 library;
 
-import 'dart:ui' show BoxHeightStyle;
-
 import 'package:flutter/widgets.dart';
 
 import 'selectable_block_handle.dart';
@@ -81,19 +79,21 @@ class _HighlightPainter extends CustomPainter {
     }
     if (mine == null || mine.isEmpty) return;
 
-    // boxHeightStyle.max:每个 box 用整行最大高度(含 emoji 撑高的行高),
-    // **与选了什么无关** —— 拖拽中行高恒定,不会因为选区刚好只含/不含 emoji
-    // 而跳变(实测 tight=[16,32,16] 参差且会跳;max=[35.4,35.4,35.4] 恒定)。
+    // 用默认 tight box:各 box 是「每行选中部分」的真实矩形,**行间天然有
+    // 间隙**(实测 line1 底 19.6 vs line2 顶 26.6,差 7px)→ 按行分组绝不
+    // 跨行误并,杜绝整段过选。
+    // (曾错用 BoxHeightStyle.max:max 把相邻行 box 撑到亚像素紧贴 → 被
+    //  mergeSelectionBoxesByLine 误判同行合并成跨两行整块 → 整段高亮 bug。)
     final boxes = paragraph.getBoxesForSelection(
       TextSelection(baseOffset: mine.start, extentOffset: mine.end),
-      boxHeightStyle: BoxHeightStyle.max,
     );
     if (boxes.isEmpty) return;
 
     final paint = Paint()
       ..style = PaintingStyle.fill
       ..color = color;
-    // box 已是统一行高(max),按行做水平 union 去掉相邻 box 间亚像素缝隙。
+    // 同行 box 合并成统一高度矩形:同一行内 emoji(偏高)与文字 box 取 union,
+    // 整行等高(防 emoji 处参差);tight 间隙保证不跨行。
     for (final rowRect in mergeSelectionBoxesByLine(boxes)) {
       canvas.drawRect(rowRect, paint);
     }
@@ -108,12 +108,12 @@ class _HighlightPainter extends CustomPainter {
 
 typedef DocumentSelectionGetter = DocumentSelection? Function();
 
-/// 把 getBoxesForSelection(boxHeightStyle.max)返回的 box 按「行」(y 区间
-/// 重叠)分组,每行合并成一个矩形 —— 水平 union 去掉相邻 box 间亚像素缝隙。
+/// 把 getBoxesForSelection(**tight**)返回的 box 按「行」(y 区间重叠)分组,
+/// 每行合并成一个矩形:同行内 emoji(偏高)与文字 box 取 union(整行等高,
+/// 消除 emoji 处参差),水平铺满该行左到右(去相邻 box 亚像素缝隙)。
 ///
-/// 前提:调用方用 [BoxHeightStyle.max],各 box 已是统一行高(与选区内容无关),
-/// 所以这里直接取行内 union(top/bottom 同行一致,left/right 取最左最右),
-/// 无需再挑「最矮 box」(那会随选区跳变)。
+/// 必须喂 tight box:tight 行间有真实间隙,分组按 y 重叠**绝不跨行**;若喂
+/// BoxHeightStyle.max,相邻行 box 亚像素紧贴会被误判同行 → 合并成跨两行整块。
 List<Rect> mergeSelectionBoxesByLine(List<TextBox> boxes) {
   final rows = <List<Rect>>[];
   for (final b in boxes) {
@@ -122,7 +122,12 @@ List<Rect> mergeSelectionBoxesByLine(List<TextBox> boxes) {
     bool placed = false;
     for (final row in rows) {
       final ref = row.first;
-      if (r.top < ref.bottom && r.bottom > ref.top) {
+      // 同行判定:垂直区间有「实质」重叠(过半),避免行间 1px 误触。
+      final overlap =
+          (r.bottom < ref.bottom ? r.bottom : ref.bottom) -
+              (r.top > ref.top ? r.top : ref.top);
+      final minH = (r.height < ref.height ? r.height : ref.height);
+      if (overlap > minH * 0.5) {
         row.add(r);
         placed = true;
         break;

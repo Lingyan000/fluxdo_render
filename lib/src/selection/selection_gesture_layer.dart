@@ -118,7 +118,9 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer> {
   }
 
   // ── 触摸:长按 ──────────────────────────────────────────────
-  void _onLongPressStart(LongPressStartDetails d) => _startWordAt(d.globalPosition);
+  void _onLongPressStart(LongPressStartDetails d) =>
+      _startWordAt(d.globalPosition);
+
   void _onLongPressMoveUpdate(LongPressMoveUpdateDetails d) =>
       _extendTo(d.globalPosition);
   void _onLongPressEnd(LongPressEndDetails d) => _finish();
