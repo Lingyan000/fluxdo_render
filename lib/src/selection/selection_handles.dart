@@ -22,12 +22,21 @@ class SelectionHandlesController {
   SelectionHandlesController({
     required this.context,
     required this.controller,
+    this.onDragStart,
+    this.onDragEnd,
   })  : _hit = SelectionHitTester(controller.registry),
         _exporter = SelectionExporter(controller.registry),
         _magnifier = SelectionMagnifier(context);
 
   final BuildContext context;
   final SelectionController controller;
+
+  /// 手柄开始拖动 —— 上层据此隐藏 toolbar(拖动中不挡视线)。
+  final VoidCallback? onDragStart;
+
+  /// 手柄结束拖动 —— 上层据此按新选区重新定位显示 toolbar。
+  final VoidCallback? onDragEnd;
+
   final SelectionHitTester _hit;
   final SelectionExporter _exporter;
   final SelectionMagnifier _magnifier;
@@ -136,6 +145,7 @@ class SelectionHandlesController {
   void _onDragStart(_DragSide side, Offset global) {
     _dragging = side;
     _magnifier.show(global);
+    onDragStart?.call();
   }
 
   void _onDragUpdate(Offset global) {

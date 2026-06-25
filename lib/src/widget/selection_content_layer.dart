@@ -96,10 +96,30 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
       (_handles ??= SelectionHandlesController(
         context: context,
         controller: widget.controller,
+        // 拖手柄时隐藏 toolbar(不挡视线/放大镜),松手后按新选区重定位重显。
+        onDragStart: () => _toolbar?.hide(),
+        onDragEnd: _reshowToolbarForCurrentSelection,
       )).show();
     } else {
       _handles?.hide();
     }
+  }
+
+  /// 按当前选区重新构建并显示 toolbar(手柄拖动松手后用)。
+  void _reshowToolbarForCurrentSelection() {
+    final sel = widget.controller.selection;
+    final data = sel == null ? null : _exporter.export(sel);
+    if (data == null) return;
+    _toolbar?.hide();
+    _toolbar = SelectionToolbar(
+      context: context,
+      onQuote: (plainText) {
+        widget.onQuoteRequest?.call(plainText);
+        widget.controller.clear();
+      },
+      onCopied: widget.onCopyToast,
+    );
+    _toolbar!.show(data);
   }
 
   /// 滚动时:toolbar + 手柄按当前选区重算几何并重定位(滚出视口自动隐藏)。
