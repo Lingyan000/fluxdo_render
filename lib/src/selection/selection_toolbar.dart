@@ -146,7 +146,9 @@ class _ToolbarBody extends StatelessWidget {
     return Material(
       elevation: 4,
       borderRadius: BorderRadius.circular(8),
-      color: scheme.inverseSurface,
+      // 跟主题色挂钩:primaryContainer 底 + onPrimaryContainer 字(M3 推荐,
+      // 有主题色倾向又不刺眼)。随明暗主题 + 自定义 seed 自动适配。
+      color: scheme.primaryContainer,
       clipBehavior: Clip.antiAlias,
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -161,7 +163,7 @@ class _ToolbarBody extends StatelessWidget {
           Container(
             width: 0.5,
             height: 24,
-            color: scheme.onInverseSurface.withValues(alpha: 0.3),
+            color: scheme.onPrimaryContainer.withValues(alpha: 0.3),
           ),
           _btn(
             context,
@@ -182,9 +184,9 @@ class _ToolbarBody extends StatelessWidget {
     ColorScheme scheme,
     BorderRadius radius,
   ) {
-    // 深色 inverseSurface 背景上,InkWell 默认水波纹对比度太低,几乎看不见。
-    // 显式用 onInverseSurface 派生的半透明色,hover / pressed 才有可见反馈。
-    final fg = scheme.onInverseSurface;
+    // primaryContainer 背景上用 onPrimaryContainer 派生半透明做 hover/pressed,
+    // 对比度足够且跟随主题。
+    final fg = scheme.onPrimaryContainer;
     return InkWell(
       onTap: onTap,
       borderRadius: radius,
