@@ -1,6 +1,8 @@
-/// 子包自带的选区 toolbar —— 选区稳定后在选区上方弹「复制 / 引用」浮层。
+/// 子包自带的选区 toolbar —— 选区稳定后在选区上方弹「复制 / 复制引用 / 引用」浮层。
 ///
-/// 复制:子包内 Clipboard.setData(代码块带 ```lang);引用:回调交主项目。
+/// - 复制:子包内 Clipboard.setData(代码块带 ```lang)。
+/// - 复制引用:回调交主项目,主项目拼 [quote=...] BBCode 进剪贴板(需 post 元数据)。
+/// - 引用:回调交主项目,打开回复框插入引用。
 /// 用 OverlayEntry 浮在内容上方,避免被滚动裁剪。
 library;
 
@@ -14,7 +16,9 @@ class SelectionToolbar {
     required this.context,
     required this.onQuote,
     required this.onCopied,
+    this.onCopyQuote,
     this.copyLabel = '复制',
+    this.copyQuoteLabel = '复制引用',
     this.quoteLabel = '引用',
   });
 
@@ -22,15 +26,20 @@ class SelectionToolbar {
   final void Function(String plainText) onQuote;
   final VoidCallback? onCopied;
 
+  /// 「复制引用」回调 —— 把选区纯文本交回主项目拼 BBCode 进剪贴板。
+  /// null = 不显示该按钮(主项目未接入时)。
+  final void Function(String plainText)? onCopyQuote;
+
   final String copyLabel;
+  final String copyQuoteLabel;
   final String quoteLabel;
 
   // toolbar 估算高度(Material vertical padding 10×2 + 文本 ~20)+ 选区间距。
   static const double _toolbarHeight = 40;
   static const double _gap = 8;
-  // 估算宽度(复制|引用 两按钮:各 h16 padding + 文本 + 分隔线,中英文兼顾)。
+  // 估算宽度(复制|复制引用|引用 三按钮:各 h16 padding + 文本 + 分隔线)。
   // 仅用于水平 shift 夹边的近似;Positioned 不限宽,真实宽由内容撑。
-  static const double _estimatedWidth = 160;
+  static const double _estimatedWidth = 240;
   // 视口左右安全边距(对齐 fk-d-menu 的 padding.left/right = 10)。
   static const double _edgePadding = 10;
 
@@ -118,11 +127,18 @@ class SelectionToolbar {
       top: top,
       child: _ToolbarBody(
         copyLabel: copyLabel,
+        copyQuoteLabel: copyQuoteLabel,
         quoteLabel: quoteLabel,
         onCopy: () {
           _copy(data);
           hide();
         },
+        onCopyQuote: onCopyQuote == null
+            ? null
+            : () {
+                onCopyQuote!(data.plainText);
+                hide();
+              },
         onQuote: () {
           onQuote(data.plainText);
           hide();
@@ -150,20 +166,34 @@ class SelectionToolbar {
 class _ToolbarBody extends StatelessWidget {
   const _ToolbarBody({
     required this.copyLabel,
+    required this.copyQuoteLabel,
     required this.quoteLabel,
     required this.onCopy,
+    required this.onCopyQuote,
     required this.onQuote,
   });
 
   final String copyLabel;
+  final String copyQuoteLabel;
   final String quoteLabel;
   final VoidCallback onCopy;
+  final VoidCallback? onCopyQuote;
   final VoidCallback onQuote;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     const radius = Radius.circular(8);
+    const leftR = BorderRadius.only(topLeft: radius, bottomLeft: radius);
+    const rightR = BorderRadius.only(topRight: radius, bottomRight: radius);
+
+    Widget divider() => Container(
+          width: 0.5,
+          height: 24,
+          color: scheme.onPrimaryContainer.withValues(alpha: 0.3),
+        );
+
+    final hasCopyQuote = onCopyQuote != null;
     return Material(
       elevation: 4,
       borderRadius: BorderRadius.circular(8),
@@ -174,25 +204,13 @@ class _ToolbarBody extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _btn(
-            context,
-            copyLabel,
-            onCopy,
-            scheme,
-            const BorderRadius.only(topLeft: radius, bottomLeft: radius),
-          ),
-          Container(
-            width: 0.5,
-            height: 24,
-            color: scheme.onPrimaryContainer.withValues(alpha: 0.3),
-          ),
-          _btn(
-            context,
-            quoteLabel,
-            onQuote,
-            scheme,
-            const BorderRadius.only(topRight: radius, bottomRight: radius),
-          ),
+          _btn(context, copyLabel, onCopy, scheme, leftR),
+          divider(),
+          if (hasCopyQuote) ...[
+            _btn(context, copyQuoteLabel, onCopyQuote!, scheme, BorderRadius.zero),
+            divider(),
+          ],
+          _btn(context, quoteLabel, onQuote, scheme, rightR),
         ],
       ),
     );

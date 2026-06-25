@@ -53,6 +53,7 @@ class FluxdoRender extends StatefulWidget {
     this.mathInlineBuilder,
     this.selectionEnabled = true,
     this.onQuoteRequest,
+    this.onCopyQuoteRequest,
     this.onCopyToast,
   });
 
@@ -137,6 +138,10 @@ class FluxdoRender extends StatefulWidget {
 
   /// 引用请求 —— toolbar 点「引用」时调,把选区 plainText 交回主项目。
   final QuoteRequestCallback? onQuoteRequest;
+
+  /// 复制引用请求 —— toolbar 点「复制引用」时调,主项目拼 [quote=...] BBCode
+  /// 进剪贴板(需 post 元数据,子包无法自拼)。null = 不显示该按钮。
+  final QuoteRequestCallback? onCopyQuoteRequest;
 
   /// 复制完成 —— 子包复制到剪贴板后通知主项目弹 toast(可选)。
   final CopyToastCallback? onCopyToast;
@@ -236,6 +241,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
         child: SelectionContentLayer(
           controller: controller,
           onQuoteRequest: widget.onQuoteRequest,
+          onCopyQuoteRequest: widget.onCopyQuoteRequest,
           onCopyToast: widget.onCopyToast,
           child: column,
         ),

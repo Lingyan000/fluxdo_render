@@ -18,12 +18,14 @@ class SelectionContentLayer extends StatefulWidget {
     super.key,
     required this.controller,
     required this.onQuoteRequest,
+    required this.onCopyQuoteRequest,
     required this.onCopyToast,
     required this.child,
   });
 
   final SelectionController controller;
   final QuoteRequestCallback? onQuoteRequest;
+  final QuoteRequestCallback? onCopyQuoteRequest;
   final CopyToastCallback? onCopyToast;
   final Widget child;
 
@@ -81,14 +83,7 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
       _handles?.hide();
       return;
     }
-    _toolbar = SelectionToolbar(
-      context: context,
-      onQuote: (plainText) {
-        widget.onQuoteRequest?.call(plainText);
-        widget.controller.clear();
-      },
-      onCopied: widget.onCopyToast,
-    );
+    _toolbar = _buildToolbar();
     _toolbar!.show(data);
 
     // 移动端(触摸选区)显示拖拽手柄;鼠标/触控板选区不显示。
@@ -105,20 +100,31 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
     }
   }
 
+  /// 构建 toolbar(复制 / 复制引用 / 引用)。两处显示共用,避免回调漂移。
+  SelectionToolbar _buildToolbar() {
+    return SelectionToolbar(
+      context: context,
+      onQuote: (plainText) {
+        widget.onQuoteRequest?.call(plainText);
+        widget.controller.clear();
+      },
+      onCopyQuote: widget.onCopyQuoteRequest == null
+          ? null
+          : (plainText) {
+              widget.onCopyQuoteRequest!.call(plainText);
+              widget.controller.clear();
+            },
+      onCopied: widget.onCopyToast,
+    );
+  }
+
   /// 按当前选区重新构建并显示 toolbar(手柄拖动松手后用)。
   void _reshowToolbarForCurrentSelection() {
     final sel = widget.controller.selection;
     final data = sel == null ? null : _exporter.export(sel);
     if (data == null) return;
     _toolbar?.hide();
-    _toolbar = SelectionToolbar(
-      context: context,
-      onQuote: (plainText) {
-        widget.onQuoteRequest?.call(plainText);
-        widget.controller.clear();
-      },
-      onCopied: widget.onCopyToast,
-    );
+    _toolbar = _buildToolbar();
     _toolbar!.show(data);
   }
 
