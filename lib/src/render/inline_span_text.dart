@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 
 import '../flatten/inline_flattener.dart';
 import '../node/inline_node.dart';
+import '../selection/projection.dart';
 import 'emoji_handler.dart';
 import 'footnote_handler.dart';
 import 'image_handler.dart';
@@ -17,6 +18,7 @@ import 'link_handler.dart';
 import 'local_date_handler.dart';
 import 'math_handler.dart';
 import 'mention_handler.dart';
+import 'selectable_text_box.dart';
 
 class InlineSpanText extends StatefulWidget {
   const InlineSpanText({
@@ -55,6 +57,9 @@ class InlineSpanText extends StatefulWidget {
 class _InlineSpanTextState extends State<InlineSpanText> {
   List<GestureRecognizer> _recognizers = const [];
 
+  /// 当前选区映射表,build 时由 flatten 结果更新(供 SelectableTextBox 读取)。
+  RenderTextProjection _projection = RenderTextProjection.empty;
+
   @override
   void dispose() {
     for (final r in _recognizers) {
@@ -88,6 +93,13 @@ class _InlineSpanTextState extends State<InlineSpanText> {
       context: context,
     );
     _recognizers = result.recognizers;
-    return Text.rich(result.span, textAlign: widget.textAlign);
+    _projection = result.projection;
+    // 选区注册 + 高亮统一由 SelectableTextBox 封装(无 SelectionScope 时退化
+    // 为裸 Text.rich,零成本)。
+    return SelectableTextBox(
+      projectionGetter: () => _projection,
+      debugLabel: 'inlineText',
+      child: Text.rich(result.span, textAlign: widget.textAlign),
+    );
   }
 }

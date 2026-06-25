@@ -34,17 +34,26 @@ import '../render/link_handler.dart';
 import '../render/local_date_handler.dart';
 import '../render/math_handler.dart';
 import '../render/mention_handler.dart';
-import '../render/selectable_adapter.dart';
+import '../selection/projection.dart';
+import '../selection/projection_builder.dart';
 
-/// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers。
+/// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers + 选区映射表。
 class FlattenResult {
-  FlattenResult({required this.span, required this.recognizers});
+  FlattenResult({
+    required this.span,
+    required this.recognizers,
+    required this.projection,
+  });
 
   final TextSpan span;
 
   /// 这次 flatten 创建的所有 GestureRecognizer,调用方必须在 widget
   /// dispose 时遍历 `recognizer.dispose()`。
   final List<GestureRecognizer> recognizers;
+
+  /// 渲染偏移 ↔ 逻辑投影 映射表(自研选区复制/引用用)。
+  /// 与 [span] 同源(同一份 inlines),渲染偏移坐标系一致。
+  final RenderTextProjection projection;
 }
 
 class InlineFlattener {
@@ -105,6 +114,7 @@ class InlineFlattener {
     return FlattenResult(
       span: TextSpan(style: baseStyle, children: children),
       recognizers: recognizers,
+      projection: buildInlineProjection(inlines),
     );
   }
 
@@ -428,22 +438,16 @@ class InlineFlattener {
     final margin = emoji.isOnlyEmoji
         ? EdgeInsets.symmetric(horizontal: 1.0, vertical: emojiBaseSize * 0.5)
         : const EdgeInsets.symmetric(horizontal: 2.0);
-    // 选区文本对齐原始 cooked:Discourse `<img class="emoji" title=":heart:">`
-    // 的 textContent 投影是 `:heart:`(HtmlTextMapper 用 title)。EmojiRun.name
-    // 已去冒号(`heart`),这里补回 `:` 让选区纯文本与 cooked 一致;name 空
-    // 时给空串(SelectableAdapter 不贡献文本,emoji 在选区里被静默跳过)。
-    final selectionText = emoji.name.isEmpty ? '' : ':${emoji.name}:';
+    // 选区文本由自研选区的映射表(buildInlineProjection)统一投影成 `:name:`,
+    // 不在此处用 SelectableAdapter(那是已废弃的 SelectionArea 方案)。
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: Padding(
         padding: margin,
-        child: SelectableAdapter(
-          selectedText: selectionText,
-          child: Builder(
-            builder: (ctx) {
-              return emojiBuilder(context ?? ctx, emoji, size);
-            },
-          ),
+        child: Builder(
+          builder: (ctx) {
+            return emojiBuilder(context ?? ctx, emoji, size);
+          },
         ),
       ),
     );
@@ -772,15 +776,12 @@ extension on InlineFlattener {
   /// 链接点击数 chip 渲染(对齐 legacy `buildClickCountWidget`)。
   /// 小灰底圆角(radius 10),h5/v1 padding,10px 字号。
   WidgetSpan _buildClickCountSpan(ClickCountRun node) {
+    // click-count 是主项目 preprocess 注入的,原始 post.cooked 没有这段文本。
+    // 自研选区的映射表(buildInlineProjection)已把 ClickCountRun 投影成空串
+    // 排除出选区,这里无需任何选区特殊处理。
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
-      // click-count 是主项目 preprocess 注入的(`_injectClickCounts`),原始
-      // post.cooked 里没有这段文本。若让它进选区,选中链接周围文字时纯文本
-      // 会混入数字,HtmlTextMapper 在 cooked 里就匹配不到 → 引用降级失败。
-      // 用 SelectionContainer.disabled 把它排除出选区(实测:选区跳过它)。
-      child: SelectionContainer.disabled(
-        child: _ClickCountWidget(count: node.count),
-      ),
+      child: _ClickCountWidget(count: node.count),
     );
   }
 }

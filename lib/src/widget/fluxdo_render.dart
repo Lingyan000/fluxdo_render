@@ -18,6 +18,10 @@ import '../render/policy_handler.dart';
 import '../render/chat_transcript_handler.dart';
 import '../render/poll_handler.dart';
 import '../render/quote_avatar_handler.dart';
+import '../selection/selection_data.dart';
+import '../selection/selection_registry.dart';
+import '../selection/selection_scope.dart';
+import 'selection_content_layer.dart';
 
 /// 帖子渲染入口 widget。
 ///
@@ -47,6 +51,9 @@ class FluxdoRender extends StatefulWidget {
     this.chatTranscriptBuilder,
     this.mathBlockBuilder,
     this.mathInlineBuilder,
+    this.selectionEnabled = true,
+    this.onQuoteRequest,
+    this.onCopyToast,
   });
 
   /// Discourse cooked HTML 内容。
@@ -124,6 +131,16 @@ class FluxdoRender extends StatefulWidget {
   /// 返回 null 时子包 fallback 用 monospace `$latex$` 原文。
   final MathInlineBuilder? mathInlineBuilder;
 
+  /// 是否启用自研选区(划词选中 → toolbar 复制/引用)。默认 true;
+  /// 用户卡 bio 等场景可关掉(不挂手势层 + 高亮,零成本)。
+  final bool selectionEnabled;
+
+  /// 引用请求 —— toolbar 点「引用」时调,把选区 plainText 交回主项目。
+  final QuoteRequestCallback? onQuoteRequest;
+
+  /// 复制完成 —— 子包复制到剪贴板后通知主项目弹 toast(可选)。
+  final CopyToastCallback? onCopyToast;
+
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
 }
@@ -132,10 +149,16 @@ class _FluxdoRenderState extends State<FluxdoRender> {
   late List<BlockNode> _nodes;
   late int _totalImagesInPost;
 
+  /// 自研选区控制器(selectionEnabled 时非 null)。
+  SelectionController? _selectionController;
+
   @override
   void initState() {
     super.initState();
     _reparse();
+    if (widget.selectionEnabled) {
+      _selectionController = SelectionController(SelectionRegistry());
+    }
   }
 
   @override
@@ -145,6 +168,18 @@ class _FluxdoRenderState extends State<FluxdoRender> {
         oldWidget.parser != widget.parser) {
       _reparse();
     }
+    if (widget.selectionEnabled && _selectionController == null) {
+      _selectionController = SelectionController(SelectionRegistry());
+    } else if (!widget.selectionEnabled && _selectionController != null) {
+      _selectionController!.dispose();
+      _selectionController = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _selectionController?.dispose();
+    super.dispose();
   }
 
   void _reparse() {
@@ -178,11 +213,26 @@ class _FluxdoRenderState extends State<FluxdoRender> {
     if (_nodes.isEmpty) {
       return const SizedBox.shrink();
     }
-    return Column(
+    final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final node in _nodes) factory.build(context, node),
       ],
+    );
+
+    final controller = _selectionController;
+    if (controller == null) return column;
+
+    // 选区树:Scope 下传 controller 给各 InlineSpanText(注册 + 高亮),
+    // 顶层手势层管长按选区,toolbar 弹复制/引用浮层。
+    return SelectionScope(
+      controller: controller,
+      child: SelectionContentLayer(
+        controller: controller,
+        onQuoteRequest: widget.onQuoteRequest,
+        onCopyToast: widget.onCopyToast,
+        child: column,
+      ),
     );
   }
 }

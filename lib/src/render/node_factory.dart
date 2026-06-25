@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 
 import '../flatten/inline_flattener.dart';
 import '../node/node.dart';
+import '../selection/projection.dart';
 import 'code_block_handler.dart';
 import 'emoji_handler.dart';
 import 'footnote_handler.dart';
@@ -32,6 +33,7 @@ import 'policy_handler.dart';
 import 'chat_transcript_handler.dart';
 import 'poll_handler.dart';
 import 'quote_avatar_handler.dart';
+import 'selectable_text_box.dart';
 
 class NodeFactory {
   NodeFactory({
@@ -1354,10 +1356,25 @@ class _CodeBlockBodyState extends State<_CodeBlockBody> {
                   scrollDirection: Axis.horizontal,
                   controller: _hController,
                   padding: const EdgeInsets.all(12),
-                  child: widget.highlighter(
-                    context,
-                    widget.code,
-                    widget.language,
+                  // 代码块选区:整块作为一个可选文本块注册,projection 是纯文本
+                  // (code 原文),复制时带 language(```lang)。highlighter 输出
+                  // 的 RichText plainText 应等于 code 原文 → 渲染偏移对齐。
+                  child: SelectableTextBox(
+                    projectionGetter: () => RenderTextProjection([
+                      ProjectionEntry(
+                        renderStart: 0,
+                        renderLen: widget.code.length,
+                        logicalText: widget.code,
+                        kind: ProjectionKind.text,
+                      ),
+                    ]),
+                    codeLanguage: widget.language,
+                    debugLabel: 'codeBlock',
+                    child: widget.highlighter(
+                      context,
+                      widget.code,
+                      widget.language,
+                    ),
                   ),
                 ),
               ),
