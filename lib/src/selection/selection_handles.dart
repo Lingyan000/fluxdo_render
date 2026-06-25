@@ -80,13 +80,17 @@ class SelectionHandlesController {
         ? cupertinoTextSelectionControls
         : materialTextSelectionControls;
 
-    return Stack(
-      children: [
-        _handle(ctx, controls, _DragSide.start, anchors.start,
-            anchors.startLineHeight),
-        _handle(ctx, controls, _DragSide.end, anchors.end,
-            anchors.endLineHeight),
-      ],
+    // 与内容/toolbar 同 groupId(= controller):点手柄不触发 onTapOutside 清除。
+    return TapRegion(
+      groupId: controller,
+      child: Stack(
+        children: [
+          _handle(ctx, controls, _DragSide.start, anchors.start,
+              anchors.startLineHeight),
+          _handle(ctx, controls, _DragSide.end, anchors.end,
+              anchors.endLineHeight),
+        ],
+      ),
     );
   }
 

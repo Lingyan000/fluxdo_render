@@ -17,6 +17,7 @@ class SelectionToolbar {
     required this.onQuote,
     required this.onCopied,
     this.onCopyQuote,
+    this.tapRegionGroupId,
     this.copyLabel = '复制',
     this.copyQuoteLabel = '复制引用',
     this.quoteLabel = '引用',
@@ -29,6 +30,9 @@ class SelectionToolbar {
   /// 「复制引用」回调 —— 把选区纯文本交回主项目拼 BBCode 进剪贴板。
   /// null = 不显示该按钮(主项目未接入时)。
   final void Function(String plainText)? onCopyQuote;
+
+  /// 与内容层同一 TapRegion groupId —— 点 toolbar 不触发内容的 onTapOutside。
+  final Object? tapRegionGroupId;
 
   final String copyLabel;
   final String copyQuoteLabel;
@@ -125,24 +129,27 @@ class SelectionToolbar {
     return Positioned(
       left: left,
       top: top,
-      child: _ToolbarBody(
-        copyLabel: copyLabel,
-        copyQuoteLabel: copyQuoteLabel,
-        quoteLabel: quoteLabel,
-        onCopy: () {
-          _copy(data);
-          hide();
-        },
-        onCopyQuote: onCopyQuote == null
-            ? null
-            : () {
-                onCopyQuote!(data.plainText);
-                hide();
-              },
-        onQuote: () {
-          onQuote(data.plainText);
-          hide();
-        },
+      child: TapRegion(
+        groupId: tapRegionGroupId,
+        child: _ToolbarBody(
+          copyLabel: copyLabel,
+          copyQuoteLabel: copyQuoteLabel,
+          quoteLabel: quoteLabel,
+          onCopy: () {
+            _copy(data);
+            hide();
+          },
+          onCopyQuote: onCopyQuote == null
+              ? null
+              : () {
+                  onCopyQuote!(data.plainText);
+                  hide();
+                },
+          onQuote: () {
+            onQuote(data.plainText);
+            hide();
+          },
+        ),
       ),
     );
   }

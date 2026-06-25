@@ -104,6 +104,8 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
   SelectionToolbar _buildToolbar() {
     return SelectionToolbar(
       context: context,
+      // 与内容同 groupId:点 toolbar 不触发 onTapOutside 清除。
+      tapRegionGroupId: widget.controller,
       onQuote: (plainText) {
         widget.onQuoteRequest?.call(plainText);
         widget.controller.clear();
@@ -147,10 +149,21 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
 
   @override
   Widget build(BuildContext context) {
-    return SelectionGestureLayer(
-      controller: widget.controller,
-      onSelectionChanged: _onSelectionChanged,
-      child: widget.child,
+    // TapRegion:点选区/toolbar(同 groupId)**之外**的任意处 → 清除选区。
+    // groupId 用本 controller 实例,各 post 独立组;toolbar 的 OverlayEntry 也
+    // 用同 groupId(见 SelectionToolbar),故点 toolbar 不算 outside。
+    return TapRegion(
+      groupId: widget.controller,
+      onTapOutside: (_) {
+        if (widget.controller.selection != null) {
+          widget.controller.clear();
+        }
+      },
+      child: SelectionGestureLayer(
+        controller: widget.controller,
+        onSelectionChanged: _onSelectionChanged,
+        child: widget.child,
+      ),
     );
   }
 }
