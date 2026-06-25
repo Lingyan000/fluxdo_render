@@ -14,6 +14,7 @@ class SelectionToolbar {
     required this.context,
     required this.onQuote,
     required this.onCopied,
+    this.topBoundaryGlobal,
     this.copyLabel = '复制',
     this.quoteLabel = '引用',
   });
@@ -21,8 +22,19 @@ class SelectionToolbar {
   final BuildContext context;
   final void Function(String plainText) onQuote;
   final VoidCallback? onCopied;
+
+  /// 顶部安全边界(**全局** y 坐标)getter —— 通常 = 祖先 Scrollable 视口
+  /// 上边缘(它本就在 AppBar 下方)。toolbar 放选区上方会越过这条线时,翻到
+  /// 选区下方(避免遮挡 AppBar)。子包不知道 AppBar 高度,由内容层注入视口
+  /// 上边缘;返回 null / 不传则退化为 overlay 顶(0)。
+  final double? Function()? topBoundaryGlobal;
+
   final String copyLabel;
   final String quoteLabel;
+
+  // toolbar 估算高度(Material vertical padding 10×2 + 文本 ~20)+ 选区间距。
+  static const double _toolbarHeight = 40;
+  static const double _gap = 8;
 
   OverlayEntry? _entry;
 
@@ -72,11 +84,23 @@ class SelectionToolbar {
       return const SizedBox.shrink();
     }
     final anchorCenterX = tl.dx + bounds.width / 2;
-    final anchorTopY = tl.dy;
+    final selTop = tl.dy;
+    final selBottom = tl.dy + bounds.height;
+
+    // 顶部安全边界转 overlay 局部坐标(全局视口上边缘 → 局部)。
+    final boundaryGlobal = topBoundaryGlobal?.call();
+    final topInset = boundaryGlobal == null
+        ? 0.0
+        : overlayBox.globalToLocal(Offset(0, boundaryGlobal)).dy;
+
+    // 默认放选区上方;若上方放不下(会越过 topInset 安全线,如 AppBar 视口
+    // 上缘)则翻到选区下方(对齐系统 toolbar 的 flip 行为)。
+    final aboveTop = selTop - _toolbarHeight - _gap;
+    final top = aboveTop >= topInset ? aboveTop : selBottom + _gap;
 
     return Positioned(
       left: anchorCenterX - 80,
-      top: (anchorTopY - 48).clamp(0.0, double.infinity),
+      top: top,
       child: _ToolbarBody(
         copyLabel: copyLabel,
         quoteLabel: quoteLabel,

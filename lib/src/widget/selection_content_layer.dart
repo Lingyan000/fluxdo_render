@@ -59,6 +59,7 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
     if (data == null) return;
     _toolbar = SelectionToolbar(
       context: context,
+      topBoundaryGlobal: _viewportTopGlobal,
       onQuote: (plainText) {
         widget.onQuoteRequest?.call(plainText);
         widget.controller.clear();
@@ -82,6 +83,15 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
     _scrollPosition?.removeListener(_onScroll);
     _toolbar?.hide();
     super.dispose();
+  }
+
+  /// 祖先 Scrollable 视口的全局上边缘 —— 给 toolbar 当顶部安全线
+  /// (视口本就在 AppBar 下方,toolbar 越过它即会遮挡 AppBar → 翻到下方)。
+  double? _viewportTopGlobal() {
+    final scrollable = Scrollable.maybeOf(context);
+    final box = scrollable?.context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero).dy;
   }
 
   @override
