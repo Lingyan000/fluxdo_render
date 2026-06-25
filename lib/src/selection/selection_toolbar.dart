@@ -89,11 +89,10 @@ class SelectionToolbar {
     // 选区外接框转 overlay 局部坐标(实时,跟随滚动)。
     final bounds = data.globalBounds;
     final tl = overlayBox.globalToLocal(bounds.topLeft);
-    final selRectLocal = tl & bounds.size;
-    // 选区完全滚出 overlay 可视区 → 隐藏(对齐系统视口隐藏行为)。
-    if (!overlayBox.paintBounds.overlaps(selRectLocal)) {
-      return const SizedBox.shrink();
-    }
+    // 不主动隐藏 —— toolbar 按选区真实位置放(Positioned),随选区**连续**滑动,
+    // 滚出屏幕时自然滑出可视区,与高亮(随内容滚)同步消失/出现。
+    // (之前用「相交则 shrink」的离散判定,会在选区还露一点时就突然消失,
+    //  与高亮不同步。)
 
     // 对齐 Discourse fk-d-menu 的 `top-start`(桌面)/`bottom-start`(移动):
     // toolbar **左对齐选区起点**(不是居中)。锚点 = 选区视觉首行框的左上角。

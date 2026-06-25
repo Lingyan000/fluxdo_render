@@ -40,21 +40,27 @@ void main() {
     expect(find.text('复制'), findsNothing);
   });
 
-  testWidgets('reposition 选区滚出视口 → toolbar 隐藏内容', (tester) async {
+  testWidgets('reposition 选区滚动 → toolbar 跟随移动(连续,不离散隐藏)',
+      (tester) async {
     final t = await mountToolbar(tester, onQuote: (_) {});
     t.show(dataAt(const Rect.fromLTWH(100, 300, 80, 20)));
     await tester.pump();
-    expect(find.text('复制'), findsOneWidget);
+    final mat = find.ancestor(
+        of: find.text('复制'), matching: find.byType(Material));
+    expect(mat, findsOneWidget);
+    final y0 = tester.getTopLeft(mat.first).dy;
 
-    // 选区移到屏幕上方很远(y=-500,完全在 overlay 之外)
-    t.reposition(dataAt(const Rect.fromLTWH(100, -500, 80, 20)));
-    await tester.pump();
-    expect(find.text('复制'), findsNothing, reason: '滚出视口应隐藏');
-
-    // 滚回视口内 → 重新显示
+    // 选区上移(模拟滚动)→ toolbar 跟着上移(连续,不是突然消失)。
     t.reposition(dataAt(const Rect.fromLTWH(100, 200, 80, 20)));
     await tester.pump();
-    expect(find.text('复制'), findsOneWidget, reason: '滚回应重显');
+    final y1 = tester.getTopLeft(mat.first).dy;
+    expect(y1, lessThan(y0), reason: 'toolbar 应跟随选区连续上移');
+
+    // 选区滚到屏幕上方很远 → toolbar 也跟到屏幕外(top 为负),与高亮同步。
+    t.reposition(dataAt(const Rect.fromLTWH(100, -500, 80, 20)));
+    await tester.pump();
+    final y2 = tester.getTopLeft(mat.first).dy;
+    expect(y2, lessThan(0), reason: 'toolbar 跟随选区滑出屏幕(不离散 shrink)');
     t.hide();
   });
 
