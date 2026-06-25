@@ -9,22 +9,19 @@ void main() {
       TextBox.fromLTRBD(l, t, r, b, TextDirection.ltr);
 
   group('mergeSelectionBoxesByLine', () {
-    test('同行文字 + 偏高 emoji → 合并成统一文字行高', () {
-      // 一行:文字 box 高 20(top10~bottom30),emoji box 高 32(top4~bottom36)。
+    test('同行 box(max 已统一高度)水平 union 成一个矩形', () {
+      // 用 BoxHeightStyle.max 时各 box 已同高(如 35.4),这里模拟同高 box。
       final merged = mergeSelectionBoxesByLine([
-        box(0, 10, 50, 30), // 文字
-        box(50, 4, 82, 36), // emoji(偏高)
-        box(82, 10, 120, 30), // 文字
+        box(0, 4, 50, 36),
+        box(50, 4, 82, 36),
+        box(82, 4, 120, 36),
       ]);
       expect(merged.length, 1, reason: '同一行合并成一个矩形');
       final r = merged.first;
-      // 行高 = 最矮 box(文字 20),top10 bottom30,不被 emoji 撑到 36
-      expect(r.top, 10);
-      expect(r.bottom, 30);
-      expect(r.height, 20, reason: 'emoji 不撑高,用文字行高');
-      // 水平铺满 0~120
+      expect(r.top, 4);
+      expect(r.bottom, 36);
       expect(r.left, 0);
-      expect(r.right, 120);
+      expect(r.right, 120, reason: '水平铺满,去掉相邻缝隙');
     });
 
     test('两行各自独立矩形', () {
@@ -44,7 +41,6 @@ void main() {
         box(50, 40, 90, 60), // 行2
       ]);
       expect(merged.length, 2);
-      // 行2 合并 0~90
       final row2 = merged.firstWhere((r) => r.top == 40);
       expect(row2.left, 0);
       expect(row2.right, 90);

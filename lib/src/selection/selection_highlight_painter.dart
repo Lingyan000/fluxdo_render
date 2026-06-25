@@ -6,6 +6,8 @@
 /// RenderParagraph.getBoxesForSelection 取矩形(本地坐标)直接画。
 library;
 
+import 'dart:ui' show BoxHeightStyle;
+
 import 'package:flutter/widgets.dart';
 
 import 'selectable_block_handle.dart';
@@ -79,17 +81,19 @@ class _HighlightPainter extends CustomPainter {
     }
     if (mine == null || mine.isEmpty) return;
 
+    // boxHeightStyle.max:每个 box 用整行最大高度(含 emoji 撑高的行高),
+    // **与选了什么无关** —— 拖拽中行高恒定,不会因为选区刚好只含/不含 emoji
+    // 而跳变(实测 tight=[16,32,16] 参差且会跳;max=[35.4,35.4,35.4] 恒定)。
     final boxes = paragraph.getBoxesForSelection(
       TextSelection(baseOffset: mine.start, extentOffset: mine.end),
+      boxHeightStyle: BoxHeightStyle.max,
     );
     if (boxes.isEmpty) return;
 
     final paint = Paint()
       ..style = PaintingStyle.fill
       ..color = color;
-    // CustomPaint 的坐标系 == child(Text.rich)本地坐标系,box 已是本地坐标。
-    // 不逐 box 直接画 —— emoji/mention 等 WidgetSpan 的 box 比纯文字行高,
-    // 逐个画会高低参差。改为**按行合并成统一高度矩形**(见 mergeSelectionBoxesByLine)。
+    // box 已是统一行高(max),按行做水平 union 去掉相邻 box 间亚像素缝隙。
     for (final rowRect in mergeSelectionBoxesByLine(boxes)) {
       canvas.drawRect(rowRect, paint);
     }
@@ -104,17 +108,17 @@ class _HighlightPainter extends CustomPainter {
 
 typedef DocumentSelectionGetter = DocumentSelection? Function();
 
-/// 把 getBoxesForSelection 返回的 box 按「行」(y 区间重叠)分组,每行合并成
-/// 一个**统一高度**矩形,消除 emoji/mention 等 WidgetSpan box 比文字行高导致的
-/// 高低参差。
+/// 把 getBoxesForSelection(boxHeightStyle.max)返回的 box 按「行」(y 区间
+/// 重叠)分组,每行合并成一个矩形 —— 水平 union 去掉相邻 box 间亚像素缝隙。
 ///
-/// 行高基准:取行内**最矮** box 的上下边(纯文字行高)——emoji 偏高、上标偏矮
-/// 都不会撑歪;水平方向铺满该行最左到最右。跨行各自独立矩形。
+/// 前提:调用方用 [BoxHeightStyle.max],各 box 已是统一行高(与选区内容无关),
+/// 所以这里直接取行内 union(top/bottom 同行一致,left/right 取最左最右),
+/// 无需再挑「最矮 box」(那会随选区跳变)。
 List<Rect> mergeSelectionBoxesByLine(List<TextBox> boxes) {
   final rows = <List<Rect>>[];
   for (final b in boxes) {
     final r = b.toRect();
-    if (r.isEmpty && r.width == 0 && r.height == 0) continue;
+    if (r.width == 0 && r.height == 0) continue;
     bool placed = false;
     for (final row in rows) {
       final ref = row.first;
@@ -129,15 +133,11 @@ List<Rect> mergeSelectionBoxesByLine(List<TextBox> boxes) {
 
   final result = <Rect>[];
   for (final row in rows) {
-    double minLeft = double.infinity;
-    double maxRight = -double.infinity;
-    Rect base = row.first;
-    for (final r in row) {
-      if (r.left < minLeft) minLeft = r.left;
-      if (r.right > maxRight) maxRight = r.right;
-      if (r.height < base.height) base = r;
+    var rect = row.first;
+    for (final r in row.skip(1)) {
+      rect = rect.expandToInclude(r);
     }
-    result.add(Rect.fromLTRB(minLeft, base.top, maxRight, base.bottom));
+    result.add(rect);
   }
   return result;
 }
