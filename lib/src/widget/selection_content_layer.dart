@@ -33,8 +33,25 @@ class SelectionContentLayer extends StatefulWidget {
 class _SelectionContentLayerState extends State<SelectionContentLayer> {
   SelectionToolbar? _toolbar;
 
+  /// 祖先 Scrollable 的滚动位置(监听它驱动 toolbar 跟随)。
+  ScrollPosition? _scrollPosition;
+
   SelectionExporter get _exporter =>
       SelectionExporter(widget.controller.registry);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 监听**祖先** Scrollable —— 不能用 NotificationListener(实测:祖先
+    // Scrollable 的 ScrollNotification 不冒泡到后代,收不到)。改用
+    // Scrollable.of(context).position(Listenable),滚动时直接 notify。
+    final pos = Scrollable.maybeOf(context)?.position;
+    if (pos != _scrollPosition) {
+      _scrollPosition?.removeListener(_onScroll);
+      _scrollPosition = pos;
+      _scrollPosition?.addListener(_onScroll);
+    }
+  }
 
   void _onSelectionChanged(SelectionData? data) {
     _toolbar?.hide();
@@ -52,30 +69,27 @@ class _SelectionContentLayerState extends State<SelectionContentLayer> {
   }
 
   /// 滚动时:toolbar 在屏 → 用当前选区重算几何并重定位(滚出视口自动隐藏)。
-  bool _onScroll(ScrollNotification n) {
+  void _onScroll() {
     final toolbar = _toolbar;
-    if (toolbar == null) return false;
+    if (toolbar == null) return;
     final sel = widget.controller.selection;
-    if (sel == null) return false;
+    if (sel == null) return;
     toolbar.reposition(_exporter.export(sel));
-    return false;
   }
 
   @override
   void dispose() {
+    _scrollPosition?.removeListener(_onScroll);
     _toolbar?.hide();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: _onScroll,
-      child: SelectionGestureLayer(
-        controller: widget.controller,
-        onSelectionChanged: _onSelectionChanged,
-        child: widget.child,
-      ),
+    return SelectionGestureLayer(
+      controller: widget.controller,
+      onSelectionChanged: _onSelectionChanged,
+      child: widget.child,
     );
   }
 }
