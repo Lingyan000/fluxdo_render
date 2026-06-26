@@ -21,6 +21,7 @@ import '../render/quote_avatar_handler.dart';
 import '../selection/selection_data.dart';
 import '../selection/selection_registry.dart';
 import '../selection/selection_scope.dart';
+import '../selection/selection_scope_registry.dart';
 import 'selection_content_layer.dart';
 
 /// 帖子渲染入口 widget。
@@ -55,6 +56,9 @@ class FluxdoRender extends StatefulWidget {
     this.onQuoteRequest,
     this.onCopyQuoteRequest,
     this.onCopyToast,
+    this.imageIndexOffset = 0,
+    this.footnotesHtml,
+    this.selectionScopeId,
   });
 
   /// Discourse cooked HTML 内容。
@@ -146,55 +150,109 @@ class FluxdoRender extends StatefulWidget {
   /// 复制完成 —— 子包复制到剪贴板后通知主项目弹 toast(可选)。
   final CopyToastCallback? onCopyToast;
 
+  /// 图片 indexInPost 起始偏移(长帖分 chunk 时,该 chunk 之前所有 chunk 的
+  /// 图片总数),使图片 heroTag / 画廊索引对齐整帖。整帖渲染时为 0。
+  final int imageIndexOffset;
+
+  /// 整帖脚注区源 html(分 chunk 时正文 chunk 不含帖尾脚注区,需额外传以保证
+  /// 脚注点击取到内容)。整帖渲染时为 null。
+  final String? footnotesHtml;
+
+  /// 共享选区作用域 id(如 post.id)。非 null 时,同 id 的多个 FluxdoRender
+  /// (长帖各 chunk)共享一个 SelectionController → 选区可跨 chunk。null 时
+  /// 每个 FluxdoRender 自建独立选区(整帖渲染 / 用户卡等)。
+  final Object? selectionScopeId;
+
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
 }
 
-class _FluxdoRenderState extends State<FluxdoRender> {
+class _FluxdoRenderState extends State<FluxdoRender>
+    with AutomaticKeepAliveClientMixin {
   late List<BlockNode> _nodes;
   late int _totalImagesInPost;
 
   /// 自研选区控制器(selectionEnabled 时非 null)。
+  /// scopeId 非 null 时为共享(SelectionScopeRegistry),否则自建。
   SelectionController? _selectionController;
+  bool _ownsController = false;
 
   @override
   void initState() {
     super.initState();
     _reparse();
-    if (widget.selectionEnabled) {
-      _selectionController = SelectionController(SelectionRegistry());
-    }
+    _acquireController();
   }
+
+  /// selectionEnabled 时获取选区控制器:有 scopeId 用共享(跨 chunk),否则自建。
+  void _acquireController() {
+    if (!widget.selectionEnabled) return;
+    final scopeId = widget.selectionScopeId;
+    if (scopeId != null) {
+      _selectionController = SelectionScopeRegistry.retain(scopeId);
+      _ownsController = false;
+    } else {
+      _selectionController = SelectionController(SelectionRegistry());
+      _ownsController = true;
+    }
+    // 选区活跃时让本 chunk 保活(防 sliver 回收 → 跨 chunk 选区/复制不断)。
+    _selectionController!.addListener(_onSelectionChanged);
+  }
+
+  void _releaseController() {
+    final c = _selectionController;
+    if (c == null) return;
+    c.removeListener(_onSelectionChanged);
+    if (_ownsController) {
+      c.dispose();
+    } else if (widget.selectionScopeId != null) {
+      SelectionScopeRegistry.release(widget.selectionScopeId!);
+    }
+    _selectionController = null;
+    _ownsController = false;
+  }
+
+  void _onSelectionChanged() => updateKeepAlive();
+
+  @override
+  bool get wantKeepAlive => _selectionController?.selection != null;
 
   @override
   void didUpdateWidget(covariant FluxdoRender oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.cookedHtml != widget.cookedHtml ||
-        oldWidget.parser != widget.parser) {
+        oldWidget.parser != widget.parser ||
+        oldWidget.imageIndexOffset != widget.imageIndexOffset ||
+        oldWidget.footnotesHtml != widget.footnotesHtml) {
       _reparse();
     }
-    if (widget.selectionEnabled && _selectionController == null) {
-      _selectionController = SelectionController(SelectionRegistry());
-    } else if (!widget.selectionEnabled && _selectionController != null) {
-      _selectionController!.dispose();
-      _selectionController = null;
+    // selectionEnabled / scopeId 变化 → 重新获取控制器。
+    if (oldWidget.selectionEnabled != widget.selectionEnabled ||
+        oldWidget.selectionScopeId != widget.selectionScopeId) {
+      _releaseController();
+      _acquireController();
     }
   }
 
   @override
   void dispose() {
-    _selectionController?.dispose();
+    _releaseController();
     super.dispose();
   }
 
   void _reparse() {
     final parser = widget.parser ?? ParagraphParser();
-    _nodes = parser.parse(widget.cookedHtml);
+    _nodes = parser.parse(
+      widget.cookedHtml,
+      imageIndexStart: widget.imageIndexOffset,
+      footnotesHtml: widget.footnotesHtml,
+    );
     _totalImagesInPost = countImageRuns(_nodes);
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // AutomaticKeepAliveClientMixin 要求
     final factory = widget.factory ??
         NodeFactory(
           linkHandler: widget.linkHandler,

@@ -36,7 +36,17 @@ class ParagraphParser {
   /// 每个产出的 BlockNode 分配稳定 id("b_0", "b_1", ...),id 仅在
   /// 这一次 parse 调用内有意义,不跨调用稳定(同一 html parse 两次 id
   /// 相同是因为顺序确定,不需要额外保证)。
-  List<BlockNode> parse(String html) {
+  /// [imageIndexStart]:本次 parse 的图片 indexInPost 起始值。长帖分 chunk 时,
+  /// 每个 chunk 单独 parse,传该 chunk 之前所有 chunk 的图片总数,使 indexInPost
+  /// 对齐**整帖**序(主项目画廊 viewer / heroTag 按整帖索引)。
+  ///
+  /// [footnotesHtml]:整帖脚注区源 html(`section.footnotes` 等)。长帖分 chunk
+  /// 时正文 chunk 不含帖尾脚注区,需额外传整帖脚注区,否则脚注点击取不到内容。
+  List<BlockNode> parse(
+    String html, {
+    int imageIndexStart = 0,
+    String? footnotesHtml,
+  }) {
     if (html.isEmpty) return const [];
 
     final fragment = html_parser.parseFragment(html);
@@ -47,13 +57,21 @@ class ParagraphParser {
     String nextId() => 'b_${idCounter++}';
 
     // 全局 image index counter,按 image 出现顺序自增分配 indexInPost。
-    // 给主项目算 Hero tag / gallery viewer 索引用。
-    var imageIndexCounter = 0;
+    // 给主项目算 Hero tag / gallery viewer 索引用。分 chunk 时从整帖偏移起算。
+    var imageIndexCounter = imageIndexStart;
     int nextImageIndex() => imageIndexCounter++;
 
     // 一次性扫整个 fragment 建立 fnId → contentHtml 映射,
     // 后续 sup.footnote-ref 解析时直接 lookup(避免 inline 节点再回查)。
     _footnotes = _collectFootnoteContents(fragment);
+    // 分 chunk 时正文与脚注区不在同一 html,额外扫整帖脚注区补全映射。
+    if (footnotesHtml != null && footnotesHtml.isNotEmpty) {
+      final extra =
+          _collectFootnoteContents(html_parser.parseFragment(footnotesHtml));
+      for (final e in extra.entries) {
+        _footnotes.putIfAbsent(e.key, () => e.value);
+      }
+    }
 
     return _parseBlocks(fragment.nodes, nextId, nextImageIndex);
   }

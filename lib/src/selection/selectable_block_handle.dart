@@ -30,7 +30,11 @@ abstract class SelectableBlockHandle {
   Rect? globalRect() {
     final p = paragraph;
     if (p == null || !p.attached || !p.hasSize) return null;
-    final raw = p.localToGlobal(Offset.zero) & p.size;
+    final origin = p.localToGlobal(Offset.zero);
+    // keepAlive 保活但移出视口的块可能无有效 paint 变换 → localToGlobal 出
+    // NaN/Infinity。这种几何无效,不能进视觉序/选区(否则 toolbar 定位 NaN 崩)。
+    if (!origin.dx.isFinite || !origin.dy.isFinite) return null;
+    final raw = origin & p.size;
     final clip = clipBoundsGetter?.call();
     if (clip == null) return raw;
     final r = raw.intersect(clip);
