@@ -22,6 +22,7 @@
 library;
 
 import '../node/inline_node.dart';
+import '../flatten/soft_break.dart';
 import 'projection.dart';
 
 /// 把 inline 节点列表构建成映射表。根 span 的渲染偏移从 0 开始。
@@ -59,11 +60,11 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
     for (final node in nodes) {
       switch (node) {
         case TextRun(:final text):
-          addText(text, ProjectionKind.text);
+          addText(insertSoftBreaks(text), ProjectionKind.text);
         case LineBreakRun():
           addText('\n', ProjectionKind.lineBreak);
         case InlineCodeRun(:final text):
-          addText(text, ProjectionKind.inlineCode);
+          addText(insertSoftBreaks(text), ProjectionKind.inlineCode);
         case EmRun(:final children):
           walk(children);
         case StrongRun(:final children):

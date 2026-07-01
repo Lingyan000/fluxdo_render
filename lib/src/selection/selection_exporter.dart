@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter/rendering.dart';
 
+import '../flatten/soft_break.dart';
 import 'selection_data.dart';
 import 'selection_geometry.dart';
 import 'selection_range.dart';
@@ -30,7 +31,8 @@ class SelectionExporter {
       buf.write(r.projection.project(r.start, r.end));
       if (i != ranges.length - 1) buf.write('\n');
     }
-    final plainText = buf.toString();
+    // 渲染层为长串软换行插的 U+200B(见 insertSoftBreaks)不属于内容,strip。
+    final plainText = buf.toString().replaceAll(kSoftBreakChar, '');
     if (plainText.isEmpty) return null;
 
     // 2. 高亮矩形(全局)+ 外接框 —— 只对**可见块**(live handle)算,滚出

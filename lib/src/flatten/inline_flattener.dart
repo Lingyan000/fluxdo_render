@@ -28,6 +28,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 
 import '../node/inline_node.dart';
+import 'soft_break.dart';
 import '../render/emoji_handler.dart';
 import '../render/footnote_handler.dart';
 import '../render/image_handler.dart';
@@ -182,7 +183,7 @@ class InlineFlattener {
   }) {
     return switch (node) {
       TextRun(:final text) => TextSpan(
-          text: text,
+          text: insertSoftBreaks(text),
           recognizer: inheritedRecognizer,
         ),
       EmRun(:final children) => TextSpan(
@@ -561,7 +562,7 @@ class InlineFlattener {
     final scheme = context == null ? null : Theme.of(context).colorScheme;
     final fgColor = scheme?.onSurfaceVariant;
     return TextSpan(
-      text: text,
+      text: insertSoftBreaks(text),
       recognizer: inheritedRecognizer,
       style: TextStyle(
         fontFamily: 'FiraCode',
