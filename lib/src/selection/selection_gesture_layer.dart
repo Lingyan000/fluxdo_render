@@ -12,6 +12,7 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter/widgets.dart';
 
 import 'hit_tester.dart';
@@ -205,12 +206,20 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer>
   void _onLongPressStart(LongPressStartDetails d) {
     _lastInputWasTouch = true;
     _beginDrag(d.globalPosition);
-    _startWordAt(d.globalPosition);
+    // 长按起选震动(对齐系统文本选区)。
+    if (_startWordAt(d.globalPosition)) {
+      HapticFeedback.selectionClick();
+    }
   }
 
   void _onLongPressMoveUpdate(LongPressMoveUpdateDetails d) {
     _lastDragGlobal = d.globalPosition;
+    final before = widget.controller.selection?.extent;
     _extendTo(d.globalPosition);
+    // 拖动跨到新位置才震动(不每帧震)。
+    if (widget.controller.selection?.extent != before) {
+      HapticFeedback.selectionClick();
+    }
     _maybeAutoScroll(d.globalPosition);
   }
 

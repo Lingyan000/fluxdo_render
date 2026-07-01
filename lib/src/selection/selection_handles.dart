@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/cupertino.dart' show cupertinoTextSelectionControls;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 
 import 'hit_tester.dart';
 import 'selection_exporter.dart';
@@ -45,6 +46,11 @@ class SelectionHandlesController {
   // 拖动中:被拖的是哪个端(视觉 start / end),拖动期间固定另一端。
   _DragSide? _dragging;
 
+  /// 拖动开始时锁定的「固定端」(另一端的文档位置),整个拖动期间不变。
+  /// 不每帧从当前 selection 重算,否则拖过另一端后固定端会漂移、手柄错位、
+  /// 无法向回选。松手清空。
+  DocumentPosition? _fixedAnchor;
+
   /// 竖直滞后补偿(本帧 scroll delta)——滚动时 endpointAnchors 几何滞后一帧,
   /// _build 把手柄竖直坐标减去它 → 与内容同帧对齐,消滚动抖动。拖动/显示时归零。
   double _yComp = 0;
@@ -77,6 +83,7 @@ class SelectionHandlesController {
     _entry?.remove();
     _entry = null;
     _dragging = null;
+    _fixedAnchor = null;
   }
 
   Widget _build(BuildContext ctx) {
@@ -158,26 +165,31 @@ class SelectionHandlesController {
 
   void _onDragStart(_DragSide side, Offset global) {
     _dragging = side;
+    // 锁定另一端为固定锚点(拖 start → 固定 visualEnd,拖 end → 固定 visualStart),
+    // 整个拖动期间不变 → 支持向回选(拖过另一端)时固定端不漂移。
+    final sel = controller.selection;
+    final ends = sel == null ? null : _exporter.orderedEndpoints(sel);
+    _fixedAnchor = ends == null
+        ? null
+        : (side == _DragSide.start ? ends.visualEnd : ends.visualStart);
     _yComp = 0; // 拖动不是滚动,无滞后补偿
+    HapticFeedback.selectionClick();
     _magnifier.show(global);
     onDragStart?.call();
   }
 
   void _onDragUpdate(Offset global) {
-    final sel = controller.selection;
-    final side = _dragging;
-    if (sel == null || side == null) return;
+    final fixed = _fixedAnchor;
+    if (_dragging == null || fixed == null) return;
     final pos = _hit.positionAt(global);
     if (pos == null) return;
 
-    // 视觉序固定另一端:拖 start → 固定 visualEnd 作 base、pos 作 extent;
-    // 拖 end → 固定 visualStart 作 base、pos 作 extent。越过另一端时视觉序
-    // 自然反转(下次 build 的 orderedEndpoints 会重新归一)。
-    final ends = _exporter.orderedEndpoints(sel);
-    if (ends == null) return;
-    final fixed =
-        side == _DragSide.start ? ends.visualEnd : ends.visualStart;
+    // 固定锚点作 base、被拖端 pos 作 extent。pos 越过 base(向回选)时
+    // DocumentSelection 自然反向,下次 build 的 orderedEndpoints 归一视觉序。
+    final prevExtent = controller.selection?.extent;
     controller.selection = DocumentSelection(base: fixed, extent: pos);
+    // 跨到新位置才震动(不每帧震),对齐系统文本选区拖拽反馈。
+    if (prevExtent != pos) HapticFeedback.selectionClick();
     _yComp = 0; // 拖动改选区,几何当前,无需补偿
     _magnifier.show(global);
     _entry?.markNeedsBuild();
@@ -185,8 +197,11 @@ class SelectionHandlesController {
 
   void _onDragEnd() {
     _dragging = null;
+    _fixedAnchor = null;
     _magnifier.hide();
     _entry?.markNeedsBuild();
+    // 通知上层按新选区重新定位并显示 toolbar(拖动中被隐藏了)。
+    onDragEnd?.call();
   }
 }
 
