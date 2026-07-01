@@ -26,6 +26,7 @@ import '../selection/selection_data.dart';
 import '../selection/selection_registry.dart';
 import '../selection/selection_scope.dart';
 import '../selection/selection_scope_registry.dart';
+import 'screenshot_mode.dart';
 import 'selection_content_layer.dart';
 
 /// 帖子渲染入口 widget。
@@ -64,6 +65,7 @@ class FluxdoRender extends StatefulWidget {
     this.onDownloadAttachment,
     this.baseTextStyle,
     this.compact = false,
+    this.screenshotMode = false,
     this.selectionEnabled = true,
     this.onQuoteRequest,
     this.onCopyQuoteRequest,
@@ -190,6 +192,11 @@ class FluxdoRender extends StatefulWidget {
   /// 传 [factory] 时以 factory 自带的 compact 为准。
   final bool compact;
 
+  /// 截图 / 离屏渲染模式 —— 分享成图场景。透传给默认 [NodeFactory](关掉大表格
+  /// 行虚拟化,全渲染),并在渲染树上包 [ScreenshotMode],让 mermaid 等懒加载
+  /// builder 跳过 VisibilityDetector 立即出图。传 [factory] 时以 factory 自带为准。
+  final bool screenshotMode;
+
   /// 是否启用自研选区(划词选中 → toolbar 复制/引用)。默认 true;
   /// 用户卡 bio 等场景可关掉(不挂手势层 + 高亮,零成本)。
   final bool selectionEnabled;
@@ -312,6 +319,11 @@ class _FluxdoRenderState extends State<FluxdoRender> {
     _docOrders = assignDocumentOrder(_nodes);
   }
 
+  /// 截图模式时在树上包 [ScreenshotMode],供 mermaid 等懒加载 builder 感知。
+  Widget _wrapScreenshot(Widget child) => widget.screenshotMode
+      ? ScreenshotMode(enabled: true, child: child)
+      : child;
+
   @override
   Widget build(BuildContext context) {
     final factory = widget.factory ??
@@ -339,6 +351,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           onDownloadAttachment: widget.onDownloadAttachment,
           baseTextStyle: widget.baseTextStyle,
           compact: widget.compact,
+          screenshotMode: widget.screenshotMode,
           totalImagesInPost: _totalImagesInPost,
           chunkIndex: widget.chunkIndex,
           docOrders: _docOrders,
@@ -360,7 +373,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
     );
 
     final controller = _selectionController;
-    if (controller == null) return column;
+    if (controller == null) return _wrapScreenshot(column);
 
     // 选区树:Scope 下传 controller 给各 InlineSpanText(注册 + 高亮),
     // 顶层手势层管长按选区,toolbar 弹复制/引用浮层。
@@ -369,7 +382,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
     // (主项目 topic_post_list 包了一层)里排除——否则 Text.rich 会自动参与
     // 外层系统选区,系统高亮抢先接管拖拽,自研手势层/toolbar 永远触发不了。
     // 自研选区直接用 RenderParagraph,不依赖 SelectionContainer,disabled 不影响它。
-    return SelectionContainer.disabled(
+    return _wrapScreenshot(SelectionContainer.disabled(
       child: SelectionScope(
         controller: controller,
         child: SelectionContentLayer(
@@ -381,6 +394,6 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           child: column,
         ),
       ),
-    );
+    ));
   }
 }

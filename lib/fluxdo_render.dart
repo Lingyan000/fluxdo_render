@@ -40,3 +40,4 @@ export 'src/render/svg_handler.dart';
 export 'src/selection/selection_data.dart';
 export 'src/selection/selection_scope.dart' show SelectionScope;
 export 'src/widget/fluxdo_render.dart';
+export 'src/widget/screenshot_mode.dart';

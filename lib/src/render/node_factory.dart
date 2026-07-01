@@ -67,6 +67,7 @@ class NodeFactory {
     this.baseTextStyle,
     this.totalImagesInPost = 0,
     this.compact = false,
+    this.screenshotMode = false,
     this.chunkIndex = 0,
     Map<Object, int>? docOrders,
     Map<Object, int>? fallbackDocOrders,
@@ -201,6 +202,11 @@ class NodeFactory {
   /// 对齐 legacy `DiscourseHtmlContent(compact: true)` 用法。
   final bool compact;
 
+  /// 截图模式 —— 分享成图等离屏渲染场景。为 true 时关掉大表格行虚拟化
+  /// (全渲染所有行,避免截断);mermaid 等主项目懒加载 builder 经
+  /// [ScreenshotMode] InheritedWidget 感知,跳过 VisibilityDetector 立即加载。
+  final bool screenshotMode;
+
   /// 派生一个"紧凑"版本(给 buildBlockquote / buildQuoteCard / 等
   /// 渲染子节点用)。所有 handlers / builders 完全相同,只是 [compact]
   /// 切到 true。
@@ -230,6 +236,7 @@ class NodeFactory {
       svgBuilder: svgBuilder,
       onDownloadAttachment: onDownloadAttachment,
       baseTextStyle: baseTextStyle,
+      screenshotMode: screenshotMode,
       totalImagesInPost: totalImagesInPost,
       compact: true,
       chunkIndex: chunkIndex,
@@ -3005,7 +3012,9 @@ class _TableWidget extends StatelessWidget {
         ? node.rows.sublist(1)
         : node.rows;
 
-    final showInfoBar = bodyRows.length > _kTableVirtualizeThreshold;
+    // 截图模式关掉行虚拟化 → 全渲染,避免离屏截图截断大表格。
+    final showInfoBar = bodyRows.length > _kTableVirtualizeThreshold &&
+        !childFactory.screenshotMode;
 
     Widget bodyWidget;
     if (showInfoBar) {
