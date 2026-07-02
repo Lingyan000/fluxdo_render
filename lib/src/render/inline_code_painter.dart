@@ -52,6 +52,15 @@ class InlineCodeBackgroundPainter extends CustomPainter {
   static const double _hPad = 3.5;
   static const double _vPad = 1.5;
 
+  /// 矩形几何缓存:同一 (paragraph, projection, 段落尺寸) 下 boxes 不变。
+  /// 选区拖动等场景每帧连带重绘本 painter(CustomPaint 非 repaint 边界),
+  /// 缓存后免去每帧 N 次 getBoxesForSelection。painter 随 rebuild 重建时
+  /// 缓存自然丢弃(rebuild 已被上游 flatten/块缓存压到很少)。
+  RenderParagraph? _cacheParagraph;
+  RenderTextProjection? _cacheProjection;
+  Size? _cacheSize;
+  List<RRect>? _cacheRRects;
+
   @override
   void paint(Canvas canvas, Size size) {
     final projection = projectionGetter();
@@ -77,6 +86,21 @@ class InlineCodeBackgroundPainter extends CustomPainter {
       ..style = PaintingStyle.fill
       ..color = color;
 
+    // 缓存命中:同段落实例 + 同投影表 + 布局尺寸未变 → 矩形必同,直接画。
+    // (相同 span 在相同宽度下换行确定,relayout 而几何变了必伴随尺寸或
+    //  投影/段落身份变化。)
+    final cached = _cacheRRects;
+    if (cached != null &&
+        identical(_cacheParagraph, paragraph) &&
+        identical(_cacheProjection, projection) &&
+        _cacheSize == paragraph.size) {
+      for (final rrect in cached) {
+        canvas.drawRRect(rrect, paint);
+      }
+      return;
+    }
+
+    final rrects = <RRect>[];
     final entries = projection.entries;
     for (var idx = 0; idx < entries.length; idx++) {
       final e = entries[idx];
@@ -122,18 +146,22 @@ class InlineCodeBackgroundPainter extends CustomPainter {
         // 首行圆左角、末行圆右角(单行 = 四角全圆);中间行直角 → 跨行连成一条。
         final lr = isFirst ? const Radius.circular(_radius) : Radius.zero;
         final rr = isLast ? const Radius.circular(_radius) : Radius.zero;
-        canvas.drawRRect(
-          RRect.fromRectAndCorners(
-            merged,
-            topLeft: lr,
-            bottomLeft: lr,
-            topRight: rr,
-            bottomRight: rr,
-          ),
-          paint,
-        );
+        rrects.add(RRect.fromRectAndCorners(
+          merged,
+          topLeft: lr,
+          bottomLeft: lr,
+          topRight: rr,
+          bottomRight: rr,
+        ));
       }
     }
+    for (final rrect in rrects) {
+      canvas.drawRRect(rrect, paint);
+    }
+    _cacheParagraph = paragraph;
+    _cacheProjection = projection;
+    _cacheSize = paragraph.size;
+    _cacheRRects = rrects;
   }
 
   /// 条目渲染区间的实测总宽(codePad 是单个 NBSP,恒单 box)。
