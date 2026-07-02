@@ -114,6 +114,20 @@ class SelectionHitTester {
     return (start: wb.start, end: wb.end);
   }
 
+  /// 位置处 caret 的**全局矩形**(宽 0)。手柄拖拽的半行补偿、放大镜焦点
+  /// 「指文字所在行」都用它(对齐 SDK _buildInfoForMagnifier 的 caretRect)。
+  /// 块不可见(回收/离屏 NaN)时返回 null。
+  Rect? caretRectAt(DocumentPosition pos) {
+    final p = registry.byId(pos.blockId)?.paragraph;
+    if (p == null || !p.attached || !p.hasSize) return null;
+    final tp = TextPosition(offset: pos.renderOffset);
+    final local = p.getOffsetForCaret(tp, Rect.zero);
+    final height = p.getFullHeightForCaret(tp);
+    final topLeft = p.localToGlobal(local);
+    if (!topLeft.dx.isFinite || !topLeft.dy.isFinite) return null;
+    return topLeft & Size(0, height);
+  }
+
   /// 块的渲染总长度(三击选段用)。走逻辑块表 → 回收块也能取。未注册返回 null。
   int? renderLengthOf(SelectableBlockId blockId) {
     return registry.logicalById(blockId)?.renderLength;

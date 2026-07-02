@@ -51,6 +51,16 @@ class SelectionHandlesController {
   /// 无法向回选。松手清空。
   DocumentPosition? _fixedAnchor;
 
+  /// 拖拽点(全局)—— 对齐 SDK SelectableRegion(_handleSelectionEndHandleDrag*):
+  /// 起拖时 = **被拖端点的文本锚点**(box 底角),之后累加手势 delta,而非直接用
+  /// 手指坐标。手指按在手柄图形上、低于文本行一整行,直接 hit-test 手指位置会
+  /// 命中下一行 → extent 永远落在固定端之后,无法向回反选。
+  Offset _dragPosition = Offset.zero;
+
+  /// 被拖端点所在行高。命中点 = _dragPosition 上移半行(行中心),
+  /// 对齐 SDK 的 `- Offset(0, lineHeight / 2)` 补偿;跨行时随 extent 刷新。
+  double _dragLineHeight = 0;
+
   /// 竖直滞后补偿(本帧 scroll delta)——滚动时 endpointAnchors 几何滞后一帧,
   /// _build 把手柄竖直坐标减去它 → 与内容同帧对齐,消滚动抖动。拖动/显示时归零。
   double _yComp = 0;
@@ -145,8 +155,11 @@ class SelectionHandlesController {
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onPanStart: (d) => _onDragStart(side, d.globalPosition),
-        onPanUpdate: (d) => _onDragUpdate(d.globalPosition),
+        onPanUpdate: (d) => _onDragUpdate(d.delta),
         onPanEnd: (_) => _onDragEnd(),
+        // PointerCancel(如系统手势/来电抢占)不走 onPanEnd —— 不收会导致
+        // 放大镜永久残留在 Overlay(对齐 SDK dispose 中 hideMagnifier 注释)。
+        onPanCancel: _onDragEnd,
         child: Center(
           child: SizedBox(
             width: size.width,
@@ -172,16 +185,33 @@ class SelectionHandlesController {
     _fixedAnchor = ends == null
         ? null
         : (side == _DragSide.start ? ends.visualEnd : ends.visualStart);
+    // 拖拽点初始化为**被拖端点的文本锚点**(非手指位置)——手指按在手柄图形上,
+    // 在文本行下方一整行,直接用手指坐标 hit-test 会命中下一行(对齐 SDK
+    // _handleSelectionEndHandleDragStart 用 selectionPoint.localPosition)。
+    final anchors = sel == null ? null : _exporter.endpointAnchors(sel);
+    if (anchors != null) {
+      _dragPosition =
+          side == _DragSide.start ? anchors.start : anchors.end;
+      _dragLineHeight =
+          side == _DragSide.start ? anchors.startLineHeight : anchors.endLineHeight;
+    } else {
+      _dragPosition = global;
+      _dragLineHeight = 0;
+    }
     _yComp = 0; // 拖动不是滚动,无滞后补偿
     HapticFeedback.selectionClick();
-    _magnifier.show(global);
+    _showMagnifierAtDragPosition();
     onDragStart?.call();
   }
 
-  void _onDragUpdate(Offset global) {
+  void _onDragUpdate(Offset delta) {
     final fixed = _fixedAnchor;
     if (_dragging == null || fixed == null) return;
-    final pos = _hit.positionAt(global);
+    // 累加手势 delta(对齐 SDK:dragPosition += details.delta),命中点上移
+    // 半行指向**行中心** → 拖到哪行选到哪行,且可越过固定端向回反选。
+    _dragPosition += delta;
+    final hitPoint = _dragPosition - Offset(0, _dragLineHeight / 2);
+    final pos = _hit.positionAt(hitPoint);
     if (pos == null) return;
 
     // 固定锚点作 base、被拖端 pos 作 extent。pos 越过 base(向回选)时
@@ -190,9 +220,25 @@ class SelectionHandlesController {
     controller.selection = DocumentSelection(base: fixed, extent: pos);
     // 跨到新位置才震动(不每帧震),对齐系统文本选区拖拽反馈。
     if (prevExtent != pos) HapticFeedback.selectionClick();
+    // 跨行后行高可能变(标题↔正文),按新 extent 刷新补偿量。
+    final caret = _hit.caretRectAt(pos);
+    if (caret != null && caret.height > 0) _dragLineHeight = caret.height;
     _yComp = 0; // 拖动改选区,几何当前,无需补偿
-    _magnifier.show(global);
+    _showMagnifierAtDragPosition(caretRect: caret);
     _entry?.markNeedsBuild();
+  }
+
+  /// 放大镜:X 跟拖拽点、Y 锁**被拖端所在行**(焦点指文字,不指手指/手柄)。
+  /// 对齐 SDK TextMagnifier/CupertinoTextMagnifier:焦点 Y 永远取
+  /// caretRect.center.dy(行中心),不用手势 Y。
+  void _showMagnifierAtDragPosition({Rect? caretRect}) {
+    final rect = caretRect ??
+        Rect.fromCenter(
+          center: _dragPosition - Offset(0, _dragLineHeight / 2),
+          width: 0,
+          height: _dragLineHeight,
+        );
+    _magnifier.show(gestureGlobal: _dragPosition, caretRect: rect);
   }
 
   void _onDragEnd() {

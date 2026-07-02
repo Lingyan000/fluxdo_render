@@ -5,6 +5,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kTouchSlop;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -231,6 +232,13 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     super.dispose();
   }
 
+  /// 触摸 outside 按下点(判"滚动 or 点击"):TapRegion 的 onTapOutside 在
+  /// **pointer-down** 即触发且不进手势竞技场 —— 移动端在选区外按下手指想滚动,
+  /// down 一落就清选区(未滚先清)。对齐系统行为(SelectableRegion 触摸清选区
+  /// 走 tap **up**):触摸设备改在 onTapUpOutside 清,且 down→up 位移 ≤
+  /// kTouchSlop 才算"点击"(超出 = 滚动/拖拽,不清)。鼠标保持 down 即清。
+  Offset? _touchOutsideDownPosition;
+
   @override
   Widget build(BuildContext context) {
     // TapRegion:点选区/toolbar(同 groupId)**之外**的任意处 → 清除选区。
@@ -239,8 +247,28 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     return _wrapKeyboard(
       TapRegion(
         groupId: widget.controller,
-        onTapOutside: (_) {
-          if (widget.controller.selection != null) {
+        onTapOutside: (event) {
+          if (widget.controller.selection == null) return;
+          if (event.kind == PointerDeviceKind.mouse ||
+              event.kind == PointerDeviceKind.trackpad) {
+            // 精确指针:按下即清(桌面习惯,与系统一致)。
+            widget.controller.clear();
+          } else {
+            // 触摸/触控笔:先记按下点,抬手再判(见 onTapUpOutside)。
+            _touchOutsideDownPosition = event.position;
+          }
+        },
+        onTapInside: (_) {
+          // down 落在区内 → 清掉上一次"down 在外、up 在内"残留的按下点,
+          // 防止它与后续某次 upOutside 误配对。
+          _touchOutsideDownPosition = null;
+        },
+        onTapUpOutside: (event) {
+          final down = _touchOutsideDownPosition;
+          _touchOutsideDownPosition = null;
+          if (down == null || widget.controller.selection == null) return;
+          // 位移在 slop 内 = 真·点击空白 → 清;超出 = 滚动/拖拽 → 保留选区。
+          if ((event.position - down).distance <= kTouchSlop) {
             widget.controller.clear();
           }
         },
