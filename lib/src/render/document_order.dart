@@ -13,10 +13,12 @@ library;
 
 import '../node/node.dart';
 
-/// 返回 `节点/ListItem → docOrder` 的 identity map。key 用 [identityHashCode]
-/// 语义(默认 Map 对自定义对象按 == ;BlockNode/ListItem 未重写 == ,即按身份)。
+/// 返回 `节点/ListItem → docOrder` 的 **identity map**(按对象身份,非 ==)。
+/// BlockNode/ListItem 均重写了值相等 == —— 用普通 Map 时,重复内容节点
+/// (如书单帖里两条一模一样的 li)会碰撞成同一条目、共享 docOrder,选区
+/// 范围判定随之跳项。必须 Map.identity()。
 Map<Object, int> assignDocumentOrder(List<BlockNode> nodes) {
-  final map = <Object, int>{};
+  final map = Map<Object, int>.identity();
   var n = 0;
 
   void visit(BlockNode node) {

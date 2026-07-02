@@ -74,7 +74,8 @@ class NodeFactory {
     Map<Object, int>? fallbackDocOrders,
   })  : _inlineFlattener = inlineFlattener ?? const InlineFlattener(),
         _docOrders = docOrders ?? const {},
-        _fallbackDocOrders = fallbackDocOrders ?? <Object, int>{};
+        // identity:节点/ListItem 是值相等对象,重复内容不得共享兜底序号
+        _fallbackDocOrders = fallbackDocOrders ?? Map<Object, int>.identity();
 
   final InlineFlattener _inlineFlattener;
 
