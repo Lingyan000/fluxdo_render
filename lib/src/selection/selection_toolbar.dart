@@ -24,7 +24,10 @@ class SelectionToolbar {
   });
 
   final BuildContext context;
-  final void Function(String plainText) onQuote;
+
+  /// 「引用」回调 —— 把选区纯文本交回主项目打开回复框。
+  /// null = 不显示该按钮(未登录等无法引用的场景,仅保留复制类按钮)。
+  final void Function(String plainText)? onQuote;
   final VoidCallback? onCopied;
 
   /// 「复制引用」回调 —— 把选区纯文本交回主项目拼 BBCode 进剪贴板。
@@ -165,10 +168,12 @@ class SelectionToolbar {
                   onCopyQuote!(data.plainText);
                   hide();
                 },
-          onQuote: () {
-            onQuote(data.plainText);
-            hide();
-          },
+          onQuote: onQuote == null
+              ? null
+              : () {
+                  onQuote!(data.plainText);
+                  hide();
+                },
         ),
       ),
     );
@@ -206,7 +211,7 @@ class _ToolbarBody extends StatelessWidget {
   final String quoteLabel;
   final VoidCallback onCopy;
   final VoidCallback? onCopyQuote;
-  final VoidCallback onQuote;
+  final VoidCallback? onQuote;
 
   @override
   Widget build(BuildContext context) {
@@ -222,6 +227,7 @@ class _ToolbarBody extends StatelessWidget {
         );
 
     final hasCopyQuote = onCopyQuote != null;
+    final hasQuote = onQuote != null;
     return Material(
       elevation: 4,
       borderRadius: BorderRadius.circular(8),
@@ -232,13 +238,18 @@ class _ToolbarBody extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _btn(context, copyLabel, onCopy, scheme, leftR),
-          divider(),
+          // 复制按钮永远在:是唯一按钮时左右圆角都要
+          _btn(context, copyLabel, onCopy, scheme,
+              hasCopyQuote || hasQuote ? leftR : BorderRadius.circular(8)),
           if (hasCopyQuote) ...[
-            _btn(context, copyQuoteLabel, onCopyQuote!, scheme, BorderRadius.zero),
             divider(),
+            _btn(context, copyQuoteLabel, onCopyQuote!, scheme,
+                hasQuote ? BorderRadius.zero : rightR),
           ],
-          _btn(context, quoteLabel, onQuote, scheme, rightR),
+          if (hasQuote) ...[
+            divider(),
+            _btn(context, quoteLabel, onQuote!, scheme, rightR),
+          ],
         ],
       ),
     );

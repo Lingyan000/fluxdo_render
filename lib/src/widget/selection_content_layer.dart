@@ -157,15 +157,18 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
   }
 
   /// 构建 toolbar(复制 / 复制引用 / 引用)。两处显示共用,避免回调漂移。
+  /// 引用/复制引用回调未注入时(未登录等)对应按钮隐藏,仅保留「复制」。
   SelectionToolbar _buildToolbar() {
     return SelectionToolbar(
       context: context,
       // 与内容同 groupId:点 toolbar 不触发 onTapOutside 清除。
       tapRegionGroupId: widget.controller,
-      onQuote: (plainText) {
-        widget.onQuoteRequest?.call(plainText);
-        widget.controller.clear();
-      },
+      onQuote: widget.onQuoteRequest == null
+          ? null
+          : (plainText) {
+              widget.onQuoteRequest!.call(plainText);
+              widget.controller.clear();
+            },
       onCopyQuote: widget.onCopyQuoteRequest == null
           ? null
           : (plainText) {
