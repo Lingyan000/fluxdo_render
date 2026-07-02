@@ -1833,10 +1833,9 @@ class DefinitionItem {
 /// 定义列表 — `<dl>`,含若干 `<dt>`/`<dd>` 配对。
 ///
 /// 对应 HTML `<dl>...</dl>`。Discourse cooked 里 markdown 不产 dl,但富文本/
-/// HTML 帖可含。legacy 走 fwfh 默认(浏览器 UA stylesheet):
-///   dl: margin 1em 0;dt: 块级、字重正常(不加粗);dd: margin-inline-start 40px。
-/// 新引擎对齐:外层上下 8(与 ListNode 同档,legacy html_chunker 也把 dl 归 list);
-/// dt 常规字重;dd 左缩进 [kDefinitionIndent]=40。
+/// HTML 帖可含。样式对齐 Discourse `.cooked` CSS:
+///   dl: margin 1em 0;dt: 块级、字重正常(不加粗);dd: margin 1em 0 1em 1.25em。
+/// 新引擎:外层上下 8(与 ListNode 同档);dt 常规字重;dd 左缩进 1.25em。
 @immutable
 class DefinitionListNode extends BlockNode {
   const DefinitionListNode({

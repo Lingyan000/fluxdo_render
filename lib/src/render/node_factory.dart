@@ -28,6 +28,7 @@ import 'video_handler.dart';
 import 'inline_span_text.dart';
 import 'lazy_video_handler.dart';
 import 'link_handler.dart';
+import 'list_item_layout.dart';
 import 'local_date_handler.dart';
 import 'math_handler.dart';
 import 'mention_handler.dart';
@@ -397,70 +398,44 @@ class NodeFactory {
 
   /// 列表渲染 — `<ul>` / `<ol>`,可递归嵌套子 list。
   ///
-  /// 样式对齐 legacy(DiscourseHtmlContentWidget customStylesBuilder):
-  ///   ul/ol: padding-left 20, margin 上下 8
-  ///   li:    margin 上下 4, line-height 1.5
+  /// 布局复刻浏览器 `list-style-position: outside`(经 [HtmlListItem],
+  /// 移植自 fwfh):marker 悬挂在 content 左缘外、右缘对齐、基线对齐、
+  /// 自然宽度永不换行 → `9.`/`10.`/`100.` 点号竖直对齐,位数多时向左延伸。
+  ///
+  /// 缩进对齐 Discourse `.cooked` CSS:
+  ///   ul/ol: `margin: 1em 0 1em 1.25em; padding-inline-start: 1.25em`
+  ///   → 每层内容左缘 = 2.5em 累进;marker 悬挂在 padding 区内。
+  ///
   /// 无序 marker 形状(按嵌套 depth,对齐浏览器 CSS list-style 级联):
   /// depth0 实心圆 disc / depth1 空心圆 circle / depth≥2 实心方块 square。
-  /// **绘制**而非字体字形 → 清晰、跨字体一致、垂直对齐稳定(字形 ◦ ▪ 在不同
-  /// 字体里大小/基线漂移,显丑)。key 供测试辨识层级。
-  static Widget _markerShape(int depth, Color color) {
-    const sz = 6.0;
-    return switch (depth) {
-      0 => Container(
-          key: const ValueKey('ul_marker_disc'),
-          width: sz,
-          height: sz,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-      1 => Container(
-          key: const ValueKey('ul_marker_circle'),
-          width: sz,
-          height: sz,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: color, width: 1.2),
-          ),
-        ),
-      _ => Container(
-          key: const ValueKey('ul_marker_square'),
-          width: sz,
-          height: sz,
-          color: color,
-        ),
-    };
-  }
+  /// **绘制**而非字体字形([ListMarkerDot],自带文本基线)→ 清晰、跨字体
+  /// 一致、垂直对齐稳定。key 供测试辨识层级。
+  static Key _ulMarkerKey(int depth) => switch (depth) {
+        0 => const ValueKey('ul_marker_disc'),
+        1 => const ValueKey('ul_marker_circle'),
+        _ => const ValueKey('ul_marker_square'),
+      };
 
-  /// 构建一个 marker:有序 = 等宽数字 Text;无序 = 绘制形状,垂直居中到首行
-  /// 列表每层缩进步进(内容相对父级的左缩进,≈ 网页 `padding-inline-start`
-  /// 1.5em)。marker **悬挂在该缩进内**(不额外叠加)→ 每层内容缩进一致,
-  /// 对齐浏览器/legacy(此前 = 20 + marker 宽 ≈ 36~44 显得过宽)。
-  static const double _kIndentStep = 24.0;
-
-  /// marker 占位宽(= 悬挂槽宽)。有序留够 "10." 两位数;无序窄一些。
-  static double _markerWidth(bool ordered) => ordered ? 22.0 : 16.0;
-
-  /// [lineHeight](用 Row.start 时与内容首行对齐)。
-  static Widget _markerBox(
+  /// 构建悬挂 marker:有序 = 等宽数字 Text(nowrap,自然宽);无序 = 自绘形状。
+  static Widget _buildMarker(
     ListNode list,
     int index,
     TextStyle textStyle,
     Color color,
-    double lineHeight,
   ) {
     if (list.ordered) {
-      return SizedBox(
-        width: _markerWidth(true),
-        child: Text('${list.start + index}.', style: textStyle),
+      return Text(
+        '${list.start + index}.',
+        style: textStyle,
+        maxLines: 1,
+        softWrap: false,
       );
     }
-    return SizedBox(
-      width: _markerWidth(false),
-      height: lineHeight,
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: _markerShape(list.depth, color),
-      ),
+    return ListMarkerDot(
+      key: _ulMarkerKey(list.depth),
+      depth: list.depth,
+      color: color,
+      textStyle: textStyle,
     );
   }
 
@@ -468,22 +443,32 @@ class NodeFactory {
   /// 避免 "1." 比 "10." 窄导致对齐错位。
   ///
   /// 嵌套子列表用 `ListItem.children` 持有,渲染时递归 buildList。
-  /// **嵌套层(depth > 0)跳过 outer vertical padding**:CSS 相邻 margin
-  /// 折叠取大,Flutter Column padding 累加 —— 不跳过会出现 8(嵌套上)
-  /// + 4(父 li 下)的额外空白,视觉上像多了一行。
-  Widget buildList(BuildContext context, ListNode node,
-      {bool suppressIndent = false}) {
+  /// **嵌套层(depth > 0)跳过 outer vertical margin**:CSS 相邻 margin
+  /// 折叠取大,Flutter Column padding 累加 —— 不跳过会出现嵌套上 + 父 li 下
+  /// 的额外空白,视觉上像多了一行。
+  Widget buildList(BuildContext context, ListNode node) {
     final theme = Theme.of(context);
     final baseStyle =
         baseTextStyle ?? theme.textTheme.bodyMedium ?? const TextStyle();
+    final em = baseStyle.fontSize ?? 14;
+    // Discourse .cooked CSS:
+    //   ul/ol { margin: 1em 0 1em 1.25em; padding: 0 }
+    //   .cooked ul/ol { padding-inline-start: 1.25em }
+    // margin-left(1.25em) + padding-inline-start(1.25em) 合并到这一层
+    // Padding → 每层内容左缘 2.5em 累进;marker 悬挂在其中(HtmlListItem
+    // 负偏移绘制,落在 padding 区,不额外占位)。
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: node.depth == 0 ? 8 : 0),
+      padding: EdgeInsets.fromLTRB(
+        em * 2.5,
+        node.depth == 0 ? em : 0,
+        0,
+        node.depth == 0 ? em : 0,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (int i = 0; i < node.items.length; i++)
-            _buildListItem(context, node, i, baseStyle,
-                suppressIndent: suppressIndent),
+            _buildListItem(context, node, i, baseStyle),
         ],
       ),
     );
@@ -493,9 +478,8 @@ class NodeFactory {
     BuildContext context,
     ListNode list,
     int index,
-    TextStyle baseStyle, {
-    bool suppressIndent = false,
-  }) {
+    TextStyle baseStyle,
+  ) {
     final item = list.items[index];
     final markerStyle = baseStyle.copyWith(
       height: 1.5,
@@ -505,48 +489,30 @@ class NodeFactory {
     );
     final markerColor =
         markerStyle.color ?? Theme.of(context).colorScheme.onSurface;
-    final em = baseStyle.fontSize ?? 14;
-    final lineHeight = em * 1.5;
-    // 本项左缩进 = 每层步进 − marker 槽宽 → marker 悬挂在缩进内,内容落在
-    // `_kIndentStep` 处(每层一致,对齐网页)。suppressIndent(包裹 li 的首个
-    // 子列表)= 0,使其 marker 紧跟外层 marker(如 "○ 1." 同排紧凑)。
-    final leftPad =
-        suppressIndent ? 0.0 : (_kIndentStep - _markerWidth(list.ordered));
+    final textDirection = Directionality.of(context);
 
     // 块级形态(li 含 h4/p/pre/blockquote 等):marker + Column(块级子,走
     // compact factory 消除多余 margin)。如 FAQ 的 Q(h4)/A(p)分行。
+    // marker 与首块首行基线对齐由 HtmlListItem 完成(defaultComputeDistance
+    // ToFirstActualBaseline 沿 Column 首子取基线,heading 上 margin 自然计入)。
     final blocks = item.blocks;
     if (blocks != null) {
-      // marker 必须对齐内容首行(对齐 fwfh 原生 <li> 行为)。首块若是 heading,
-      // 它带 `em * _headingMargin` 的上 padding,marker 放 Row 顶部会浮在 heading
-      // 文字之上 —— 给 marker 加等量上 padding,并按首块行高垂直居中。
       final first = blocks.first;
       final isHead = first is HeadingNode;
-      final firstTopInset =
-          isHead ? em * _headingMargin[first.level - 1] : 0.0;
-      final firstLineHeight =
-          isHead ? em * _headingScale[first.level - 1] * 1.2 : em * 1.5;
       final blockMarkerStyle =
           markerStyle.copyWith(height: isHead ? 1.2 : 1.5);
       return Padding(
-        padding: EdgeInsets.fromLTRB(leftPad, 4, 0, 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: EdgeInsets.only(top: firstTopInset),
-              child: _markerBox(
-                  list, index, blockMarkerStyle, markerColor, firstLineHeight),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final b in blocks) _compactCopy().build(context, b),
-                ],
-              ),
-            ),
-          ],
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: HtmlListItem(
+          textDirection: textDirection,
+          marker:
+              _buildMarker(list, index, blockMarkerStyle, markerColor),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final b in blocks) _compactCopy().build(context, b),
+            ],
+          ),
         ),
       );
     }
@@ -554,65 +520,50 @@ class NodeFactory {
     final hasChildren = item.children != null;
 
     // li 仅作嵌套列表包裹(无直接文本,如 <li><ol>…</ol><ul>…</ul></li>):
-    // marker 与「嵌套子列表首行」同排(对齐浏览器 "○ 1." 同行),而非空 marker
-    // 独占一行 / 完全丢 marker。marker 加 top:4 抵消嵌套首项的 top padding 以对齐。
+    // marker 悬挂于嵌套子列表整体左缘外,与其首行基线对齐(浏览器行为:
+    // 外层 marker 与嵌套首项 marker/文本同一行)。
     if (item.inlines.isEmpty && hasChildren) {
       final children = item.children!;
       return Padding(
-        padding: EdgeInsets.fromLTRB(leftPad, 4, 0, 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: _markerBox(list, index, markerStyle, markerColor, lineHeight),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 第一个子列表与外层 marker 同排 → 去掉其首层缩进("○ 1." 紧凑);
-                  // 其余子列表正常缩进(作为子项排在下方)。
-                  buildList(context, children.first, suppressIndent: true),
-                  for (final sub in children.skip(1)) buildList(context, sub),
-                ],
-              ),
-            ),
-          ],
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: HtmlListItem(
+          textDirection: textDirection,
+          marker: _buildMarker(list, index, markerStyle, markerColor),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final sub in children) buildList(context, sub),
+            ],
+          ),
         ),
       );
     }
 
     return Padding(
       // 有嵌套子 list 时取消底部 padding,避免 inline 行和子 list 之间空一截
-      padding: EdgeInsets.fromLTRB(leftPad, 4, 0, hasChildren ? 0 : 4),
+      padding: EdgeInsets.fromLTRB(0, 4, 0, hasChildren ? 0 : 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _markerBox(list, index, markerStyle, markerColor, lineHeight),
-              Expanded(
-                child: InlineSpanText(
-                  inlines: item.inlines,
-                  baseStyle: baseStyle.copyWith(height: 1.5),
-                  documentOrder: docOrderOf(item),
-                  chunkIndex: chunkIndex,
-                  flattener: _inlineFlattener,
-                  linkHandler: linkHandler,
-                  onDownloadAttachment: onDownloadAttachment,
-                  emojiImageBuilder: emojiImageBuilder,
-                  mentionTapHandler: mentionTapHandler,
-                  imageContentBuilder: imageContentBuilder,
-                  footnoteTapHandler: footnoteTapHandler,
-                  localDateBuilder: localDateBuilder,
-
-                  mathInlineBuilder: mathInlineBuilder,
-                  totalImagesInPost: totalImagesInPost,
-                ),
-              ),
-            ],
+          HtmlListItem(
+            textDirection: textDirection,
+            marker: _buildMarker(list, index, markerStyle, markerColor),
+            child: InlineSpanText(
+              inlines: item.inlines,
+              baseStyle: baseStyle.copyWith(height: 1.5),
+              documentOrder: docOrderOf(item),
+              chunkIndex: chunkIndex,
+              flattener: _inlineFlattener,
+              linkHandler: linkHandler,
+              onDownloadAttachment: onDownloadAttachment,
+              emojiImageBuilder: emojiImageBuilder,
+              mentionTapHandler: mentionTapHandler,
+              imageContentBuilder: imageContentBuilder,
+              footnoteTapHandler: footnoteTapHandler,
+              localDateBuilder: localDateBuilder,
+              mathInlineBuilder: mathInlineBuilder,
+              totalImagesInPost: totalImagesInPost,
+            ),
           ),
           // 嵌套子 list 递归渲染
           if (hasChildren)
@@ -622,18 +573,15 @@ class NodeFactory {
     );
   }
 
-  /// 定义列表渲染 — `<dl>`:dt(术语,常规字重)+ dd(释义,左缩进 40)。
+  /// 定义列表渲染 — `<dl>`:dt(术语,常规字重)+ dd(释义,左缩进 1.25em)。
   ///
-  /// 样式对齐 legacy(fwfh 默认 / 浏览器 UA stylesheet):
-  ///   dl: 上下外边距(此处 8,与 ListNode 同档 —— legacy html_chunker 把 dl
-  ///       归 HtmlChunkType.list;fwfh 默认 dl margin 1em 与新引擎其他列表 8px
-  ///       同量级,统一取 8 视觉一致)
+  /// 样式对齐 Discourse `.cooked` CSS(与 ul/ol 同一体系):
+  ///   dl: 上下外边距(此处 8,与旧档一致)
   ///   dt: 块级、字重正常(**不加粗**,对齐浏览器默认 dt)
-  ///   dd: 块级、左缩进 margin-inline-start 40
+  ///   dd: 块级、`margin: 1em 0 1em 1.25em`(Discourse 覆盖了 UA 默认 40px;
+  ///       dd 无 padding-inline-start,故缩进 = 1.25em,比 ul/ol 的 2.5em 浅)
   /// dd 内块级子节点走 _compactCopy()(消除嵌套 paragraph 的多余上下 margin,
   /// 与 li 块级形态 / blockquote 子节点一致)。
-  static const double kDefinitionIndent = 40.0;
-
   Widget buildDefinitionList(BuildContext context, DefinitionListNode node) {
     final theme = Theme.of(context);
     final baseStyle =
@@ -667,10 +615,11 @@ class NodeFactory {
                   totalImagesInPost: totalImagesInPost,
                 ),
               ),
-            // dd 释义:左缩进 40,块级子节点走 compact factory。
+            // dd 释义:左缩进 1.25em(Discourse dd margin-left),块级子节点走
+            // compact factory。
             for (final dd in item.definitions)
               Padding(
-                padding: const EdgeInsets.only(left: kDefinitionIndent),
+                padding: EdgeInsets.only(left: em * 1.25),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

@@ -1,4 +1,4 @@
-/// 验证 DefinitionListNode 渲染:dt 文本可见(常规字重)+ dd 左缩进 40。
+/// 验证 DefinitionListNode 渲染:dt 文本可见(常规字重)+ dd 左缩进 1.25em。
 library;
 
 import 'package:flutter/material.dart';
@@ -40,7 +40,8 @@ void main() {
     expect(find.text('释义内容'), findsOneWidget);
   });
 
-  testWidgets('dd 左缩进 40(存在 left padding>=40 的 Padding)', (tester) async {
+  testWidgets('dd 左缩进 1.25em(存在 left == em*1.25 的 Padding)',
+      (tester) async {
     await pump(
       tester,
       const DefinitionListNode(
@@ -57,12 +58,16 @@ void main() {
         ],
       ),
     );
-    // 至少有一个 Padding 的 left == 40(dd 缩进)。
+    // 至少有一个 Padding 的 left == em*1.25(dd 缩进,对齐 Discourse
+    // `dd { margin-left: 1.25em }`)。em = bodyMedium fontSize。
+    final ctx = tester.element(find.text('D'));
+    final em = Theme.of(ctx).textTheme.bodyMedium?.fontSize ?? 14;
+    final expected = em * 1.25;
     final paddings = tester.widgetList<Padding>(find.byType(Padding));
     final hasIndent = paddings.any((p) {
       final pad = p.padding;
-      return pad is EdgeInsets && pad.left == 40.0;
+      return pad is EdgeInsets && pad.left == expected;
     });
-    expect(hasIndent, isTrue, reason: 'dd 应有 left:40 缩进对齐浏览器默认');
+    expect(hasIndent, isTrue, reason: 'dd 应有 left:1.25em 缩进对齐 Discourse');
   });
 }
