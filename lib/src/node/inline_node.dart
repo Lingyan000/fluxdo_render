@@ -460,7 +460,7 @@ class ImageRun extends InlineNode {
 /// - 揭示后:正常显示子节点(可再点击隐藏)。
 /// - 状态由 _SpoilerInlineWidget 内部 StatefulWidget 管,**不跨同份 cookedHtml 同步**。
 ///
-/// 粒子系统移植自 legacy `SpoilerParticleSystem`(见 render/spoiler_particles.dart)。
+/// 粒子由 GPU fragment shader 程序化生成(见 render/spoiler_effect.dart)。
 @immutable
 class SpoilerRun extends InlineNode {
   const SpoilerRun({required this.children});

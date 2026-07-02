@@ -1,0 +1,109 @@
+/// Spoiler 遮罩效果 —— GPU fragment shader 程序化粒子(参考 Telegram
+/// 新版做法):粒子完全在 `shaders/spoiler.frag` 里按 hash(cell, time)
+/// 生成,CPU 每帧只更新一个 time uniform + 一次 drawRect,开销与
+/// spoiler 数量 / 面积基本无关(替代旧 CPU 粒子系统:每实例每帧模拟
+/// 120~900 个粒子对象 + 分桶拷贝 Float32List,多实例同屏线性叠加卡顿)。
+///
+/// 未揭示时不透明背景**完全遮盖**内容 + 上层粒子尘埃;shader 未加载/
+/// 加载失败时天然退化为纯静态遮罩(只有背景,无粒子)。
+library;
+
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+/// spoiler shader 全局加载器(进程内只 fromAsset 一次,所有实例共享)。
+class SpoilerShader {
+  SpoilerShader._();
+
+  static ui.FragmentProgram? _program;
+  static Future<void>? _loading;
+
+  /// 已加载的 program(未加载完成/失败时为 null → painter 只画静态背景)。
+  static ui.FragmentProgram? get program => _program;
+
+  /// 确保 shader 已加载(幂等;失败静默,遮罩退化为静态背景)。
+  ///
+  /// asset key 双回退:被主项目依赖时是 `packages/fluxdo_render/...`,
+  /// 包自身作为 root(单测 / example 直跑)时不带前缀。
+  static Future<void> ensureLoaded() {
+    if (_program != null) return Future.value();
+    return _loading ??= _load();
+  }
+
+  static Future<void> _load() async {
+    for (final key in const [
+      'packages/fluxdo_render/shaders/spoiler.frag',
+      'shaders/spoiler.frag',
+    ]) {
+      try {
+        _program = await ui.FragmentProgram.fromAsset(key);
+        return;
+      } catch (_) {
+        // 换下一个 key。
+      }
+    }
+    debugPrint('[SpoilerShader] 加载失败,退化为静态遮罩');
+    _loading = null;
+  }
+}
+
+/// 遮罩绘制器:不透明背景填满 + shader 粒子尘埃层。
+///
+/// [time] 同时作为 repaint Listenable —— Ticker 只更新 time.value,
+/// 不 setState 重建 widget 子树。
+///
+/// [shader] 由 widget State 持有并 dispose(painter 每次 rebuild 会重建,
+/// 不能拥有 shader 生命周期);为 null(未加载完成/失败)时只画静态背景。
+class SpoilerEffectPainter extends CustomPainter {
+  SpoilerEffectPainter({
+    required this.time,
+    required this.seed,
+    required this.shader,
+    required this.isDark,
+    required this.backgroundColor,
+    this.borderRadius = 4.0,
+  }) : super(repaint: time);
+
+  final ValueListenable<double> time;
+  final double seed;
+  final ui.FragmentShader? shader;
+  final bool isDark;
+  final Color backgroundColor;
+  final double borderRadius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
+
+    canvas.save();
+    canvas.clipRRect(rrect);
+    // 不透明背景完全遮盖内容(含 code 背景等)。
+    canvas.drawRRect(rrect, Paint()..color = backgroundColor);
+
+    final s = shader;
+    if (s != null && size.width > 0 && size.height > 0) {
+      final baseColor = isDark ? Colors.white : Colors.grey.shade800;
+      // setFloat 只改 uniform,零分配。
+      s
+        ..setFloat(0, time.value) // u_time
+        ..setFloat(1, seed) // u_seed
+        ..setFloat(2, baseColor.r) // u_color
+        ..setFloat(3, baseColor.g)
+        ..setFloat(4, baseColor.b)
+        ..setFloat(5, 1.0);
+      canvas.drawRect(rect, Paint()..shader = s);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(SpoilerEffectPainter old) =>
+      old.isDark != isDark ||
+      old.backgroundColor != backgroundColor ||
+      old.seed != seed ||
+      old.shader != shader ||
+      old.time != time;
+}

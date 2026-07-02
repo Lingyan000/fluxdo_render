@@ -23,6 +23,9 @@
 
 library;
 
+import 'dart:math' show Random;
+import 'dart:ui' as ui show FragmentShader;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
@@ -36,7 +39,7 @@ import '../render/link_handler.dart';
 import '../render/local_date_handler.dart';
 import '../render/math_handler.dart';
 import '../render/mention_handler.dart';
-import '../render/spoiler_particles.dart';
+import '../render/spoiler_effect.dart';
 import '../selection/projection.dart';
 import '../selection/projection_builder.dart';
 
@@ -870,10 +873,12 @@ class _SpoilerInlineWidget extends StatefulWidget {
 
 class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     with SingleTickerProviderStateMixin {
-  final SpoilerParticleSystem _particles = SpoilerParticleSystem();
+  // shader 时间源 —— Ticker 只更新 value(painter 以其为 repaint
+  // Listenable),不 setState 重建 widget 子树。
+  final ValueNotifier<double> _time = ValueNotifier(0);
+  final double _seed = Random().nextDouble() * 100;
+  ui.FragmentShader? _shader;
   Ticker? _ticker;
-  Size? _size;
-  Duration _lastTime = Duration.zero;
   bool _revealed = false;
   bool _reduceMotion = false;
 
@@ -881,6 +886,18 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick);
+    _initShader();
+  }
+
+  void _initShader() {
+    if (SpoilerShader.program != null) {
+      _shader = SpoilerShader.program!.fragmentShader();
+      return;
+    }
+    SpoilerShader.ensureLoaded().then((_) {
+      if (!mounted || SpoilerShader.program == null) return;
+      setState(() => _shader = SpoilerShader.program!.fragmentShader());
+    });
   }
 
   @override
@@ -895,7 +912,6 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     if (t == null) return;
     final shouldRun = !_revealed && !_reduceMotion;
     if (shouldRun && !t.isActive) {
-      _lastTime = Duration.zero;
       t.start();
     } else if (!shouldRun && t.isActive) {
       t.stop();
@@ -903,12 +919,8 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
   }
 
   void _onTick(Duration elapsed) {
-    if (!mounted || _revealed || _size == null) return;
-    final dtMs = (elapsed - _lastTime).inMilliseconds.toDouble();
-    _lastTime = elapsed;
-    if (dtMs <= 0 || dtMs > 100) return;
-    // 不 setState:粒子系统是 repaint Listenable,只重绘 CustomPaint。
-    _particles.update(dtMs);
+    if (!mounted || _revealed) return;
+    _time.value = elapsed.inMicroseconds / 1e6;
   }
 
   void _reveal() {
@@ -919,8 +931,6 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
 
   void _hide() {
     if (!_revealed) return;
-    _particles.clear();
-    _size = null;
     setState(() => _revealed = false);
     _syncTicker();
   }
@@ -928,7 +938,8 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
   @override
   void dispose() {
     _ticker?.dispose();
-    _particles.dispose();
+    _shader?.dispose();
+    _time.dispose();
     super.dispose();
   }
 
@@ -941,7 +952,7 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
       // 揭示态与未揭示态**同尺寸**(都只内容,无额外 padding/decoration)→ 不抖动。
       return GestureDetector(onTap: _hide, child: richText);
     }
-    // 遮蔽态:文字占布局(Opacity 0)+ 上层遮罩(粒子云 / reduce-motion 静态块),点击散开。
+    // 遮蔽态:文字占布局(Opacity 0)+ 上层遮罩(shader 粒子云 / reduce-motion 静态块),点击散开。
     final isDark = theme.brightness == Brightness.dark;
     final bg = theme.scaffoldBackgroundColor;
     return GestureDetector(
@@ -957,29 +968,17 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
                       borderRadius: BorderRadius.circular(3),
                     ),
                   )
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      final size =
-                          Size(constraints.maxWidth, constraints.maxHeight);
-                      if (_size != size) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted && !_revealed) {
-                            _size = size;
-                            _particles.initForSize(size);
-                          }
-                        });
-                      }
-                      return RepaintBoundary(
-                        child: CustomPaint(
-                          painter: SpoilerParticlePainter(
-                            system: _particles,
-                            isDark: isDark,
-                            backgroundColor: bg,
-                            borderRadius: 3,
-                          ),
-                        ),
-                      );
-                    },
+                : RepaintBoundary(
+                    child: CustomPaint(
+                      painter: SpoilerEffectPainter(
+                        time: _time,
+                        seed: _seed,
+                        shader: _shader,
+                        isDark: isDark,
+                        backgroundColor: bg,
+                        borderRadius: 3,
+                      ),
+                    ),
                   ),
           ),
         ],
