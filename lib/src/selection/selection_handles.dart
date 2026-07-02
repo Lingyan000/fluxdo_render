@@ -17,6 +17,7 @@ import 'hit_tester.dart';
 import 'selection_exporter.dart';
 import 'selection_geometry.dart';
 import 'selection_magnifier.dart';
+import 'selection_range.dart';
 import 'selection_registry.dart';
 
 class SelectionHandlesController {
@@ -61,6 +62,10 @@ class SelectionHandlesController {
   /// 对齐 SDK 的 `- Offset(0, lineHeight / 2)` 补偿;跨行时随 extent 刷新。
   double _dragLineHeight = 0;
 
+  /// 上一帧成功计算的端点锚。拖动中几何瞬时不可得时兜底(见 [_build]),
+  /// 防止把正在拖拽的手柄摘树。
+  SelectionEndpoints? _lastBuiltAnchors;
+
   /// 竖直滞后补偿(本帧 scroll delta)——滚动时 endpointAnchors 几何滞后一帧,
   /// _build 把手柄竖直坐标减去它 → 与内容同帧对齐,消滚动抖动。拖动/显示时归零。
   double _yComp = 0;
@@ -94,13 +99,25 @@ class SelectionHandlesController {
     _entry = null;
     _dragging = null;
     _fixedAnchor = null;
+    _lastBuiltAnchors = null;
   }
 
   Widget _build(BuildContext ctx) {
     final sel = controller.selection;
-    if (sel == null || sel.isCollapsed) return const SizedBox.shrink();
-    final anchors = _exporter.endpointAnchors(sel);
-    if (anchors == null) return const SizedBox.shrink();
+    var anchors =
+        (sel == null || sel.isCollapsed) ? null : _exporter.endpointAnchors(sel);
+    if (anchors == null) {
+      // 拖动中几何瞬时不可得(两端重合 collapsed / 端点块离屏)→ 沿用上一帧
+      // 锚点,**绝不返回 shrink 摘树**:摘树会 dispose 正在拖拽的
+      // GestureDetector,onPanEnd/onPanCancel 都不会再来 → 拖拽死亡 +
+      // 放大镜永久残留(SDK 手柄 overlay 拖动期同样常驻,collapsed 只换类型)。
+      if (_dragging == null || _lastBuiltAnchors == null) {
+        return const SizedBox.shrink();
+      }
+      anchors = _lastBuiltAnchors!;
+    } else {
+      _lastBuiltAnchors = anchors;
+    }
 
     final controls = Theme.of(context).platform == TargetPlatform.iOS
         ? cupertinoTextSelectionControls
@@ -214,10 +231,20 @@ class SelectionHandlesController {
     final pos = _hit.positionAt(hitPoint);
     if (pos == null) return;
 
+    // 拖到与固定端**重合**(collapsed)或相邻块边界零宽 → 跳过本帧,选区保持
+    // ≥1 字符(对齐系统手柄不可折叠行为)。若放行空选区,_build 无锚可用,
+    // 且松手后会残留一个"看不见的选区"。放大镜照常跟随。
+    final candidate = DocumentSelection(base: fixed, extent: pos);
+    if (candidate.isCollapsed ||
+        expandSelection(controller.registry, candidate).isEmpty) {
+      _showMagnifierAtDragPosition();
+      return;
+    }
+
     // 固定锚点作 base、被拖端 pos 作 extent。pos 越过 base(向回选)时
     // DocumentSelection 自然反向,下次 build 的 orderedEndpoints 归一视觉序。
     final prevExtent = controller.selection?.extent;
-    controller.selection = DocumentSelection(base: fixed, extent: pos);
+    controller.selection = candidate;
     // 跨到新位置才震动(不每帧震),对齐系统文本选区拖拽反馈。
     if (prevExtent != pos) HapticFeedback.selectionClick();
     // 跨行后行高可能变(标题↔正文),按新 extent 刷新补偿量。
