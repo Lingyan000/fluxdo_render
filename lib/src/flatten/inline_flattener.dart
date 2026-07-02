@@ -873,12 +873,17 @@ class _SpoilerInlineWidget extends StatefulWidget {
 
 class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     with SingleTickerProviderStateMixin {
+  // 尘埃闪烁无需满帧率;降更新率直接省 UI/raster 开销(Skia 后端间隔期
+  // 还能复用 RepaintBoundary 缓存层)。
+  static const Duration _tickInterval = Duration(milliseconds: 33);
+
   // shader 时间源 —— Ticker 只更新 value(painter 以其为 repaint
   // Listenable),不 setState 重建 widget 子树。
   final ValueNotifier<double> _time = ValueNotifier(0);
   final double _seed = Random().nextDouble() * 100;
   ui.FragmentShader? _shader;
   Ticker? _ticker;
+  Duration _lastTick = Duration.zero;
   bool _revealed = false;
   bool _reduceMotion = false;
 
@@ -912,6 +917,7 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     if (t == null) return;
     final shouldRun = !_revealed && !_reduceMotion;
     if (shouldRun && !t.isActive) {
+      _lastTick = Duration.zero;
       t.start();
     } else if (!shouldRun && t.isActive) {
       t.stop();
@@ -920,6 +926,8 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
 
   void _onTick(Duration elapsed) {
     if (!mounted || _revealed) return;
+    if (elapsed - _lastTick < _tickInterval) return; // ~30fps 节流
+    _lastTick = elapsed;
     _time.value = elapsed.inMicroseconds / 1e6;
   }
 

@@ -1,11 +1,15 @@
 /// Spoiler 遮罩效果 —— GPU fragment shader 程序化粒子(参考 Telegram
 /// 新版做法):粒子完全在 `shaders/spoiler.frag` 里按 hash(cell, time)
-/// 生成,CPU 每帧只更新一个 time uniform + 一次 drawRect,开销与
-/// spoiler 数量 / 面积基本无关(替代旧 CPU 粒子系统:每实例每帧模拟
-/// 120~900 个粒子对象 + 分桶拷贝 Float32List,多实例同屏线性叠加卡顿)。
+/// 生成,CPU 侧每帧只更新一个 time uniform + 一次 drawRect(替代旧 CPU
+/// 粒子系统:每实例每帧模拟 120~900 个粒子对象 + 分桶拷贝 Float32List,
+/// 多实例同屏线性叠加卡顿)。
 ///
-/// 未揭示时不透明背景**完全遮盖**内容 + 上层粒子尘埃;shader 未加载/
-/// 加载失败时天然退化为纯静态遮罩(只有背景,无粒子)。
+/// GPU 侧成本 ∝ 可见面积 × 每像素 ops,且 Impeller 无 raster cache、
+/// 可见区域每帧重执行 shader —— 所以 .frag 必须保持每像素几十 ops 量级
+/// (见 frag 头注释),widget 侧动画更新率压到 ~30fps。
+///
+/// 未揭示时 shader 输出不透明色(背景并入)**完全遮盖**内容;shader
+/// 未加载/加载失败时退化为纯色静态遮罩。
 library;
 
 import 'dart:ui' as ui;
@@ -80,12 +84,10 @@ class SpoilerEffectPainter extends CustomPainter {
 
     canvas.save();
     canvas.clipRRect(rrect);
-    // 不透明背景完全遮盖内容(含 code 背景等)。
-    canvas.drawRRect(rrect, Paint()..color = backgroundColor);
-
     final s = shader;
     if (s != null && size.width > 0 && size.height > 0) {
       final baseColor = isDark ? Colors.white : Colors.grey.shade800;
+      // shader 输出不透明色(背景已并入)→ 单次绘制、无半透明混合层;
       // setFloat 只改 uniform,零分配。
       s
         ..setFloat(0, time.value) // u_time
@@ -93,8 +95,15 @@ class SpoilerEffectPainter extends CustomPainter {
         ..setFloat(2, baseColor.r) // u_color
         ..setFloat(3, baseColor.g)
         ..setFloat(4, baseColor.b)
-        ..setFloat(5, 1.0);
+        ..setFloat(5, 1.0)
+        ..setFloat(6, backgroundColor.r) // u_bg
+        ..setFloat(7, backgroundColor.g)
+        ..setFloat(8, backgroundColor.b)
+        ..setFloat(9, 1.0);
       canvas.drawRect(rect, Paint()..shader = s);
+    } else {
+      // shader 未就绪/加载失败:纯色静态遮罩,内容照样被完全遮盖。
+      canvas.drawRRect(rrect, Paint()..color = backgroundColor);
     }
     canvas.restore();
   }

@@ -1,20 +1,30 @@
 #include <flutter/runtime_effect.glsl>
 
 // Spoiler 粒子尘埃场 —— 参考 Telegram 新版做法:粒子完全在 shader 里按
-// hash(cell, time) 程序化生成,CPU 每帧只更新 time uniform,开销与
-// spoiler 数量 / 面积基本无关。
+// hash(cell, time) 程序化生成,CPU 每帧只更新 time uniform。
 //
-// 视觉对齐旧 CPU 粒子系统:细小圆点(直径 ~1.2-1.4 逻辑px)、
-// 3 档透明度、缓慢漂移 + 生灭闪烁。
+// 性能约束:Impeller 没有 raster cache,可见区域每帧都会重新执行本
+// shader,大块 spoiler 在 retina 上是百万级像素 —— 每像素成本必须压到
+// 几十 ALU ops。因此:
+// - 每层只采样**自身 cell**(粒子位置约束在 cell 内含漂移余量,不会越
+//   界影响邻 cell 像素),每像素每层仅 1 次 hash;
+// - 两层半格错位叠加,掩盖单层网格排布感;
+// - 背景色并进 shader 输出不透明色,外层无需先画背景再混合半透明层。
+//
+// 视觉对齐旧 CPU 粒子系统:细小圆点(直径 ~1.4 逻辑px)、3 档透明度、
+// 缓慢漂移 + 生灭闪烁。
 
 uniform float u_time;  // 动画时间(秒)
 uniform float u_seed;  // 每实例随机相位,避免多个 spoiler 同步闪烁
-uniform vec4 u_color;  // 粒子基色(非预乘)
+uniform vec4 u_color;  // 粒子基色
+uniform vec4 u_bg;     // 不透明遮罩背景色
 
 out vec4 fragColor;
 
-// 粒子网格尺寸(逻辑 px):每 cell 一个粒子,密度 ≈ 1/(CELL²)
-const float CELL = 3.5;
+// 单层粒子网格尺寸(逻辑 px);两层叠加后密度 ≈ 2/(CELL²)
+const float CELL = 5.0;
+// 粒子半径(逻辑 px)
+const float R = 0.7;
 
 // hash(Dave Hoskins 风格,无 sin,移动 GPU 上精度稳定)
 vec2 hash22(vec2 p) {
@@ -23,40 +33,33 @@ vec2 hash22(vec2 p) {
   return fract((p3.xx + p3.yz) * p3.zy);
 }
 
-float hash12(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.zyx + 31.32);
-  return fract((p3.x + p3.y) * p3.z);
+// 单层尘埃:每 cell 一个粒子,只采样自身 cell(1 次 hash)。
+float dustLayer(vec2 p, float seed) {
+  vec2 cell = floor(p / CELL);
+  vec2 local = p - (cell + 0.5) * CELL; // 相对 cell 中心
+  vec2 rnd = hash22(cell + seed);
+  // 派生第二组随机数(免二次 hash)
+  vec2 rnd2 = fract(rnd * 41.17 + rnd.yx * 7.73);
+
+  // 生灭闪烁:三角包络,周期 0.8~1.7s,相位随机 → 各粒子错开
+  float t = fract(u_time / (0.8 + 0.9 * rnd.x) + rnd.y * 23.7);
+  float env = min(t, 1.0 - t) * 2.0;
+  env *= env;
+
+  // 出生点约束在 cell 内(预留 半径 + AA + 漂移 余量)+ 生命内慢漂移
+  vec2 off = (rnd2 - 0.5) * (CELL - 2.0 * (R + 0.3 + 0.6));
+  off += (rnd - 0.5) * 2.0 * (t - 0.5);
+
+  float d = length(local - off);
+  // 3 档透明度 0.3 / 0.65 / 1.0(对齐旧 CPU 粒子的 alphaType 分档)
+  float tier = 0.3 + 0.35 * floor(rnd2.y * 2.999);
+  return (1.0 - smoothstep(R - 0.3, R + 0.3, d)) * env * tier;
 }
 
 void main() {
   vec2 p = FlutterFragCoord().xy;
-  vec2 base = floor(p / CELL);
-  float acc = 0.0;
-  // 采样自身 + 8 邻域 cell:粒子出生点在自己 cell 内、漂移最多 ±CELL,
-  // 3x3 邻域必然覆盖所有可能影响本像素的粒子。
-  for (int dy = -1; dy <= 1; dy++) {
-    for (int dx = -1; dx <= 1; dx++) {
-      vec2 cell = base + vec2(float(dx), float(dy));
-      vec2 rc = hash22(cell + u_seed);
-      // 生命周期 0.6~1.5s,相位随机 → 各粒子生灭错开
-      float period = mix(0.6, 1.5, rc.x);
-      float ft = u_time / period + rc.y * 17.0;
-      float cycle = floor(ft);
-      float t = fract(ft);
-      // 每个周期重新随机:出生点(cell 内)/ 漂移方向 / 透明度档位
-      vec2 rp = hash22(cell + u_seed + cycle * 0.9137);
-      vec2 rd = hash22(cell * 1.3719 + u_seed + cycle * 0.5173);
-      vec2 pos = (cell + rp) * CELL + (rd - 0.5) * 2.0 * CELL * t;
-      // 淡入淡出包络
-      float env = smoothstep(0.0, 0.18, t) * (1.0 - smoothstep(0.82, 1.0, t));
-      // 3 档透明度 0.3 / 0.65 / 1.0(对齐旧 CPU 粒子的 alphaType 分档)
-      float tier = 0.3 + 0.35 * floor(hash12(cell * 2.17 + u_seed + cycle) * 3.0);
-      // 圆点(半径 ~0.65 逻辑px,软边)
-      float d = length(p - pos);
-      acc += (1.0 - smoothstep(0.35, 0.95, d)) * tier * env;
-    }
-  }
-  float a = min(acc, 1.0) * u_color.a;
-  fragColor = vec4(u_color.rgb * a, a);
+  // 两层半格错位、独立种子 → 掩盖网格排布感
+  float a = dustLayer(p, u_seed);
+  a = max(a, dustLayer(p + CELL * 0.5, u_seed + 77.7));
+  fragColor = vec4(mix(u_bg.rgb, u_color.rgb, min(a, 1.0) * u_color.a), 1.0);
 }
