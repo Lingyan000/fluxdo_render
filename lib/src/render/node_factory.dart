@@ -3040,11 +3040,21 @@ class _TableWidget extends StatelessWidget {
 
   /// 用 TextPainter 采样前 10 行 cell.textContent 算列宽(对齐 legacy)。
   /// TextPainter 比真 build 一次 widget 树快几个数量级,精度足够。
+  ///
+  /// 结果按 [node] 身份缓存(Expando,node 随 parse 缓存跨 rebuild 稳定):
+  /// 大表格重 build(缓存失效的主题切换等)不再重复 rows×cols 次 layout。
+  /// baseStyle 变化(字号/字体)时签名不匹配 → 重测。
+  static final Expando<({TextStyle style, List<double> widths})>
+      _columnWidthsCache = Expando('tableColumnWidths');
+
   List<double> _computeColumnWidths(ThemeData theme) {
-    final widths = List<double>.filled(node.columnCount, _kTableMinColWidth);
     final baseStyle = childFactory.baseTextStyle ??
         theme.textTheme.bodyMedium ??
         const TextStyle(fontSize: 14);
+    final cached = _columnWidthsCache[node];
+    if (cached != null && cached.style == baseStyle) return cached.widths;
+
+    final widths = List<double>.filled(node.columnCount, _kTableMinColWidth);
     final sampleCount = node.rows.length < 11 ? node.rows.length : 11;
     for (var i = 0; i < sampleCount; i++) {
       final row = node.rows[i];
@@ -3068,6 +3078,7 @@ class _TableWidget extends StatelessWidget {
     for (var i = 0; i < node.columnCount; i++) {
       widths[i] = widths[i].clamp(_kTableMinColWidth, _kTableMaxColWidth);
     }
+    _columnWidthsCache[node] = (style: baseStyle, widths: widths);
     return widths;
   }
 
