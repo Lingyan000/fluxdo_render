@@ -5,8 +5,7 @@
 
 library;
 
-import 'package:flutter/gestures.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../flatten/inline_flattener.dart';
 import '../node/inline_node.dart';
@@ -75,46 +74,110 @@ class InlineSpanText extends StatefulWidget {
 }
 
 class _InlineSpanTextState extends State<InlineSpanText> {
-  List<GestureRecognizer> _recognizers = const [];
+  /// flatten 结果缓存。输入(见 [_cacheValid])不变时跨 rebuild 复用:
+  /// - span identical → RenderParagraph 的 text setter 短路,不重排版
+  ///   (此前每次 build 重新 flatten,recognizer 是新实例导致 span 永不相等,
+  ///   任何 ancestor rebuild 都放大成全部可见文本重 layout);
+  /// - recognizer 不重建 → 命中路径上进行中的 tap 手势不再被 dispose 打断。
+  /// 失效(内容/主题/handler 真变了)才重新 flatten 并释放旧 recognizers。
+  FlattenResult? _result;
 
-  /// 当前选区映射表,build 时由 flatten 结果更新(供 SelectableTextBox 读取)。
-  RenderTextProjection _projection = RenderTextProjection.empty;
+  // ---- 缓存 key:全部影响 flatten 输出的输入 ----
+  // theme 覆盖 flatten 同步路径里唯一的 context 读取
+  // (_buildInlineCodeSpan 的 colorScheme.onSurfaceVariant 字色)。
+  List<InlineNode>? _keyInlines;
+  TextStyle? _keyBaseStyle;
+  ThemeData? _keyTheme;
+  InlineFlattener? _keyFlattener;
+  LinkActionHandler? _keyLinkHandler;
+  EmojiImageBuilder? _keyEmojiBuilder;
+  MentionTapHandler? _keyMentionHandler;
+  ImageContentBuilder? _keyImageBuilder;
+  FootnoteTapHandler? _keyFootnoteHandler;
+  LocalDateBuilder? _keyLocalDateBuilder;
+  MathInlineBuilder? _keyMathInlineBuilder;
+  AttachmentDownloadHandler? _keyOnDownloadAttachment;
+  int _keyTotalImages = -1;
+
+  /// 当前选区映射表(供 SelectableTextBox 读取),与 span 同源。
+  RenderTextProjection get _projection =>
+      _result?.projection ?? RenderTextProjection.empty;
 
   @override
   void dispose() {
-    for (final r in _recognizers) {
-      r.dispose();
-    }
+    _disposeResult();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    // 每次 build 重新 flatten — recognizers 也跟着重建。
-    // 旧的 recognizers 在下一次 setState/rebuild 之前不会被销毁,
-    // 但 GestureRecognizer 持有空闲资源很轻,且单 build 周期产生
-    // 的不会泄漏(下次 build 之前没用户操作时间 — 即使 rebuild
-    // 频繁,旧的也只在 dispose 时回收一次)。
-    // 简单稳定的做法:rebuild 时先 dispose 旧的,再放新的。
-    for (final r in _recognizers) {
-      r.dispose();
+  void reassemble() {
+    // hot reload 后强制重 flatten,渲染代码改动立即可见
+    _disposeResult();
+    super.reassemble();
+  }
+
+  void _disposeResult() {
+    final r = _result;
+    if (r == null) return;
+    for (final rec in r.recognizers) {
+      rec.dispose();
     }
-    final result = widget.flattener.flatten(
-      widget.inlines,
-      widget.baseStyle,
-      linkHandler: widget.linkHandler,
-      emojiImageBuilder: widget.emojiImageBuilder,
-      mentionTapHandler: widget.mentionTapHandler,
-      imageContentBuilder: widget.imageContentBuilder,
-      footnoteTapHandler: widget.footnoteTapHandler,
-      localDateBuilder: widget.localDateBuilder,
-      mathInlineBuilder: widget.mathInlineBuilder,
-      onDownloadAttachment: widget.onDownloadAttachment,
-      totalImagesInPost: widget.totalImagesInPost,
-      context: context,
-    );
-    _recognizers = result.recognizers;
-    _projection = result.projection;
+    _result = null;
+  }
+
+  bool _cacheValid(ThemeData theme) =>
+      _result != null &&
+      identical(_keyInlines, widget.inlines) &&
+      _keyBaseStyle == widget.baseStyle &&
+      identical(_keyTheme, theme) &&
+      identical(_keyFlattener, widget.flattener) &&
+      identical(_keyLinkHandler, widget.linkHandler) &&
+      identical(_keyEmojiBuilder, widget.emojiImageBuilder) &&
+      identical(_keyMentionHandler, widget.mentionTapHandler) &&
+      identical(_keyImageBuilder, widget.imageContentBuilder) &&
+      identical(_keyFootnoteHandler, widget.footnoteTapHandler) &&
+      identical(_keyLocalDateBuilder, widget.localDateBuilder) &&
+      identical(_keyMathInlineBuilder, widget.mathInlineBuilder) &&
+      identical(_keyOnDownloadAttachment, widget.onDownloadAttachment) &&
+      _keyTotalImages == widget.totalImagesInPost;
+
+  @override
+  Widget build(BuildContext context) {
+    // 无条件读 Theme:注册依赖,主题切换时本 widget 被标脏 → 缓存 miss
+    // → 重 flatten(行内代码字色等派生自 colorScheme)。
+    final theme = Theme.of(context);
+    if (!_cacheValid(theme)) {
+      // 内容/主题/handler 真变了 → 旧 span 手势语义已失效,立即释放重建。
+      _disposeResult();
+      _result = widget.flattener.flatten(
+        widget.inlines,
+        widget.baseStyle,
+        linkHandler: widget.linkHandler,
+        emojiImageBuilder: widget.emojiImageBuilder,
+        mentionTapHandler: widget.mentionTapHandler,
+        imageContentBuilder: widget.imageContentBuilder,
+        footnoteTapHandler: widget.footnoteTapHandler,
+        localDateBuilder: widget.localDateBuilder,
+        mathInlineBuilder: widget.mathInlineBuilder,
+        onDownloadAttachment: widget.onDownloadAttachment,
+        totalImagesInPost: widget.totalImagesInPost,
+        context: context,
+      );
+      _keyInlines = widget.inlines;
+      _keyBaseStyle = widget.baseStyle;
+      _keyTheme = theme;
+      _keyFlattener = widget.flattener;
+      _keyLinkHandler = widget.linkHandler;
+      _keyEmojiBuilder = widget.emojiImageBuilder;
+      _keyMentionHandler = widget.mentionTapHandler;
+      _keyImageBuilder = widget.imageContentBuilder;
+      _keyFootnoteHandler = widget.footnoteTapHandler;
+      _keyLocalDateBuilder = widget.localDateBuilder;
+      _keyMathInlineBuilder = widget.mathInlineBuilder;
+      _keyOnDownloadAttachment = widget.onDownloadAttachment;
+      _keyTotalImages = widget.totalImagesInPost;
+    }
+    final result = _result!;
     // 选区注册 + 高亮统一由 SelectableTextBox 封装(无 SelectionScope 时退化
     // 为裸 Text.rich,零成本)。
     return SelectableTextBox(
