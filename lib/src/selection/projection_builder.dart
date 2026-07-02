@@ -64,7 +64,12 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
         case LineBreakRun():
           addText('\n', ProjectionKind.lineBreak);
         case InlineCodeRun(:final text):
+          // 与 flattener _buildInlineCodeSpan 同构:NBSP + code + NBSP。
+          // NBSP 是注入的粘性内边距,渲染占 1 字符但不属于内容 →
+          // 空投影(同 clickCount,复制/引用不带出)。
+          addPlaceholder('', ProjectionKind.codePad);
           addText(insertSoftBreaks(text), ProjectionKind.inlineCode);
+          addPlaceholder('', ProjectionKind.codePad);
         case EmRun(:final children):
           walk(children);
         case StrongRun(:final children):

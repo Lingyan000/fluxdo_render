@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/node/node.dart';
-import 'package:fluxdo_render/src/node/inline_node.dart';
 import 'package:fluxdo_render/src/render/node_factory.dart';
 
 Widget _wrap(Widget child) => MaterialApp(

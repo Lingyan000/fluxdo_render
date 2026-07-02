@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/parser/paragraph_parser.dart';
 import 'package:fluxdo_render/src/node/node.dart';
-import 'package:fluxdo_render/src/node/inline_node.dart';
 
 void main() {
   group('FootnotesSectionNode 解析 entries', () {

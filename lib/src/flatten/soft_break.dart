@@ -18,6 +18,17 @@ library;
 /// 零宽空格(zero-width space),作为软换行点。
 const String kSoftBreakChar = '​';
 
+/// 行内代码两侧的不换行空格(NBSP,U+00A0)—— "粘性内边距"。
+///
+/// 对齐 legacy 预处理:` <code>…</code> `。作用:
+/// - painter 的水平 padding(3.5px)出血落在 NBSP 的空白里(NBSP 宽 ≈ 半个
+///   空格字符),**不会画到相邻文字底下**(code 紧贴文字时的溢出就是没它);
+/// - NBSP 不可换行 → 间隙和 code 粘在一起,不会孤行。
+///
+/// 一致性:flattener 渲染层加,projection_builder 以空投影条目(logicalText
+/// `''`)同步偏移,复制/引用文本不含它。
+const String kInlineCodePadChar = ' ';
+
 /// 触发软换行的最小连续可断字符数。低于此长度的 run 原样返回(正常英文词、
 /// 短 token 零变化 → golden/选区不受影响)。30 ≈ 窄屏一行等宽字符数,超过必溢出。
 const int _kRunThreshold = 30;

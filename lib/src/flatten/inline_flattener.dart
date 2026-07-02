@@ -12,8 +12,8 @@
 /// - LinkRun 产出带 TapGestureRecognizer 的 TextSpan,recognizer 是
 ///   stateful 资源,通过 [FlattenResult.recognizers] 暴露给调用方,
 ///   由 widget dispose 时统一 dispose。
-/// - InlineCodeRun 输出 monospace + 灰底 TextSpan,圆角/padding 留到阶段 5
-///   自研选区+绘制层实现(目前用 TextStyle.background 的纯矩形灰底)。
+/// - InlineCodeRun 输出 `[NBSP][monospace code][NBSP]`(粘性内边距,见
+///   [_buildInlineCodeSpan]);灰底由 InlineCodeBackgroundPainter 下层自绘。
 /// - EmojiRun 走 WidgetSpan(图片不是文字),由 [EmojiImageBuilder] 注入,
 ///   尺寸跟随父字号(only-emoji 32dp)。
 ///
@@ -543,6 +543,18 @@ class InlineFlattener {
   }
 
 
+  /// 行内代码渲染:NBSP 粘性内边距 + monospace 小字 TextSpan。
+  ///
+  /// 结构 = `[NBSP][code 文本][NBSP]`(对齐 legacy 预处理
+  /// ` <code>…</code> `):NBSP 用**父级普通字体**渲染(宽度可控)、
+  /// 不可换行(和 code 粘死不孤行),给 [InlineCodeBackgroundPainter] 的水平
+  /// padding(3.5px)留出空白 —— 没有它,code 紧贴相邻文字时灰底会画到文字
+  /// 底下(真机溢出问题的根因)。painter 的灰底区间只含 code 文本本身
+  /// (projection 里 NBSP 是独立 codePad 条目,不进 inlineCode 区间)。
+  ///
+  /// **一致性**:projection_builder 对 InlineCodeRun 同步产出
+  /// codePad(1) + inlineCode(n) + codePad(1),两侧偏移模型必须一致;
+  /// codePad 逻辑投影为空串,复制/引用文本不含 NBSP。
   ///
   /// 颜色策略:**派生自 ColorScheme**,跟主题统一(legacy 用了固定 hex,
   /// 我们在子包内主动升级 — 任何品牌色 / 自定义 seed 都自动适配):
@@ -562,14 +574,21 @@ class InlineFlattener {
     final scheme = context == null ? null : Theme.of(context).colorScheme;
     final fgColor = scheme?.onSurfaceVariant;
     return TextSpan(
-      text: insertSoftBreaks(text),
-      recognizer: inheritedRecognizer,
-      style: TextStyle(
-        fontFamily: 'FiraCode',
-        fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
-        fontSize: _inlineCodeFontSize, // baseStyle 14 → 11.9
-        color: fgColor,
-      ),
+      // recognizer 不从父 span 传播,pad 与 code 叶子都得挂(link 内可点)。
+      children: [
+        TextSpan(text: kInlineCodePadChar, recognizer: inheritedRecognizer),
+        TextSpan(
+          text: insertSoftBreaks(text),
+          recognizer: inheritedRecognizer,
+          style: TextStyle(
+            fontFamily: 'FiraCode',
+            fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
+            fontSize: _inlineCodeFontSize, // baseStyle 14 → 11.9
+            color: fgColor,
+          ),
+        ),
+        TextSpan(text: kInlineCodePadChar, recognizer: inheritedRecognizer),
+      ],
     );
   }
 

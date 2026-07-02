@@ -1,5 +1,13 @@
 /// 行内代码背景自绘 —— 在 InlineSpanText 的文字**下层**画圆角灰底,跨行时按行
-/// 合并成连续 RRect(首行圆左角、末行圆右角),对齐 legacy `InlineCodePainter`。
+/// 合并成连续 RRect(首行圆左角、末行圆右角)。
+///
+/// 对齐 legacy 装饰架构(`CombinedDecoratorOverlay` + `InlineCodePainter` +
+/// `ScanBoundary`):legacy 给 `<code>` 设**透明 CSS 背景** + 标记字体,布局后
+/// 扫描 RenderParagraph 定位 code 区间,把灰底画在内容 Stack **最底层**并用
+/// ClipRect 裁剪;可滚动容器(表格)以 ScanBoundary 截断扫描、内部自挂 overlay,
+/// 保证装饰**永远画在文字之下、且不越出所属容器**。新引擎按块(SelectableTextBox)
+/// 自带这两条:painter 画在本块文字下层,块级 ClipRect 裁掉 padding 出血
+/// (见 SelectableTextBox.build);表格 cell / 代码块各是独立块,天然"自带边界"。
 ///
 /// 为什么自绘而非 `TextStyle.background`:后者只能画**直角矩形**,代码跨行会裂成
 /// 两块独立矩形、无圆角、无 padding、贴字。自绘用 RenderParagraph 的
@@ -34,33 +42,64 @@ class InlineCodeBackgroundPainter extends CustomPainter {
   /// 灰底色(主项目主题 `colorScheme.surfaceContainerHighest`)。
   final Color color;
 
-  // 对齐 legacy InlineCodePainter。垂直 padding 顶部略大:真机字体(FiraCode)
-  // 字形 ink 上沿略超出 tight 度量盒,顶部少给会切到代码字顶 → 顶 3 / 底 1.5。
+  // 与 legacy InlineCodePainter 完全一致:hPadding 3.5 / vPadding 1.5(对称)/
+  // radius 3。不要私自加大 —— 之前顶部加到 3.0,出血伸进上一行文字底下,
+  // 真机观感就是"背景溢出到别的文字下面"。
+  //
+  // _hPad 只是**上限**:实际水平出血按相邻 codePad(NBSP)的实测宽度 clamp
+  // (见 paint 内注释),保证灰底构造上落在 pad 空白里、永不压到邻字。
   static const double _radius = 3.0;
   static const double _hPad = 3.5;
-  static const double _vPadTop = 3.0;
-  static const double _vPadBottom = 1.5;
+  static const double _vPad = 1.5;
 
   @override
   void paint(Canvas canvas, Size size) {
     final projection = projectionGetter();
     // 快路径:无 inline code 区间 → 不取 paragraph,零成本。
-    final codeEntries = <ProjectionEntry>[
-      for (final e in projection.entries)
-        if (e.kind == ProjectionKind.inlineCode && e.renderLen > 0) e,
-    ];
-    if (codeEntries.isEmpty) return;
+    var hasCode = false;
+    for (final e in projection.entries) {
+      if (e.kind == ProjectionKind.inlineCode && e.renderLen > 0) {
+        hasCode = true;
+        break;
+      }
+    }
+    if (!hasCode) return;
     final paragraph = paragraphGetter();
     if (paragraph == null) return;
+
+    // 裁剪到块边界(对齐 legacy CombinedDecoratorOverlay 的 ClipRect):
+    // padding 会伸出块外,CustomPaint 不裁剪 → 出血会画到相邻块的文字上
+    // (compact 容器如 spoiler 内段落 margin 0,块间紧贴,上边 padding 正好
+    // 糊住上一段文字)。块内文字永远在 painter 之上,不受影响。
+    canvas.clipRect(Offset.zero & size, doAntiAlias: false);
 
     final paint = Paint()
       ..style = PaintingStyle.fill
       ..color = color;
 
-    for (final e in codeEntries) {
-      // 用 BoxHeightStyle.tight:贴合**代码字形自身**的行高(inline code 是
-      // 0.85em 小字),而非段落整行高(baseStyle 1.5,会比代码高一大截显得过高)。
-      // 背景 hug 住代码文字 → 对齐 legacy / 浏览器观感。
+    final entries = projection.entries;
+    for (var idx = 0; idx < entries.length; idx++) {
+      final e = entries[idx];
+      if (e.kind != ProjectionKind.inlineCode || e.renderLen == 0) continue;
+
+      // 水平出血上限 = 相邻 codePad(NBSP 粘性内边距,flattener 恒在 code 两侧
+      // 各注入一个)的**实测宽度**。NBSP 宽度随字体/字号浮动(≈0.25em):默认
+      // 14px 时 ≈4.9px 兜得住 3.5,但正文字号调小后可能 < 3.5 —— 写死 _hPad
+      // 会超出 pad 压到邻字边缘。取 min 后出血从构造上不可能触及邻字;
+      // 无 pad 条目(理论不发生,防御)退回 _hPad 保持旧观感。
+      final leftPad = idx > 0 && entries[idx - 1].kind == ProjectionKind.codePad
+          ? _entryWidth(paragraph, entries[idx - 1])
+          : _hPad;
+      final rightPad = idx + 1 < entries.length &&
+              entries[idx + 1].kind == ProjectionKind.codePad
+          ? _entryWidth(paragraph, entries[idx + 1])
+          : _hPad;
+      final leftBleed = leftPad < _hPad ? leftPad : _hPad;
+      final rightBleed = rightPad < _hPad ? rightPad : _hPad;
+
+      // 用 BoxHeightStyle.tight(legacy 扫描同款默认值):贴合**代码字形自身**的
+      // 行高(inline code 是 0.85em 小字),而非段落整行高(baseStyle 1.5,会比
+      // 代码高一大截显得过高)。背景 hug 住代码文字 → 对齐 legacy / 浏览器观感。
       final boxes = paragraph.getBoxesForSelection(
         TextSelection(baseOffset: e.renderStart, extentOffset: e.renderEnd),
         boxHeightStyle: BoxHeightStyle.tight,
@@ -69,16 +108,20 @@ class InlineCodeBackgroundPainter extends CustomPainter {
       final rows = mergeSelectionBoxesByLine(boxes);
       for (var i = 0; i < rows.length; i++) {
         final row = rows[i];
+        final isFirst = i == 0;
+        final isLast = i == rows.length - 1;
+        // pad 只存在于 code 整体的首尾(NBSP 与相邻 code 字符间不可断行,
+        // 恒同行):首行左缘贴左 pad、末行右缘贴右 pad → 按各自 pad clamp;
+        // 跨行折行处的边缘在行首/行尾,旁边没有文字,保持 _hPad。
         final merged = Rect.fromLTRB(
-          row.left - _hPad,
-          row.top - _vPadTop,
-          row.right + _hPad,
-          row.bottom + _vPadBottom,
+          row.left - (isFirst ? leftBleed : _hPad),
+          row.top - _vPad,
+          row.right + (isLast ? rightBleed : _hPad),
+          row.bottom + _vPad,
         );
         // 首行圆左角、末行圆右角(单行 = 四角全圆);中间行直角 → 跨行连成一条。
-        final lr = i == 0 ? const Radius.circular(_radius) : Radius.zero;
-        final rr =
-            i == rows.length - 1 ? const Radius.circular(_radius) : Radius.zero;
+        final lr = isFirst ? const Radius.circular(_radius) : Radius.zero;
+        final rr = isLast ? const Radius.circular(_radius) : Radius.zero;
         canvas.drawRRect(
           RRect.fromRectAndCorners(
             merged,
@@ -91,6 +134,18 @@ class InlineCodeBackgroundPainter extends CustomPainter {
         );
       }
     }
+  }
+
+  /// 条目渲染区间的实测总宽(codePad 是单个 NBSP,恒单 box)。
+  double _entryWidth(RenderParagraph paragraph, ProjectionEntry e) {
+    final boxes = paragraph.getBoxesForSelection(
+      TextSelection(baseOffset: e.renderStart, extentOffset: e.renderEnd),
+    );
+    var w = 0.0;
+    for (final b in boxes) {
+      w += b.right - b.left;
+    }
+    return w;
   }
 
   @override

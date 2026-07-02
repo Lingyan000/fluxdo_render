@@ -19,6 +19,10 @@ enum ProjectionKind {
   text,
   lineBreak,
   inlineCode,
+
+  /// 行内代码两侧注入的 NBSP 粘性内边距(见 kInlineCodePadChar)。
+  /// 渲染占 1 字符、逻辑投影恒为空串(不属于内容,复制/引用不带出)。
+  codePad,
   emoji,
   mention,
   image,

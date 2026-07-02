@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/flatten/inline_flattener.dart';
+import 'package:fluxdo_render/src/flatten/soft_break.dart';
 import 'package:fluxdo_render/src/node/inline_node.dart';
 
 void main() {
@@ -221,9 +222,9 @@ void main() {
       }
       walk(result.span);
 
-      // 三个叶子(TextRun / StrongRun 内的 TextRun / InlineCodeRun)
-      // 都必须挂同一个 recognizer
-      expect(leafRecognizers, hasLength(3));
+      // 五个叶子(TextRun / StrongRun 内的 TextRun / InlineCodeRun 的
+      // pad + code + pad)都必须挂同一个 recognizer
+      expect(leafRecognizers, hasLength(5));
       expect(leafRecognizers.every((r) => r != null), isTrue);
       expect(
         leafRecognizers.toSet(),
@@ -238,6 +239,16 @@ void main() {
   });
 
   group('InlineCodeRun', () {
+    // InlineCodeRun 产出 [NBSP pad][code][NBSP pad] 容器 span(粘性内边距,
+    // 见 _buildInlineCodeSpan);取中间的 code 叶子断言样式。
+    TextSpan codeLeafOf(FlattenResult result) {
+      final container = result.span.children![0] as TextSpan;
+      expect(container.children, hasLength(3));
+      expect((container.children![0] as TextSpan).text, kInlineCodePadChar);
+      expect((container.children![2] as TextSpan).text, kInlineCodePadChar);
+      return container.children![1] as TextSpan;
+    }
+
     testWidgets('light 主题:派生 onSurfaceVariant 字色(背景移到 painter,span 不带 background)',
         (tester) async {
       late BuildContext ctx;
@@ -254,7 +265,7 @@ void main() {
         baseStyle,
         context: ctx,
       );
-      final span = result.span.children![0] as TextSpan;
+      final span = codeLeafOf(result);
       expect(span.text, 'git status');
       expect(span.style?.fontFamily, 'FiraCode');
       expect(span.style?.fontFamilyFallback, ['monospace', 'Menlo', 'Courier']);
@@ -282,7 +293,7 @@ void main() {
         baseStyle,
         context: ctx,
       );
-      final span = result.span.children![0] as TextSpan;
+      final span = codeLeafOf(result);
       expect(span.style?.color, scheme.onSurfaceVariant);
       expect(span.style?.background, isNull);
     });
@@ -292,7 +303,7 @@ void main() {
         [const InlineCodeRun('x')],
         baseStyle,
       );
-      final span = result.span.children![0] as TextSpan;
+      final span = codeLeafOf(result);
       expect(span.style?.color, isNull);
       expect(span.style?.background, isNull);
       // 字体/字号仍生效
@@ -312,7 +323,9 @@ void main() {
       final children = result.span.children!;
       expect(children, hasLength(3));
       expect((children[0] as TextSpan).text, '使用 ');
-      expect((children[1] as TextSpan).text, 'git');
+      final code = children[1] as TextSpan;
+      // pad + code + pad 容器,中间是 code 文本
+      expect((code.children![1] as TextSpan).text, 'git');
       expect((children[2] as TextSpan).text, ' 命令');
     });
   });
