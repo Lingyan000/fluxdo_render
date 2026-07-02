@@ -42,17 +42,25 @@ float dustLayer(vec2 p, float seed) {
   vec2 rnd2 = fract(rnd * 41.17 + rnd.yx * 7.73);
 
   // 生灭闪烁:三角包络,周期 0.8~1.7s,相位随机 → 各粒子错开
-  float t = fract(u_time / (0.8 + 0.9 * rnd.x) + rnd.y * 23.7);
+  float ft = u_time / (0.8 + 0.9 * rnd.x) + rnd.y * 23.7;
+  float cycle = floor(ft);
+  float t = ft - cycle;
   float env = min(t, 1.0 - t) * 2.0;
   env *= env;
 
+  // 每个周期用黄金分割低差异序列换出生点/漂移方向/透明度档位 ——
+  // 免二次 hash,且序列不循环,粒子不会在同一位置重复同一动作
+  // (否则每 ~1s 肉眼可见"重播")。
+  vec2 rnd3 = fract(rnd2 + cycle * vec2(0.61803398875, 0.38196601125));
+  vec2 dir = fract(rnd + cycle * vec2(0.75487766625, 0.56984029100)) - 0.5;
+
   // 出生点约束在 cell 内(预留 半径 + AA + 漂移 余量)+ 生命内慢漂移
-  vec2 off = (rnd2 - 0.5) * (CELL - 2.0 * (R + 0.3 + 0.6));
-  off += (rnd - 0.5) * 2.0 * (t - 0.5);
+  vec2 off = (rnd3 - 0.5) * (CELL - 2.0 * (R + 0.3 + 0.6));
+  off += dir * 2.0 * (t - 0.5);
 
   float d = length(local - off);
   // 3 档透明度 0.3 / 0.65 / 1.0(对齐旧 CPU 粒子的 alphaType 分档)
-  float tier = 0.3 + 0.35 * floor(rnd2.y * 2.999);
+  float tier = 0.3 + 0.35 * floor(fract(rnd2.y + cycle * 0.61803) * 2.999);
   return (1.0 - smoothstep(R - 0.3, R + 0.3, d)) * env * tier;
 }
 

@@ -878,8 +878,10 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
   static const Duration _tickInterval = Duration(milliseconds: 33);
 
   // shader 时间源 —— Ticker 只更新 value(painter 以其为 repaint
-  // Listenable),不 setState 重建 widget 子树。
-  final ValueNotifier<double> _time = ValueNotifier(0);
+  // Listenable),不 setState 重建 widget 子树。值取全局时钟
+  // [SpoilerShader.timeSeconds]:widget 重建 / Ticker 重启不回卷,
+  // 粒子场不会从头重播。
+  final ValueNotifier<double> _time = ValueNotifier(SpoilerShader.timeSeconds);
   final double _seed = Random().nextDouble() * 100;
   ui.FragmentShader? _shader;
   Ticker? _ticker;
@@ -928,7 +930,7 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     if (!mounted || _revealed) return;
     if (elapsed - _lastTick < _tickInterval) return; // ~30fps 节流
     _lastTick = elapsed;
-    _time.value = elapsed.inMicroseconds / 1e6;
+    _time.value = SpoilerShader.timeSeconds;
   }
 
   void _reveal() {

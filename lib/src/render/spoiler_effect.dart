@@ -23,6 +23,13 @@ class SpoilerShader {
 
   static ui.FragmentProgram? _program;
   static Future<void>? _loading;
+  static final Stopwatch _clock = Stopwatch()..start();
+
+  /// 全局连续时间基(秒)—— 所有 spoiler 共用,widget 重建 / Ticker
+  /// 重启不回卷,粒子场永远处于"进行中"而不是从头重播(Telegram 同款
+  /// 全局时钟做法)。每 4096s 回卷一次,保住 shader 内 float32 精度。
+  static double get timeSeconds =>
+      (_clock.elapsedMicroseconds % 4096000000) / 1e6;
 
   /// 已加载的 program(未加载完成/失败时为 null → painter 只画静态背景)。
   static ui.FragmentProgram? get program => _program;
@@ -43,6 +50,7 @@ class SpoilerShader {
     ]) {
       try {
         _program = await ui.FragmentProgram.fromAsset(key);
+        _warmUp();
         return;
       } catch (_) {
         // 换下一个 key。
@@ -50,6 +58,30 @@ class SpoilerShader {
     }
     debugPrint('[SpoilerShader] 加载失败,退化为静态遮罩');
     _loading = null;
+  }
+
+  /// 离屏画 1×1 预热 GPU pipeline —— runtime effect 的 PSO 是首次真正
+  /// 绘制时才在 raster 线程编译的,不预热则每次 app 启动后第一个 spoiler
+  /// 上屏瞬间会卡一下。
+  static void _warmUp() {
+    try {
+      final shader = _program!.fragmentShader();
+      for (var i = 0; i < 10; i++) {
+        shader.setFloat(i, i < 2 ? 0.0 : 1.0); // time/seed=0,颜色=白
+      }
+      final recorder = ui.PictureRecorder();
+      Canvas(recorder).drawRect(
+        const Rect.fromLTWH(0, 0, 1, 1),
+        Paint()..shader = shader,
+      );
+      final picture = recorder.endRecording();
+      final image = picture.toImageSync(1, 1); // 触发 raster 线程真实执行
+      image.dispose();
+      picture.dispose();
+      shader.dispose();
+    } catch (e) {
+      debugPrint('[SpoilerShader] 预热失败(不影响功能): $e');
+    }
   }
 }
 
