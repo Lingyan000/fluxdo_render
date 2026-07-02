@@ -252,6 +252,24 @@ class _FluxdoRenderState extends State<FluxdoRender> {
   SelectionController? _selectionController;
   bool _ownsController = false;
 
+  /// 块级 widget 树缓存(Column 及其全部 factory.build 产物)。
+  ///
+  /// 输入不变时跨 rebuild 返回 identical 的 Column → Element.updateChild
+  /// 看到相同 widget 直接跳过整棵内容子树的 rebuild(此前每次 build 新建
+  /// NodeFactory + 重跑所有 block,任何 ancestor rebuild 都放大成全部
+  /// 可见内容重建/重排版)。
+  ///
+  /// 失效时机:
+  /// - _reparse(内容变了)
+  /// - didUpdateWidget 检出渲染配置(handlers/样式/trim/chunkIndex)变化
+  /// - build 时 Theme / Directionality / MediaQuery.size 变化(NodeFactory
+  ///   同步路径读这三个 inherited —— 表格虚拟化限高用 size.height ——
+  ///   派生值内嵌在产出的 widget 里)
+  Widget? _cachedColumn;
+  ThemeData? _cacheTheme;
+  TextDirection? _cacheDirectionality;
+  Size? _cacheMediaSize;
+
   @override
   void initState() {
     super.initState();
@@ -293,6 +311,8 @@ class _FluxdoRenderState extends State<FluxdoRender> {
         oldWidget.imageIndexOffset != widget.imageIndexOffset ||
         oldWidget.footnotesHtml != widget.footnotesHtml) {
       _reparse();
+    } else if (_renderConfigChanged(oldWidget)) {
+      _cachedColumn = null;
     }
     // selectionEnabled / scopeId 变化 → 重新获取控制器。
     if (oldWidget.selectionEnabled != widget.selectionEnabled ||
@@ -300,6 +320,46 @@ class _FluxdoRenderState extends State<FluxdoRender> {
       _releaseController();
       _acquireController();
     }
+  }
+
+  /// 除内容外,所有会进入 NodeFactory / factory.build 产物的配置项。
+  /// 任一身份变化 → 块缓存失效(主项目 callbacks 按 post 缓存,稳态下全部
+  /// identical,不会误失效)。
+  bool _renderConfigChanged(FluxdoRender old) =>
+      !identical(old.factory, widget.factory) ||
+      !identical(old.linkHandler, widget.linkHandler) ||
+      !identical(old.emojiImageBuilder, widget.emojiImageBuilder) ||
+      !identical(old.mentionTapHandler, widget.mentionTapHandler) ||
+      !identical(old.imageContentBuilder, widget.imageContentBuilder) ||
+      !identical(old.codeBlockHighlighter, widget.codeBlockHighlighter) ||
+      !identical(old.quoteAvatarBuilder, widget.quoteAvatarBuilder) ||
+      !identical(old.oneboxBuilder, widget.oneboxBuilder) ||
+      !identical(old.imageGridBuilder, widget.imageGridBuilder) ||
+      !identical(old.footnoteTapHandler, widget.footnoteTapHandler) ||
+      !identical(old.lazyVideoBuilder, widget.lazyVideoBuilder) ||
+      !identical(old.iframeBuilder, widget.iframeBuilder) ||
+      !identical(old.videoBuilder, widget.videoBuilder) ||
+      !identical(old.audioBuilder, widget.audioBuilder) ||
+      !identical(old.localDateBuilder, widget.localDateBuilder) ||
+      !identical(old.policyBuilder, widget.policyBuilder) ||
+      !identical(old.pollBuilder, widget.pollBuilder) ||
+      !identical(old.chatTranscriptBuilder, widget.chatTranscriptBuilder) ||
+      !identical(old.mathBlockBuilder, widget.mathBlockBuilder) ||
+      !identical(old.mathInlineBuilder, widget.mathInlineBuilder) ||
+      !identical(old.svgBuilder, widget.svgBuilder) ||
+      !identical(old.onDownloadAttachment, widget.onDownloadAttachment) ||
+      old.baseTextStyle != widget.baseTextStyle ||
+      old.compact != widget.compact ||
+      old.screenshotMode != widget.screenshotMode ||
+      old.chunkIndex != widget.chunkIndex ||
+      old.trimTopMargin != widget.trimTopMargin ||
+      old.trimBottomMargin != widget.trimBottomMargin;
+
+  @override
+  void reassemble() {
+    // hot reload 后强制重建,渲染代码改动立即可见
+    _cachedColumn = null;
+    super.reassemble();
   }
 
   @override
@@ -317,6 +377,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
         );
     _totalImagesInPost = countImageRuns(_nodes);
     _docOrders = assignDocumentOrder(_nodes);
+    _cachedColumn = null;
   }
 
   /// 截图模式时在树上包 [ScreenshotMode],供 mermaid 等懒加载 builder 感知。
@@ -326,6 +387,54 @@ class _FluxdoRenderState extends State<FluxdoRender> {
 
   @override
   Widget build(BuildContext context) {
+    if (_nodes.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    // 无条件读 Theme/Directionality/MediaQuery.size:注册 inherited 依赖,
+    // 三者变化时本 widget 被标脏 → 走到这里检出变化 → 缓存失效重建
+    // (NodeFactory 同步路径把 theme / 表格限高等派生值直接嵌进 widget,
+    // 不能跨主题/屏幕尺寸复用)。
+    final theme = Theme.of(context);
+    final directionality = Directionality.of(context);
+    final mediaSize = MediaQuery.sizeOf(context);
+    if (!identical(_cacheTheme, theme) ||
+        _cacheDirectionality != directionality ||
+        _cacheMediaSize != mediaSize) {
+      _cachedColumn = null;
+      _cacheTheme = theme;
+      _cacheDirectionality = directionality;
+      _cacheMediaSize = mediaSize;
+    }
+
+    Widget column = _cachedColumn ?? _buildColumn(context);
+    _cachedColumn = column;
+
+    final controller = _selectionController;
+    if (controller == null) return _wrapScreenshot(column);
+
+    // 选区树:Scope 下传 controller 给各 InlineSpanText(注册 + 高亮),
+    // 顶层手势层管长按选区,toolbar 弹复制/引用浮层。
+    //
+    // 关键:用 SelectionContainer.disabled 把内容从**外层系统 SelectionArea**
+    // (主项目 topic_post_list 包了一层)里排除——否则 Text.rich 会自动参与
+    // 外层系统选区,系统高亮抢先接管拖拽,自研手势层/toolbar 永远触发不了。
+    // 自研选区直接用 RenderParagraph,不依赖 SelectionContainer,disabled 不影响它。
+    return _wrapScreenshot(SelectionContainer.disabled(
+      child: SelectionScope(
+        controller: controller,
+        child: SelectionContentLayer(
+          controller: controller,
+          chunkIndex: widget.chunkIndex,
+          onQuoteRequest: widget.onQuoteRequest,
+          onCopyQuoteRequest: widget.onCopyQuoteRequest,
+          onCopyToast: widget.onCopyToast,
+          child: column,
+        ),
+      ),
+    ));
+  }
+
+  Widget _buildColumn(BuildContext context) {
     final factory = widget.factory ??
         NodeFactory(
           linkHandler: widget.linkHandler,
@@ -356,10 +465,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           chunkIndex: widget.chunkIndex,
           docOrders: _docOrders,
         );
-    if (_nodes.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final column = Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (int i = 0; i < _nodes.length; i++)
@@ -371,29 +477,5 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           ),
       ],
     );
-
-    final controller = _selectionController;
-    if (controller == null) return _wrapScreenshot(column);
-
-    // 选区树:Scope 下传 controller 给各 InlineSpanText(注册 + 高亮),
-    // 顶层手势层管长按选区,toolbar 弹复制/引用浮层。
-    //
-    // 关键:用 SelectionContainer.disabled 把内容从**外层系统 SelectionArea**
-    // (主项目 topic_post_list 包了一层)里排除——否则 Text.rich 会自动参与
-    // 外层系统选区,系统高亮抢先接管拖拽,自研手势层/toolbar 永远触发不了。
-    // 自研选区直接用 RenderParagraph,不依赖 SelectionContainer,disabled 不影响它。
-    return _wrapScreenshot(SelectionContainer.disabled(
-      child: SelectionScope(
-        controller: controller,
-        child: SelectionContentLayer(
-          controller: controller,
-          chunkIndex: widget.chunkIndex,
-          onQuoteRequest: widget.onQuoteRequest,
-          onCopyQuoteRequest: widget.onCopyQuoteRequest,
-          onCopyToast: widget.onCopyToast,
-          child: column,
-        ),
-      ),
-    ));
   }
 }
