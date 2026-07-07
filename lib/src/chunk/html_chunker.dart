@@ -5,8 +5,13 @@ import 'html_chunk.dart';
 /// HTML 分割器
 class HtmlChunker {
   /// 长帖分块阈值 —— cooked HTML 超过此长度才分块虚拟化(短帖整段渲染)。
-  /// 从 legacy ChunkedHtmlContent 迁入(原值 5000)。
-  static const int chunkThreshold = 5000;
+  ///
+  /// 5000 → 2000(2026-07):生产诊断(120Hz)显示稳态滚动掉帧主体是
+  /// build 6~16ms 帧 = 中等帖子(2~5K 字符)整帖首建的 parse+构建+排版
+  /// 一次性落在同一滚动帧;分块后随 sliver 逐帧物化,单帧只付一块
+  /// (≤_maxMergeLength=2000 字符)的成本,且块可被空闲预热提前解析。
+  /// 真正的短帖(<2000)单帧成本本就在预算内,保持整段渲染。
+  static const int chunkThreshold = 2000;
 
   /// 块级元素标签（需要独立成块）
   static const _blockTags = {
