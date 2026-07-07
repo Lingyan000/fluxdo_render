@@ -101,7 +101,7 @@ void main() {
       await h.typeChar('1');
     }
 
-    expect(state.blocks[1].content.text, '1' * 60,
+    expect((state.blocks[1] as TextBlock).content.text, '1' * 60,
         reason: '60 连击后文档不丢字不重复');
     expect(state.selection!.extent.offset, 60, reason: '光标应在末尾');
     // 平台模型与文档一致(无纠偏残留/回环)
@@ -158,7 +158,7 @@ void main() {
       await h.typeChar('1');
     }
 
-    expect(state.blocks[1].content.text, '${'1' * 50}$tail',
+    expect((state.blocks[1] as TextBlock).content.text, '${'1' * 50}$tail',
         reason: '前插 50 字后尾部 40 个 2 应原样保留');
     expect(state.selection!.extent.offset, 50);
     await tester.pump(const Duration(seconds: 1));

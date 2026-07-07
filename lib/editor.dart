@@ -9,6 +9,10 @@
 library;
 
 export 'src/editor/input/editor_ime_client.dart' show EditorImeClient;
+export 'src/editor/model/doc_converter.dart';
 export 'src/editor/model/editable_text_content.dart';
+export 'src/editor/model/editor_block.dart';
 export 'src/editor/model/editor_state.dart';
+export 'src/editor/widget/editor_island.dart';
+export 'src/editor/widget/editor_toolbar.dart';
 export 'src/editor/widget/fluxdo_editor.dart';

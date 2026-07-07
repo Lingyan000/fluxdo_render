@@ -21,6 +21,7 @@ import 'package:flutter/services.dart';
 import '../flatten/inline_flattener.dart';
 import '../node/node.dart';
 import '../selection/projection.dart';
+import 'block_text_styles.dart';
 import 'code_block_handler.dart';
 import 'emoji_handler.dart';
 import 'footnote_handler.dart';
@@ -361,13 +362,8 @@ class NodeFactory {
     final baseStyle =
         baseTextStyle ?? theme.textTheme.bodyMedium ?? const TextStyle();
     final em = baseStyle.fontSize ?? 14;
-    final scale = _headingScale[node.level - 1];
-    final headingStyle = baseStyle.copyWith(
-      fontSize: em * scale,
-      fontWeight: FontWeight.bold,
-      height: 1.2,
-    );
-    final margin = em * _headingMargin[node.level - 1];
+    final headingStyle = headingStyleFor(baseStyle, node.level);
+    final margin = em * kHeadingMargin[node.level - 1];
     return Padding(
       padding: EdgeInsets.only(
         top: trimTop ? 0 : margin,
@@ -394,11 +390,8 @@ class NodeFactory {
     );
   }
 
-  // 索引 0 对应 h1
-  static const _headingScale = [2.0, 1.5, 1.17, 1.0, 0.83, 0.67];
-
-  // CSS heading margin(em 倍数,top/bottom 各一份)
-  static const _headingMargin = [0.67, 0.83, 1.0, 1.33, 1.67, 2.33];
+  // heading 字号/间距常量移至 block_text_styles.dart(kHeadingScale/
+  // kHeadingMargin)—— 编辑端 EditableTextBlock 同源取用。
 
   /// 列表渲染 — `<ul>` / `<ol>`,可递归嵌套子 list。
   ///

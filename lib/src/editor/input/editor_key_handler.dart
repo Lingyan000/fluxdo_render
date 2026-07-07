@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../model/editable_text_content.dart' show MarkKind;
 import '../model/editor_state.dart';
 
 /// 处理结果由调用方(FluxdoEditor 的 Focus.onKeyEvent)透传给框架。
@@ -83,7 +84,36 @@ KeyEventResult handleEditorKeyEvent(
     case LogicalKeyboardKey.enter:
     case LogicalKeyboardKey.numpadEnter:
       state.sealHistory();
-      state.splitParagraph();
+      state.splitBlock();
+      onEdited();
+    case LogicalKeyboardKey.tab:
+      // 列表项:缩进/反缩进;普通文本块:插入制表符(Shift+Tab 无操作,
+      // 但仍 handled —— 防 Tab 焦点遍历把焦点带走)。
+      final sel = state.selection;
+      final block =
+          sel == null ? null : state.textBlockById(sel.extent.blockId);
+      if (block != null && block.isListItem) {
+        if (shift) {
+          state.outdentListItem();
+        } else {
+          state.indentListItem();
+        }
+      } else if (!shift) {
+        state.insertText('\t');
+      }
+      onEdited();
+    // ---- 格式快捷键(M2) ----
+    case LogicalKeyboardKey.keyB when primary:
+      state.toggleMark(MarkKind.strong);
+      onEdited();
+    case LogicalKeyboardKey.keyI when primary:
+      state.toggleMark(MarkKind.em);
+      onEdited();
+    case LogicalKeyboardKey.keyE when primary:
+      state.toggleMark(MarkKind.inlineCode);
+      onEdited();
+    case LogicalKeyboardKey.keyX when primary && shift:
+      state.toggleMark(MarkKind.lineThrough);
       onEdited();
     case LogicalKeyboardKey.keyA when primary:
       state.selectAll();

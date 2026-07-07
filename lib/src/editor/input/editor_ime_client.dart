@@ -22,6 +22,7 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../model/editable_text_content.dart';
 import '../model/editor_state.dart';
 
 /// pad 前缀字符。**必须用普通空格**(对齐 appflowy 生产实现
@@ -97,8 +98,8 @@ class EditorImeClient with TextInputClient {
       // 跨段删除由键盘路径处理后回到单段,再走这里同步。
       return;
     }
-    final block = state.blockById(sel.extent.blockId);
-    if (block == null) return;
+    final block = state.textBlockById(sel.extent.blockId);
+    if (block == null) return; // 岛/幽灵块:IME 窗口不喂值
 
     final value = _format(
       TextEditingValue(
@@ -243,7 +244,7 @@ class EditorImeClient with TextInputClient {
     // 却前进,后续任何 syncFromState 都会用旧段落状态覆写平台,进入
     // 「用户打字 → 被清空」循环。改为:立即按当前选区重挂/重喂;选区
     // 也失效则断开,绝不半死不活。
-    if (state.blockById(blockId) == null) {
+    if (state.textBlockById(blockId) == null) {
       _log('ghost block $blockId — resync');
       if (state.selection != null) {
         syncFromState(show: false, force: true);
@@ -271,19 +272,23 @@ class EditorImeClient with TextInputClient {
     }
 
     final prev = _unformat(_lastSent) ??
-        TextEditingValue(text: state.blockById(blockId)?.content.text ?? '');
+        TextEditingValue(text: state.textBlockById(blockId)?.content.text ?? '');
 
     // 平台可能插入 '\n'(部分 IME 的回车路径不走 performAction)——
     // 编辑器语义是分段,拦下来转 splitParagraph。
     if (value.text.contains('\n')) {
       final cleaned = value.text.replaceAll('\n', '');
       if (cleaned == prev.text) {
-        state.splitParagraph();
+        state.splitBlock();
         syncFromState(show: false);
         return;
       }
       // 混合变更(罕见):先按纯文本处理,'\n' 剥掉。
     }
+    // 剥 '\n'(编辑器语义是分段,不进文本)。注意**不能**在这里剥 FFFC:
+    // 窗口文本里的 FFFC 是既有原子的合法哨兵,整体剥除会被 diff 误判为
+    // "删除了原子"。幻造哨兵只可能出现在**新插入段**里 → 对 diff.inserted
+    // 单独 sanitize(见下)。
     final sanitizedText = value.text.replaceAll('\n', '');
 
     // 三段式 diff(对比上次值,caret 锚定):公共前缀/后缀 → 中段即变更。
@@ -330,13 +335,19 @@ class EditorImeClient with TextInputClient {
 
     final wasComposing = state.hasComposing;
 
+    // 幻造哨兵防御:新插入段里的 FFFC 一律剥(原子只能经 insertAtom/
+    // fromInlines 建立;IME 不可能合法产生哨兵)。窗口既有 FFFC 不受影响
+    // (它们在 diff 的公共前后缀里)。
+    final cleanInserted = EditableTextContent.sanitizeText(diff.inserted);
+    final phantomCount = diff.inserted.length - cleanInserted.length;
+
     state.imeReplace(
       blockId,
       diff.start,
       diff.oldEnd,
-      diff.inserted,
-      caretOffset: value.selection.extentOffset
-          .clamp(0, sanitizedText.length),
+      cleanInserted,
+      caretOffset: (value.selection.extentOffset - phantomCount)
+          .clamp(0, sanitizedText.length - phantomCount),
       composing: composing,
     );
 
@@ -351,8 +362,8 @@ class EditorImeClient with TextInputClient {
     _lastSent = rawValue;
 
     // reconcile:若应用后文档与 IME 认知不一致(编辑器改写了内容,
-    // 比如剥了 '\n'),回喂纠正。
-    final now = state.blockById(blockId);
+    // 比如剥了 '\n'/幻造 FFFC),回喂纠正。
+    final now = state.textBlockById(blockId);
     if (now != null && now.content.text != sanitizedText) {
       syncFromState(show: false, force: true);
     }
@@ -422,7 +433,7 @@ class EditorImeClient with TextInputClient {
       _applyingPlatformUpdate = true;
       try {
         state.sealHistory();
-        state.splitParagraph();
+        state.splitBlock();
         syncFromState(show: false);
       } finally {
         _applyingPlatformUpdate = false;

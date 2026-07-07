@@ -13,6 +13,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../render/block_text_styles.dart';
+import '../../render/node_factory.dart';
 import '../../selection/hit_tester.dart';
 import '../../selection/selection_geometry.dart';
 import '../../selection/selection_registry.dart';
@@ -22,6 +24,7 @@ import '../input/editor_key_handler.dart';
 import '../model/editor_state.dart';
 import 'editable_paragraph.dart';
 import 'editor_caret.dart';
+import 'editor_island.dart';
 
 class FluxdoEditor extends StatefulWidget {
   const FluxdoEditor({
@@ -29,6 +32,7 @@ class FluxdoEditor extends StatefulWidget {
     required this.state,
     this.baseTextStyle,
     this.autofocus = false,
+    this.nodeFactory,
   });
 
   final EditorState state;
@@ -36,6 +40,10 @@ class FluxdoEditor extends StatefulWidget {
   final TextStyle? baseTextStyle;
 
   final bool autofocus;
+
+  /// 孤岛块的渲染工厂(主项目注入带 emoji/image builder 的实例;
+  /// null 用子包默认 fallback —— demo/测试可用)。
+  final NodeFactory? nodeFactory;
 
   @override
   State<FluxdoEditor> createState() => _FluxdoEditorState();
@@ -45,6 +53,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   late final SelectionController _controller;
   late final SelectionHitTester _hitTester;
   late final EditorImeClient _ime;
+  late final NodeFactory _islandFactory;
   final FocusNode _focusNode = FocusNode(debugLabel: 'FluxdoEditor');
   final GlobalKey _rootKey = GlobalKey();
 
@@ -62,6 +71,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     _controller = SelectionController(SelectionRegistry());
     _hitTester = SelectionHitTester(_controller.registry);
     _ime = EditorImeClient(state: widget.state);
+    _islandFactory = widget.nodeFactory ?? NodeFactory();
     widget.state.addListener(_onStateChanged);
     _focusNode.addListener(_onFocusChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _afterFrame());
@@ -99,7 +109,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
       if (widget.state.selection == null) {
         final last = widget.state.blocks.last;
         widget.state.updateSelection(EditorSelection.collapsed(
-          EditorPosition(blockId: last.id, offset: last.content.length),
+          EditorPosition(blockId: last.id, offset: last.selectionLength),
         ));
       }
       _ime.syncFromState();
@@ -138,6 +148,22 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     }
   }
 
+  /// 岛是否处于「整选」态(选区恰覆盖该岛 0..1)。
+  bool _isIslandSelected(String islandId) {
+    final norm = widget.state.normalizedSelection();
+    if (norm == null) return false;
+    final (from, to) = norm;
+    final fi = widget.state.indexOfBlock(from.blockId);
+    final ti = widget.state.indexOfBlock(to.blockId);
+    final ii = widget.state.indexOfBlock(islandId);
+    if (fi < 0 || ti < 0 || ii < 0) return false;
+    // 岛在选区块区间内;端点在岛上时按四象限(0=含,1=起于岛后)
+    if (ii < fi || ii > ti) return false;
+    if (ii == fi && from.blockId == islandId && from.offset >= 1) return false;
+    if (ii == ti && to.blockId == islandId && to.offset <= 0) return false;
+    return true;
+  }
+
   // -----------------------------------------------------------------
   // 坐标桥接
   // -----------------------------------------------------------------
@@ -150,6 +176,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   }) {
     final index = widget.state.indexOfBlock(pos.blockId);
     if (index < 0) return null;
+    // 岛不注册 RenderParagraph → 无 DocumentPosition(高亮/caret 均由
+    // EditorIsland 自绘选中态,不走选区几何)。
+    if (widget.state.blocks[index] is IslandBlock) return null;
     final id = _renderIdOf(index);
     final proj = _controller.registry.logicalById(id)?.projection;
     final renderOffset =
@@ -161,10 +190,37 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     );
   }
 
+  /// 跨岛选区的高亮镜像:端点在岛上时收缩到岛外邻文本块(文本部分高亮,
+  /// 岛的选中态由 EditorIsland 自绘)。
   DocumentSelection? _toDocumentSelection(EditorSelection? sel) {
     if (sel == null || sel.isCollapsed) return null;
-    final base = _toDocumentPosition(sel.base);
-    final extent = _toDocumentPosition(sel.extent);
+    final norm = widget.state.normalizedSelection();
+    if (norm == null) return null;
+    var (from, to) = norm;
+
+    final blocks = widget.state.blocks;
+    var fi = widget.state.indexOfBlock(from.blockId);
+    var ti = widget.state.indexOfBlock(to.blockId);
+    if (fi < 0 || ti < 0) return null;
+
+    // from 端在岛上 → 前进到下一个文本块头
+    while (fi <= ti && blocks[fi] is IslandBlock) {
+      fi++;
+      if (fi > ti) return null; // 纯岛选区:无文本高亮
+      from = EditorPosition(blockId: blocks[fi].id, offset: 0);
+    }
+    // to 端在岛上 → 回退到上一个文本块尾
+    while (ti >= fi && blocks[ti] is IslandBlock) {
+      ti--;
+      if (ti < fi) return null;
+      to = EditorPosition(
+        blockId: blocks[ti].id,
+        offset: blocks[ti].selectionLength,
+      );
+    }
+
+    final base = _toDocumentPosition(from);
+    final extent = _toDocumentPosition(to);
     if (base == null || extent == null) return null;
     return DocumentSelection(base: base, extent: extent);
   }
@@ -179,14 +235,24 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     return EditorPosition(blockId: blocks[index].id, offset: offset);
   }
 
-  /// 编辑光标固定行高(EditableText 的 preferredLineHeight 同款):
-  /// 按 baseStyle 用 TextPainter 量一次,build 时缓存。
+  /// 编辑光标固定行高:按**光标所在块的有效样式**取 preferredLineHeight
+  /// (heading 块光标更高)。缓存键 = (baseStyle, kind, level)。
   double _caretLineHeight = 16;
-  TextStyle? _caretHeightForStyle;
+  (TextStyle, TextBlockKind, int)? _caretHeightKey;
 
-  void _ensureCaretLineHeight(TextStyle style) {
-    if (_caretHeightForStyle == style) return;
-    _caretHeightForStyle = style;
+  void _ensureCaretLineHeight(TextStyle base) {
+    final sel = widget.state.selection;
+    final block = sel == null
+        ? null
+        : widget.state.textBlockById(sel.extent.blockId);
+    final kind = block?.kind ?? TextBlockKind.paragraph;
+    final level = block?.headingLevel ?? 1;
+    final key = (base, kind, level);
+    if (_caretHeightKey == key) return;
+    _caretHeightKey = key;
+    final style = kind == TextBlockKind.heading
+        ? headingStyleFor(base, level)
+        : base;
     final painter = TextPainter(
       text: TextSpan(text: ' ', style: style),
       textDirection: TextDirection.ltr,
@@ -253,7 +319,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
           ? EditorPosition(blockId: blocks.first.id, offset: 0)
           : EditorPosition(
               blockId: blocks.last.id,
-              offset: blocks.last.content.length,
+              offset: blocks.last.selectionLength,
             );
       if (endpoint == sel.extent) return;
       widget.state.updateSelection(
@@ -339,20 +405,57 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     final composingBlockId =
         state.hasComposing ? state.selection?.extent.blockId : null;
 
+    // 有序列表序号(派生渲染态):连续 listItem run 内扫描,run 首项取
+    // listStart;ordered/depth 切换重新起算(同 depth 的 ol 连续编号)。
+    final ordinals = List<int>.filled(state.blocks.length, 1);
+    final counters = <(bool, int), int>{}; // (ordered,depth) → 下一序号
+    for (var i = 0; i < state.blocks.length; i++) {
+      final b = state.blocks[i];
+      if (b is! TextBlock || !b.isListItem) {
+        counters.clear();
+        continue;
+      }
+      final key = (b.ordered, b.depth);
+      final next = counters[key] ?? b.listStart;
+      ordinals[i] = next;
+      counters[key] = next + 1;
+      // 更浅层计数不清(嵌套子列表结束回到父层继续编号);更深层清零
+      counters.removeWhere((k, _) => k.$2 > b.depth);
+    }
+
     final children = <Widget>[
       for (var i = 0; i < state.blocks.length; i++)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
-          child: EditableParagraph(
+          child: switch (state.blocks[i]) {
             // key 绑块 id:分段/合并时 Element 正确复用/重建
-            key: ValueKey(state.blocks[i].id),
-            block: state.blocks[i],
-            documentOrder: i,
-            baseStyle: baseStyle,
-            composing: state.blocks[i].id == composingBlockId
-                ? state.composing
-                : TextRange.empty,
-          ),
+            final TextBlock tb => EditableParagraph(
+                key: ValueKey(tb.id),
+                block: tb,
+                documentOrder: i,
+                baseStyle: baseStyle,
+                composing: tb.id == composingBlockId
+                    ? state.composing
+                    : TextRange.empty,
+                listMarkerOrdinal: ordinals[i],
+              ),
+            // 孤岛:NodeFactory 渲染,tap 整选,选中态描边
+            final IslandBlock ib => EditorIsland(
+                key: ValueKey(ib.id),
+                node: ib.node,
+                nodeFactory: _islandFactory,
+                selected: _isIslandSelected(ib.id),
+                onTapSelect: () {
+                  _focusNode.requestFocus();
+                  widget.state.sealHistory();
+                  widget.state.updateSelection(EditorSelection(
+                    base: EditorPosition(blockId: ib.id, offset: 0),
+                    extent: EditorPosition(blockId: ib.id, offset: 1),
+                  ));
+                  _ime.syncFromState(show: false);
+                },
+              ),
+          },
         ),
     ];
 

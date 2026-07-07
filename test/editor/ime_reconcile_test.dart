@@ -10,7 +10,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/editor/input/editor_ime_client.dart';
+import 'package:fluxdo_render/src/editor/model/editable_text_content.dart';
 import 'package:fluxdo_render/src/editor/model/editor_state.dart';
+import 'package:fluxdo_render/src/node/inline_node.dart';
 
 // pad \u4e0e\u8fd0\u884c\u65f6\u540c\u6e90(\u7a7a\u683c;\u66fe\u7528 ZWSP \u7591\u88ab macOS \u8f93\u5165\u4e0a\u4e0b\u6587\u5265\u79bb)
 final pad = EditorImeClient.padCharForTesting;
@@ -24,7 +26,7 @@ void main() {
     int caret = 3,
   }) {
     final state = EditorState.fromTexts(paragraphs);
-    final block = state.blocks[blockIndex];
+    final block = state.blocks[blockIndex] as TextBlock;
     state.updateSelection(EditorSelection.collapsed(
       EditorPosition(blockId: block.id, offset: caret),
     ));
@@ -51,7 +53,7 @@ void main() {
         selection: const TextSelection.collapsed(offset: 5),
         composing: const TextRange(start: 4, end: 5),
       ));
-      expect(state.blocks[0].content.text, '第一段n');
+      expect((state.blocks[0] as TextBlock).content.text, '第一段n');
       expect(state.composing, const TextRange(start: 3, end: 4));
       expect(state.hasComposing, true);
 
@@ -61,7 +63,7 @@ void main() {
         selection: const TextSelection.collapsed(offset: 6),
         composing: const TextRange(start: 4, end: 6),
       ));
-      expect(state.blocks[0].content.text, '第一段ni');
+      expect((state.blocks[0] as TextBlock).content.text, '第一段ni');
       expect(state.composing, const TextRange(start: 3, end: 5));
 
       // 空格上屏 '你':预编辑整段替换,composing 清空
@@ -70,7 +72,7 @@ void main() {
         selection: const TextSelection.collapsed(offset: 5),
         composing: TextRange.empty,
       ));
-      expect(state.blocks[0].content.text, '第一段你');
+      expect((state.blocks[0] as TextBlock).content.text, '第一段你');
       expect(state.hasComposing, false);
       expect(state.selection!.extent.offset, 4);
     });
@@ -87,7 +89,7 @@ void main() {
         selection: const TextSelection.collapsed(offset: 5),
         composing: const TextRange(start: 4, end: 5),
       ));
-      expect(state.blocks[0].content.text, '第一段n');
+      expect((state.blocks[0] as TextBlock).content.text, '第一段n');
       expect(state.composing, const TextRange(start: 3, end: 4));
     });
 
@@ -108,10 +110,10 @@ void main() {
         selection: const TextSelection.collapsed(offset: 5),
         composing: TextRange.empty,
       ));
-      expect(state.blocks[0].content.text, '第一段你');
+      expect((state.blocks[0] as TextBlock).content.text, '第一段你');
       state.undo();
       // 整个 n→ni→你 过程一步撤销
-      expect(state.blocks[0].content.text, '第一段');
+      expect((state.blocks[0] as TextBlock).content.text, '第一段');
     });
 
     test('30 字长句连续上屏不丢字不乱序', () {
@@ -135,7 +137,7 @@ void main() {
           composing: TextRange.empty,
         ));
       }
-      expect(state.blocks[0].content.text, sentence);
+      expect((state.blocks[0] as TextBlock).content.text, sentence);
     });
   });
 
@@ -190,7 +192,7 @@ void main() {
       ));
       // 不得合并段落
       expect(state.blocks.length, 2);
-      expect(state.blocks[1].content.text, 'second');
+      expect((state.blocks[1] as TextBlock).content.text, 'second');
     });
   });
 
@@ -207,7 +209,7 @@ void main() {
         selection: TextSelection.collapsed(offset: 0),
       ));
       expect(state.blocks.length, 1);
-      expect(state.blocks[0].content.text, '第一段second');
+      expect((state.blocks[0] as TextBlock).content.text, '第一段second');
       expect(state.selection!.extent.offset, 3);
     });
   });
@@ -235,8 +237,84 @@ void main() {
         composing: TextRange.empty,
       ));
       expect(state.blocks.length, 3);
-      expect(state.blocks[0].content.text, '第一段');
-      expect(state.blocks[1].content.text, '');
+      expect((state.blocks[0] as TextBlock).content.text, '第一段');
+      expect((state.blocks[1] as TextBlock).content.text, '');
+    });
+  });
+
+  group('原子(FFFC)在 IME 窗口', () {
+    (EditorState, EditorImeClient) makeWithAtom() {
+      // "ab￼cd",原子在 2,光标在 3(原子后)
+      const emoji = EmojiRun(name: 'heart', url: 'u');
+      final state = EditorState(blocks: [
+        TextBlock(
+          id: 'e_0',
+          content: EditableTextContent(
+            text: 'ab${kAtomChar}cd',
+            atoms: const {2: emoji},
+          ),
+        ),
+      ]);
+      state.updateSelection(const EditorSelection.collapsed(
+        EditorPosition(blockId: 'e_0', offset: 3),
+      ));
+      final ime = EditorImeClient(state: state);
+      ime.debugAttachToBlock(
+        'e_0',
+        EditorImeClient.debugFormat(
+          TextEditingValue(
+            text: 'ab${kAtomChar}cd',
+            selection: const TextSelection.collapsed(offset: 3),
+          ),
+        ),
+      );
+      return (state, ime);
+    }
+
+    test('原子后打拼音上屏:原子身份保留、位置不动', () {
+      final (state, ime) = makeWithAtom();
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}ab${kAtomChar}nicd',
+        selection: const TextSelection.collapsed(offset: 6),
+        composing: const TextRange(start: 4, end: 6),
+      ));
+      var c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, 'ab${kAtomChar}nicd');
+      expect(c.atoms[2], isNotNull);
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}ab$kAtomChar你cd',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: TextRange.empty,
+      ));
+      c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, 'ab$kAtomChar你cd');
+      expect(c.atoms[2], isNotNull);
+    });
+
+    test('平台上报少一个 FFFC = 退格删原子:身份同步消失', () {
+      final (state, ime) = makeWithAtom();
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}abcd',
+        selection: const TextSelection.collapsed(offset: 3),
+        composing: TextRange.empty,
+      ));
+      final c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, 'abcd');
+      expect(c.atoms, isEmpty);
+    });
+
+    test('replacement 携带裸 FFFC:被剥除,不产孤儿哨兵', () {
+      final (state, ime) = makeWithAtom();
+      // 平台幻造:在光标处"插入"一个裸 FFFC + x
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}ab$kAtomChar${kAtomChar}xcd',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: TextRange.empty,
+      ));
+      final c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, 'ab${kAtomChar}xcd');
+      expect(c.atoms.length, 1);
+      expect(c.atoms[2], isNotNull);
     });
   });
 
@@ -248,7 +326,7 @@ void main() {
         selection: const TextSelection.collapsed(offset: 3),
         composing: TextRange.empty,
       ));
-      expect(state.blocks[0].content.text, 'aXb');
+      expect((state.blocks[0] as TextBlock).content.text, 'aXb');
       expect(state.selection!.extent.offset, 2);
     });
 
@@ -260,7 +338,7 @@ void main() {
         selection: const TextSelection.collapsed(offset: 3),
         composing: TextRange.empty,
       ));
-      expect(state.blocks[0].content.text, 'hi world');
+      expect((state.blocks[0] as TextBlock).content.text, 'hi world');
       expect(state.selection!.extent.offset, 2);
     });
   });

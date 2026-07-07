@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../../flatten/inline_flattener.dart';
+import '../../render/block_text_styles.dart';
+import '../../render/list_item_layout.dart';
 import '../../render/selectable_text_box.dart';
 import '../../selection/projection.dart';
 import '../model/editor_state.dart';
@@ -27,9 +29,10 @@ class EditableParagraph extends StatefulWidget {
     required this.documentOrder,
     required this.baseStyle,
     this.composing = TextRange.empty,
+    this.listMarkerOrdinal = 1,
   });
 
-  final ParagraphBlock block;
+  final TextBlock block;
 
   /// 在编辑器文档中的序号(= blocks index;SelectableBlockId.docOrder)。
   final int documentOrder;
@@ -38,6 +41,9 @@ class EditableParagraph extends StatefulWidget {
 
   /// 本段的 IME composing 区间(编辑文本坐标);非本段/无 composing 传 empty。
   final TextRange composing;
+
+  /// 有序列表项显示序号(派生渲染态,FluxdoEditor 按连续 run 扫描计算)。
+  final int listMarkerOrdinal;
 
   @override
   State<EditableParagraph> createState() => _EditableParagraphState();
@@ -53,14 +59,17 @@ class _EditableParagraphState extends State<EditableParagraph> {
     // block.content 不可变 → 引用相等即缓存有效。
     return _result ??= _flattener.flatten(
       widget.block.content.toInlines(),
-      widget.baseStyle,
+      _effectiveStyle,
     );
   }
 
   @override
   void didUpdateWidget(covariant EditableParagraph oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // kind/headingLevel 变了 → 有效样式变 → flatten 缓存失效
     if (oldWidget.block.content != widget.block.content ||
+        oldWidget.block.kind != widget.block.kind ||
+        oldWidget.block.headingLevel != widget.block.headingLevel ||
         oldWidget.baseStyle != widget.baseStyle) {
       _disposeResult();
     }
@@ -96,9 +105,18 @@ class _EditableParagraphState extends State<EditableParagraph> {
     return found;
   }
 
+  /// 块有效字体样式(heading 缩放/加粗;FluxdoEditor 的 caret 行高与此
+  /// 同源 —— 见其 _ensureCaretLineHeight 的 per-kind 缓存)。
+  TextStyle get _effectiveStyle => widget.block.isHeading
+      ? headingStyleFor(widget.baseStyle, widget.block.headingLevel)
+      : widget.baseStyle;
+
   @override
   Widget build(BuildContext context) {
     final result = _ensureResult();
+    final block = widget.block;
+    final style = _effectiveStyle;
+    final em = widget.baseStyle.fontSize ?? 14;
 
     Widget text = KeyedSubtree(
       key: _textKey,
@@ -112,7 +130,7 @@ class _EditableParagraphState extends State<EditableParagraph> {
       child: Text.rich(
         result.span,
         strutStyle: StrutStyle.fromTextStyle(
-          widget.baseStyle,
+          style,
           forceStrutHeight: true,
         ),
       ),
@@ -124,19 +142,83 @@ class _EditableParagraphState extends State<EditableParagraph> {
           paragraphGetter: _findParagraph,
           projectionGetter: () => _result?.projection,
           composing: widget.composing,
-          color: widget.baseStyle.color ??
-              Theme.of(context).colorScheme.onSurface,
+          color: style.color ?? Theme.of(context).colorScheme.onSurface,
         ),
         child: text,
       );
     }
 
-    return SelectableTextBox(
+    Widget boxed = SelectableTextBox(
       projectionGetter: () => _ensureResult().projection,
       documentOrder: widget.documentOrder,
-      debugLabel: 'edit:${widget.block.id}',
+      debugLabel: 'edit:${block.id}',
       child: text,
     );
+
+    // 列表项:marker 悬挂布局(阅读端 HtmlListItem 同款;marker 不在
+    // RenderParagraph 内,投影/命中不受扰)。
+    // 缩进必须是 (depth+1) 而非 depth:marker 画在 content **左侧负偏移**
+    // 区,第 0 层不留 padding 的话 marker 悬挂到编辑器 Stack 外被
+    // hardEdge 裁掉(症状:圆点消失)。阅读端 buildList 每层都有
+    // padding-left,同理。
+    if (block.isListItem) {
+      final markerColor =
+          style.color ?? Theme.of(context).colorScheme.onSurface;
+      final markerStyle = style.copyWith(
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
+      boxed = Padding(
+        padding: EdgeInsets.only(left: em * 1.5 * (block.depth + 1)),
+        child: HtmlListItem(
+          textDirection: Directionality.of(context),
+          marker: block.ordered
+              ? Text(
+                  '${widget.listMarkerOrdinal}.',
+                  style: markerStyle,
+                  maxLines: 1,
+                  softWrap: false,
+                )
+              : ListMarkerDot(
+                  depth: block.depth,
+                  color: markerColor,
+                  textStyle: markerStyle,
+                ),
+          child: boxed,
+        ),
+      );
+    }
+
+    // heading 上下 margin(阅读端 buildHeading 同款)。
+    if (block.isHeading) {
+      final margin = em * kHeadingMargin[block.headingLevel - 1];
+      boxed = Padding(
+        padding: EdgeInsets.symmetric(vertical: margin / 2),
+        child: boxed,
+      );
+    }
+
+    // 引用装饰:左 4px 竖条 + 浅底(阅读端 buildBlockquote 视觉;相邻
+    // quote 块各画各的,首尾圆角合并留 M3 打磨)。
+    if (block.quoteDepth > 0) {
+      final scheme = Theme.of(context).colorScheme;
+      boxed = Padding(
+        padding: EdgeInsets.only(left: 12.0 * (block.quoteDepth - 1)),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
+            border: Border(
+              left: BorderSide(color: scheme.outlineVariant, width: 4),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+            child: boxed,
+          ),
+        ),
+      );
+    }
+
+    return boxed;
   }
 }
 

@@ -41,15 +41,28 @@ class EditorCaret extends StatefulWidget {
 
 class _EditorCaretState extends State<EditorCaret>
     with TickerProviderStateMixin {
-  late final AnimationController _move = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 100),
-  );
+  // 不能用惰性字段初始化器(late final = AnimationController(...)):
+  // 光标从未显示过时首次访问会发生在 dispose() → unmount 期间
+  // createTicker 崩溃("Looking up a deactivated widget's ancestor")。
+  late final AnimationController _move;
+  late final AnimationController _blink;
 
-  late final AnimationController _blink = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1100),
-  );
+  @override
+  void initState() {
+    super.initState();
+    _move = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 100),
+    );
+    _blink = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
+    if (widget.caretRect != null) {
+      _rectAnim = AlwaysStoppedAnimation(widget.caretRect);
+      _startBlink();
+    }
+  }
 
   /// 呼吸曲线:前 40% 常亮(打字时反复重置只会停留在这段)→ 渐隐 →
   /// 短灭 → 渐现 → 短亮,循环。
@@ -81,15 +94,6 @@ class _EditorCaretState extends State<EditorCaret>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.caretRect != null) {
-      _rectAnim = AlwaysStoppedAnimation(widget.caretRect);
-      _startBlink();
-    }
   }
 
   @override

@@ -60,24 +60,63 @@ void main() {
     });
   });
 
-  group('原子占位符', () {
-    // "a[emoji]b": render a(0) ￼(1) b(2);logical a : h e a r t : b
+  group('原子占位符(M2:emoji/mention 内容宽 1 = 一个 FFFC 哨兵)', () {
+    // "a[emoji]b": render a(0) ￼(1) b(2);内容 a ￼ b(宽 3)
     final atomProj = RenderTextProjection(const [
       ProjectionEntry(renderStart: 0, renderLen: 1, logicalText: 'a', kind: ProjectionKind.text),
       ProjectionEntry(renderStart: 1, renderLen: 1, logicalText: ':heart:', kind: ProjectionKind.emoji),
       ProjectionEntry(renderStart: 2, renderLen: 1, logicalText: 'b', kind: ProjectionKind.text),
     ]);
 
-    test('逻辑偏移落在原子内部 → 归到原子末端(不可切)', () {
-      // logical 3(':heart:' 中间)→ render 2(原子后)
-      expect(atomProj.renderOffsetForContent(3), 2);
-      expect(atomProj.renderOffsetForContent(1), 1); // 原子前
-      expect(atomProj.renderOffsetForContent(8), 2); // 原子后
+    test('contentLength:原子计 1', () {
+      expect(atomProj.contentLength, 3);
     });
 
-    test('render 落在原子上 → 逻辑归到原子串末', () {
-      expect(atomProj.contentOffsetForRender(1), 1);
-      expect(atomProj.contentOffsetForRender(2), 8);
+    test('内容→渲染:原子前后各 1', () {
+      expect(atomProj.renderOffsetForContent(0), 0);
+      expect(atomProj.renderOffsetForContent(1), 1); // 原子前
+      expect(atomProj.renderOffsetForContent(2), 2); // 原子后
+      expect(atomProj.renderOffsetForContent(3), 3);
+    });
+
+    test('渲染→内容:严格双射', () {
+      for (var c = 0; c <= 3; c++) {
+        final r = atomProj.renderOffsetForContent(c);
+        expect(atomProj.contentOffsetForRender(r), c,
+            reason: 'content=$c → render=$r 应可逆');
+      }
+    });
+
+    test('投影空间不受影响(复制仍出 :heart:)', () {
+      expect(atomProj.projectAll(), 'a:heart:b');
+      expect(atomProj.logicalLength, 9);
+    });
+  });
+
+  group('混排双射(emoji+mention+行内代码+ZWSP)', () {
+    // 内容: "hi ￼ @x前 [var x] ab"(原子宽1;代码段带 codePad;文本带 ZWSP)
+    // render: h i ␠ ￼ ␠ ￼ pad v a r ␠ x pad a ​ b
+    final proj = RenderTextProjection(const [
+      ProjectionEntry(renderStart: 0, renderLen: 3, logicalText: 'hi ', kind: ProjectionKind.text),
+      ProjectionEntry(renderStart: 3, renderLen: 1, logicalText: ':smile:', kind: ProjectionKind.emoji),
+      ProjectionEntry(renderStart: 4, renderLen: 1, logicalText: ' ', kind: ProjectionKind.text),
+      ProjectionEntry(renderStart: 5, renderLen: 1, logicalText: '@sam', kind: ProjectionKind.mention),
+      ProjectionEntry(renderStart: 6, renderLen: 1, logicalText: '', kind: ProjectionKind.codePad),
+      ProjectionEntry(renderStart: 7, renderLen: 5, logicalText: 'var x', kind: ProjectionKind.inlineCode),
+      ProjectionEntry(renderStart: 12, renderLen: 1, logicalText: '', kind: ProjectionKind.codePad),
+      ProjectionEntry(renderStart: 13, renderLen: 3, logicalText: 'a​b', kind: ProjectionKind.text),
+    ]);
+
+    test('contentLength = 3+1+1+1+5+2 = 13', () {
+      expect(proj.contentLength, 13);
+    });
+
+    test('全偏移双向往返', () {
+      for (var c = 0; c <= proj.contentLength; c++) {
+        final r = proj.renderOffsetForContent(c);
+        expect(proj.contentOffsetForRender(r), c,
+            reason: 'content=$c → render=$r 应可逆');
+      }
     });
   });
 

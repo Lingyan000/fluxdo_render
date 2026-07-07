@@ -1,24 +1,32 @@
 /// 可编辑段落的扁平行内模型。
 ///
 /// 编辑操作(插入/删除/切分/合并)在**扁平坐标**上做:一个段落 =
-/// 一段纯文本 + 若干互不嵌套约束的样式区间([MarkSpan])。这与
-/// ProseMirror 的 inline 表示(text + marks)同构 —— 编辑是 O(区间数)
-/// 的简单区间调整,不需要在嵌套树上找路径。
+/// 一段纯文本 + 样式区间([MarkSpan]) + 原子表([atoms])。这与
+/// ProseMirror 的 inline 表示(text + marks + 原子 node)同构 ——
+/// 编辑是 O(区间数) 的简单区间调整,不需要在嵌套树上找路径。
+///
+/// **原子节点**(M2):emoji/mention 在文本里用 [kAtomChar](U+FFFC,
+/// OBJECT REPLACEMENT CHARACTER)占 1 个 code unit,身份存 [atoms]
+/// (offset → 原 InlineNode 引用)。选型依据:
+/// - FFFC 恰是 Flutter WidgetSpan 的渲染占位字符,渲染/投影层的原子
+///   entry 机制已存在;
+/// - 与 IME pad(空格)/软换行 ZWSP(U+200B)/codePad NBSP(U+00A0)
+///   互不冲突;
+/// - grapheme 步长恒 1 → M1 的退格/光标移动逻辑天然把原子当一个单位。
+/// 用户输入里的裸 FFFC 由 [sanitizeText] 剥除(防 IME 回显幻造原子)。
 ///
 /// 渲染时通过 [toInlines] 转回 [InlineNode] 树喂现有 InlineFlattener,
 /// 保证编辑态与阅读态视觉零差异(行内代码 NBSP 灰底等精调全部复用)。
-///
-/// **M1 范围**:纯文本 + 简单样式(em/strong/inline-code/styled)。
-/// 原子节点(emoji/mention/image 等)M2 引入 atom 表后支持;M1 里
-/// [EditableTextContent.fromInlines] 遇到不支持的节点按投影文本降级
-/// (见 [_flattenInto] 的 fallback 分支)。
 library;
 
 import 'package:flutter/foundation.dart';
 
 import '../../node/inline_node.dart';
 
-/// 行内样式种类(编辑模型用,与 InlineNode 树的映射见 [MarkKind.wrap])。
+/// 原子哨兵字符(U+FFFC OBJECT REPLACEMENT CHARACTER)。
+const String kAtomChar = '\uFFFC';
+
+/// 行内样式种类(编辑模型用)。
 enum MarkKind {
   em,
   strong,
@@ -60,23 +68,46 @@ class MarkSpan {
 /// 段落的扁平可编辑内容(不可变;编辑原语返回新实例)。
 @immutable
 class EditableTextContent {
-  EditableTextContent({required this.text, List<MarkSpan> marks = const []})
-      : marks = List.unmodifiable(
+  EditableTextContent({
+    required this.text,
+    List<MarkSpan> marks = const [],
+    Map<int, InlineNode> atoms = const {},
+  })  : marks = List.unmodifiable(
           marks.where((m) => !m.isEmpty).toList()
             ..sort((a, b) {
               final c = a.start.compareTo(b.start);
               return c != 0 ? c : a.end.compareTo(b.end);
             }),
+        ),
+        atoms = Map.unmodifiable(atoms),
+        assert(
+          atoms.keys.every(
+            (o) => o >= 0 && o < text.length && text[o] == kAtomChar,
+          ),
+          'atoms 的每个 offset 必须指向文本中的 kAtomChar',
         );
 
   static final EditableTextContent empty = EditableTextContent(text: '');
 
   final String text;
 
-  /// 按 start 升序;同 kind 区间不重叠(构造方保证语义,本类不强校验)。
+  /// 按 start 升序;同 kind 区间不重叠(编辑原语与 [toggleMarkInRange]
+  /// 维护该语义,构造器只做排序/去空)。
   final List<MarkSpan> marks;
 
+  /// 原子表:offset(指向 text 中的 [kAtomChar])→ 原 InlineNode
+  /// (EmojiRun/MentionRun;M2 白名单,其他类型由 doc_converter 拦在岛外)。
+  final Map<int, InlineNode> atoms;
+
   int get length => text.length;
+
+  /// 剥除文本里的裸 FFFC(用户/IME 输入不允许自带哨兵 —— 只能经
+  /// [insertAtom]/fromInlines 建立原子)。
+  static String sanitizeText(String input) =>
+      input.contains(kAtomChar) ? input.replaceAll(kAtomChar, '') : input;
+
+  /// [offset] 处(其后)的字符是否原子。
+  bool isAtomAt(int offset) => atoms.containsKey(offset);
 
   // -----------------------------------------------------------------
   // InlineNode 树 ↔ 扁平 双向转换
@@ -84,36 +115,51 @@ class EditableTextContent {
 
   /// 从渲染节点树构建扁平模型。
   ///
-  /// M1 支持:TextRun / EmRun / StrongRun / InlineCodeRun /
-  /// StyledRun(underline|lineThrough) / LineBreakRun(转 '\n')。
-  /// 其余节点(emoji/mention/image/link/...)降级为其纯文本表示
-  /// (对齐 projection 的逻辑投影),样式丢弃 —— M2 的 atom 表会替换
-  /// 这个 fallback。
+  /// 支持:TextRun / EmRun / StrongRun / InlineCodeRun /
+  /// StyledRun(underline|lineThrough) / LineBreakRun(转 '\n')/
+  /// **EmojiRun / MentionRun(原子,M2)**。
+  ///
+  /// 其余节点(link/image/spoiler/...)不在编辑白名单 —— 调用方
+  /// (doc_converter.isEditableInline)负责拦截整块岛化,此处的降级
+  /// 分支仅作纯文本兜底(防御,不应在正常链路走到)。
   factory EditableTextContent.fromInlines(List<InlineNode> inlines) {
     final buf = StringBuffer();
     final marks = <MarkSpan>[];
-    _flattenInto(inlines, buf, marks, const []);
-    return EditableTextContent(text: buf.toString(), marks: marks);
+    final atoms = <int, InlineNode>{};
+    _flattenInto(inlines, buf, marks, atoms, const []);
+    return EditableTextContent(
+      text: buf.toString(),
+      marks: marks,
+      atoms: atoms,
+    );
   }
 
   static void _flattenInto(
     List<InlineNode> nodes,
     StringBuffer buf,
     List<MarkSpan> marks,
+    Map<int, InlineNode> atoms,
     List<MarkKind> activeKinds,
   ) {
     for (final node in nodes) {
       switch (node) {
         case TextRun(:final text):
-          _appendText(buf, marks, activeKinds, text);
+          _appendText(buf, marks, activeKinds, sanitizeText(text));
         case LineBreakRun():
           _appendText(buf, marks, activeKinds, '\n');
         case EmRun(:final children):
-          _flattenInto(children, buf, marks, [...activeKinds, MarkKind.em]);
+          _flattenInto(
+              children, buf, marks, atoms, [...activeKinds, MarkKind.em]);
         case StrongRun(:final children):
-          _flattenInto(children, buf, marks, [...activeKinds, MarkKind.strong]);
+          _flattenInto(
+              children, buf, marks, atoms, [...activeKinds, MarkKind.strong]);
         case InlineCodeRun(:final text):
-          _appendText(buf, marks, [...activeKinds, MarkKind.inlineCode], text);
+          _appendText(
+            buf,
+            marks,
+            [...activeKinds, MarkKind.inlineCode],
+            sanitizeText(text),
+          );
         case StyledRun(:final kind, :final children):
           final mapped = switch (kind) {
             InlineStyleKind.underline => MarkKind.underline,
@@ -124,26 +170,29 @@ class EditableTextContent {
             children,
             buf,
             marks,
+            atoms,
             mapped == null ? activeKinds : [...activeKinds, mapped],
           );
-        // ---- M1 降级分支:按纯文本收编,样式/交互丢弃(TODO M2 atom 表) ----
+        // ---- 原子(一等公民):哨兵占位 + 身份入表 ----
+        case EmojiRun():
+          atoms[buf.length] = node;
+          _appendText(buf, marks, activeKinds, kAtomChar);
+        case MentionRun():
+          atoms[buf.length] = node;
+          _appendText(buf, marks, activeKinds, kAtomChar);
+        // ---- 白名单外(防御降级,正常链路由 doc_converter 拦截岛化) ----
         case LinkRun(:final children):
-          _flattenInto(children, buf, marks, activeKinds);
-        case EmojiRun(:final name):
-          _appendText(buf, marks, activeKinds, name.isEmpty ? '' : ':$name:');
-        case MentionRun(:final username):
-          _appendText(buf, marks, activeKinds, '@$username');
+          _flattenInto(children, buf, marks, atoms, activeKinds);
         case ImageRun(:final alt):
-          _appendText(buf, marks, activeKinds, alt);
+          _appendText(buf, marks, activeKinds, sanitizeText(alt));
         case SpoilerRun(:final children):
-          _flattenInto(children, buf, marks, activeKinds);
+          _flattenInto(children, buf, marks, atoms, activeKinds);
         case ColoredRun(:final children):
-          _flattenInto(children, buf, marks, activeKinds);
+          _flattenInto(children, buf, marks, atoms, activeKinds);
         case FootnoteRefRun():
         case LocalDateRun():
         case ClickCountRun():
         case MathInlineRun():
-          // 无稳定文本表示的节点:M1 丢弃(编辑器不会由这些内容发起)。
           break;
       }
     }
@@ -159,7 +208,9 @@ class EditableTextContent {
     final start = buf.length;
     buf.write(text);
     final end = buf.length;
-    for (final kind in activeKinds) {
+    // 去重:嵌套同类标签(<em><strong><em>)会让 kind 重复出现,
+    // 重复处理会产出重叠区间(破坏"同 kind 不重叠"语义与往返不动点)。
+    for (final kind in {...activeKinds}) {
       // 与紧邻的同 kind 区间合并(嵌套展开会产生相邻碎段)。
       final lastIdx = marks.lastIndexWhere((m) => m.kind == kind);
       if (lastIdx >= 0 && marks[lastIdx].end == start) {
@@ -172,11 +223,9 @@ class EditableTextContent {
 
   /// 转回 InlineNode 树(渲染用)。
   ///
-  /// 策略:按所有区间边界切文本为片段,每个片段带其覆盖样式集合,
-  /// 相邻同样式片段已在边界切分时天然分开(不再合并 —— InlineFlattener
-  /// 对相邻同样式 span 的渲染结果一致)。嵌套顺序固定:
-  /// strong > em > underline > lineThrough 外层到内层;inlineCode 独占
-  /// (InlineCodeRun 只持纯文本,与其他样式互斥,冲突时 code 优先)。
+  /// 策略:按所有区间边界 + 原子位置切文本为片段;原子片段直接吐回
+  /// [atoms] 里的原节点(样式区间对原子不生效 —— emoji 图片没有粗体)。
+  /// 嵌套顺序固定:strong > em > underline > lineThrough;inlineCode 独占。
   List<InlineNode> toInlines() {
     if (text.isEmpty) return const [];
 
@@ -186,9 +235,9 @@ class EditableTextContent {
       cuts.add(m.start.clamp(0, text.length));
       cuts.add(m.end.clamp(0, text.length));
     }
-    // '\n' 单独成段(转 LineBreakRun)
+    // '\n' 与原子单独成段
     for (var i = 0; i < text.length; i++) {
-      if (text[i] == '\n') {
+      if (text[i] == '\n' || text[i] == kAtomChar) {
         cuts.add(i);
         cuts.add(i + 1);
       }
@@ -204,6 +253,14 @@ class EditableTextContent {
       final piece = text.substring(s, e);
       if (piece == '\n') {
         out.add(const LineBreakRun());
+        continue;
+      }
+      if (piece == kAtomChar) {
+        final atom = atoms[s];
+        if (atom != null) {
+          out.add(atom);
+        }
+        // 无身份的孤儿哨兵(不变量破坏,构造器断言防):静默丢弃。
         continue;
       }
       final kinds = <MarkKind>{
@@ -236,7 +293,7 @@ class EditableTextContent {
   }
 
   // -----------------------------------------------------------------
-  // 编辑原语(全部返回新实例)
+  // 编辑原语(全部返回新实例;atoms 表随区间同步平移)
   // -----------------------------------------------------------------
 
   /// 在 [offset] 处插入 [inserted]。样式区间调整规则:
@@ -244,6 +301,9 @@ class EditableTextContent {
   /// - 插入点在区间内部(start < offset < end):区间拉长(延续样式,
   ///   对齐主流编辑器"在粗体中间打字仍是粗体");
   /// - 插入点恰在区间边界:不延续(在粗体结尾打字回到正常)。
+  ///
+  /// 注意:[inserted] 未经 [sanitizeText] —— 调用方(EditorState/
+  /// insertAtom)负责;insertAtom 恰要插入哨兵本体,不能在这里一刀切剥。
   EditableTextContent insert(int offset, String inserted) {
     assert(offset >= 0 && offset <= text.length);
     if (inserted.isEmpty) return this;
@@ -261,10 +321,25 @@ class EditableTextContent {
     return EditableTextContent(
       text: text.replaceRange(offset, offset, inserted),
       marks: newMarks,
+      atoms: {
+        for (final e in atoms.entries)
+          (e.key >= offset ? e.key + len : e.key): e.value,
+      },
     );
   }
 
-  /// 删除 `[start, end)` 区间。
+  /// 在 [offset] 处插入一个原子(哨兵 + 身份)。
+  EditableTextContent insertAtom(int offset, InlineNode atom) {
+    assert(offset >= 0 && offset <= text.length);
+    final withChar = insert(offset, kAtomChar);
+    return EditableTextContent(
+      text: withChar.text,
+      marks: withChar.marks,
+      atoms: {...withChar.atoms, offset: atom},
+    );
+  }
+
+  /// 删除 `[start, end)` 区间(区间内的原子随之消失)。
   EditableTextContent delete(int start, int end) {
     assert(start >= 0 && end <= text.length && start <= end);
     if (start == end) return this;
@@ -282,6 +357,13 @@ class EditableTextContent {
     return EditableTextContent(
       text: text.replaceRange(start, end, ''),
       marks: newMarks,
+      atoms: {
+        for (final e in atoms.entries)
+          if (e.key < start)
+            e.key: e.value
+          else if (e.key >= end)
+            e.key - len: e.value,
+      },
     );
   }
 
@@ -307,7 +389,116 @@ class EditableTextContent {
         for (final m in other.marks)
           m.copyWith(start: m.start + base, end: m.end + base),
       ],
+      atoms: {
+        ...atoms,
+        for (final e in other.atoms.entries) e.key + base: e.value,
+      },
     );
+  }
+
+  // -----------------------------------------------------------------
+  // mark 区间代数(格式命令用)
+  // -----------------------------------------------------------------
+
+  /// `[start, end)` 是否被 [kind] 完全覆盖(toggle 语义判定)。
+  ///
+  /// 覆盖判定容许多个同 kind 区间**无缝拼接**;区间之间有任何未覆盖
+  /// 字符即 false。原子字符也计入(选中含 emoji 的一段"全是粗体"时,
+  /// emoji 位置上的 mark 虽不影响渲染,但参与覆盖判定 —— 保证 toggle
+  /// 幂等:两次 toggle 回到原状)。
+  bool isRangeFullyMarked(int start, int end, MarkKind kind) {
+    assert(start >= 0 && end <= text.length && start <= end);
+    if (start == end) return false;
+    var cursor = start;
+    // marks 按 start 升序;同 kind 区间不重叠
+    for (final m in marks) {
+      if (m.kind != kind) continue;
+      if (m.end <= cursor) continue;
+      if (m.start > cursor) return false; // 缝隙
+      cursor = m.end;
+      if (cursor >= end) return true;
+    }
+    return cursor >= end;
+  }
+
+  /// 对 `[start, end)` 应用 [kind](幂等;与既有区间合并归一)。
+  EditableTextContent applyMark(int start, int end, MarkKind kind) {
+    assert(start >= 0 && end <= text.length && start <= end);
+    if (start == end) return this;
+    final same = <MarkSpan>[];
+    final others = <MarkSpan>[];
+    for (final m in marks) {
+      (m.kind == kind ? same : others).add(m);
+    }
+    // 与 [start,end) 相交/相邻的同 kind 区间合并成一条
+    var ns = start;
+    var ne = end;
+    final keep = <MarkSpan>[];
+    for (final m in same) {
+      if (m.end < ns || m.start > ne) {
+        keep.add(m);
+      } else {
+        if (m.start < ns) ns = m.start;
+        if (m.end > ne) ne = m.end;
+      }
+    }
+    return EditableTextContent(
+      text: text,
+      marks: [...others, ...keep, MarkSpan(start: ns, end: ne, kind: kind)],
+      atoms: atoms,
+    );
+  }
+
+  /// 从 `[start, end)` 移除 [kind](区间切分)。
+  EditableTextContent removeMark(int start, int end, MarkKind kind) {
+    assert(start >= 0 && end <= text.length && start <= end);
+    if (start == end) return this;
+    final newMarks = <MarkSpan>[];
+    for (final m in marks) {
+      if (m.kind != kind || m.end <= start || m.start >= end) {
+        newMarks.add(m);
+        continue;
+      }
+      // 相交:留两侧残段
+      if (m.start < start) {
+        newMarks.add(m.copyWith(end: start));
+      }
+      if (m.end > end) {
+        newMarks.add(m.copyWith(start: end));
+      }
+    }
+    return EditableTextContent(text: text, marks: newMarks, atoms: atoms);
+  }
+
+  /// toggle:全覆盖 → 移除;否则 → 补齐(主流编辑器语义)。
+  EditableTextContent toggleMarkInRange(int start, int end, MarkKind kind) =>
+      isRangeFullyMarked(start, end, kind)
+          ? removeMark(start, end, kind)
+          : applyMark(start, end, kind);
+
+  /// 对 `[start, end)` 精确设置 marks 集合(pending style 应用:
+  /// 先清区间上全部 kind,再施加 [kinds])。
+  EditableTextContent applyExactMarks(int start, int end, Set<MarkKind> kinds) {
+    var c = this;
+    for (final kind in MarkKind.values) {
+      c = kinds.contains(kind)
+          ? c.applyMark(start, end, kind)
+          : c.removeMark(start, end, kind);
+    }
+    return c;
+  }
+
+  /// [offset] 光标处的"当前样式集"(pending 初值/工具栏高亮):
+  /// 取光标**前一个字符**上的 marks(行首取后一个);原子字符视为无样式。
+  Set<MarkKind> marksAt(int offset) {
+    assert(offset >= 0 && offset <= text.length);
+    if (text.isEmpty) return const {};
+    final probe = offset > 0 ? offset - 1 : 0;
+    if (isAtomAt(probe)) return const {};
+    return {
+      for (final m in marks)
+        if (m.start <= probe && probe < m.end) m.kind,
+    };
   }
 
   @override
@@ -316,12 +507,17 @@ class EditableTextContent {
       other is EditableTextContent &&
           runtimeType == other.runtimeType &&
           text == other.text &&
-          listEquals(marks, other.marks);
+          listEquals(marks, other.marks) &&
+          mapEquals(atoms, other.atoms);
 
   @override
-  int get hashCode => Object.hash(text, Object.hashAll(marks));
+  int get hashCode => Object.hash(
+        text,
+        Object.hashAll(marks),
+        Object.hashAll(atoms.entries.map((e) => Object.hash(e.key, e.value))),
+      );
 
   @override
-  String toString() =>
-      'EditableTextContent(${text.length} chars, ${marks.length} marks)';
+  String toString() => 'EditableTextContent(${text.length} chars, '
+      '${marks.length} marks, ${atoms.length} atoms)';
 }

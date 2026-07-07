@@ -142,22 +142,27 @@ class RenderTextProjection {
   // - 软换行 ZWSP(kSoftBreakChar,soft_break 注入,渲染/投影都有)宽 0;
   // - codePad(NBSP 粘性内边距,logicalText '')宽 0;
   // - 文本类 entry 其余字符 1:1;
-  // - 原子类按其投影串计长(与 EditableTextContent.fromInlines 的降级
-  //   一致::name: / @username / alt)。
+  // - **emoji/mention 原子宽 1**(编辑模型里是一个 U+FFFC 哨兵,M2);
+  // - 其余原子类按投影串计长(编辑器 TextBlock 不出现,防御口径)。
+  //
+  // 在编辑器可出现的 entry 集(text/lineBreak/inlineCode/codePad/
+  // emoji/mention)上,两向映射是**严格双射**。
   //
   // 与「逻辑投影空间」(projectAll,含 ZWSP,给复制/HtmlTextMapper)是
   // **两个不同空间** —— 编辑器曾直接混用,30 字符(软换行阈值)以上
   // 光标错位、段尾无法选中,就是这个混淆。
   // -------------------------------------------------------------------
 
+  /// 单个 entry 的内容空间宽度。
+  static int _contentLenOfEntry(ProjectionEntry e) => switch (e.kind) {
+        ProjectionKind.emoji || ProjectionKind.mention => 1,
+        _ when e.isAtomic => e.logicalText.length,
+        _ => _contentLenOf(e.logicalText),
+      };
+
   /// 内容空间总长度。
-  int get contentLength {
-    var n = 0;
-    for (final e in entries) {
-      n += e.isAtomic ? e.logicalText.length : _contentLenOf(e.logicalText);
-    }
-    return n;
-  }
+  int get contentLength =>
+      entries.fold(0, (n, e) => n + _contentLenOfEntry(e));
 
   /// 内容偏移 → 渲染偏移。
   ///
@@ -165,20 +170,18 @@ class RenderTextProjection {
   /// - 边界(恰在某 entry 内容末)**延迟归属**:跳过零内容 entry
   ///   (codePad/纯 ZWSP),落到下一个内容 entry 的 renderStart —— 光标
   ///   不停在 NBSP 粘性内边距上;
-  /// - 原子内部归到原子末端(不可切);
+  /// - 多字符原子(防御口径)内部归到原子末端(不可切);
   /// - 入参越界自动 clamp。
   int renderOffsetForContent(int contentOffset) {
     var remaining = contentOffset.clamp(0, contentLength);
     for (final e in entries) {
-      final entryContentLen = e.isAtomic
-          ? e.logicalText.length
-          : _contentLenOf(e.logicalText);
+      final entryContentLen = _contentLenOfEntry(e);
       if (remaining <= 0) {
         if (entryContentLen == 0) continue; // pad/ZWSP:光标不停这
         return e.renderStart;
       }
       if (remaining < entryContentLen) {
-        if (e.isAtomic) return e.renderEnd; // 原子内部 → 末端
+        if (e.isAtomic) return e.renderEnd; // 多字符原子内部 → 末端
         var seen = 0;
         final s = e.logicalText;
         for (var i = 0; i < s.length; i++) {
@@ -207,9 +210,10 @@ class RenderTextProjection {
     var content = 0;
     for (final e in entries) {
       if (target <= e.renderStart) return content;
+      final entryContentLen = _contentLenOfEntry(e);
       if (e.isAtomic) {
-        if (target < e.renderEnd) return content + e.logicalText.length;
-        content += e.logicalText.length;
+        if (target < e.renderEnd) return content + entryContentLen;
+        content += entryContentLen;
       } else {
         final s = e.logicalText;
         final upTo = target < e.renderEnd ? target - e.renderStart : s.length;

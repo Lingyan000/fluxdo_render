@@ -17,17 +17,17 @@ void main() {
       final s = makeState();
       placeCaret(s, 0, 3);
       s.insertText('!');
-      expect(s.blocks[0].content.text, '第一段!');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段!');
       expect(s.selection!.extent.offset, 4);
     });
 
     test('splitParagraph 段中分段', () {
       final s = makeState();
       placeCaret(s, 1, 3);
-      s.splitParagraph();
+      s.splitBlock();
       expect(s.blocks.length, 4);
-      expect(s.blocks[1].content.text, 'sec');
-      expect(s.blocks[2].content.text, 'ond');
+      expect((s.blocks[1] as TextBlock).content.text, 'sec');
+      expect((s.blocks[2] as TextBlock).content.text, 'ond');
       expect(s.selection!.extent.blockId, s.blocks[2].id);
       expect(s.selection!.extent.offset, 0);
     });
@@ -36,7 +36,7 @@ void main() {
       final s = makeState();
       s.mergeWithPrevious(s.blocks[1].id);
       expect(s.blocks.length, 2);
-      expect(s.blocks[0].content.text, '第一段second');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段second');
       expect(s.selection!.extent.offset, 3);
     });
 
@@ -45,13 +45,13 @@ void main() {
       placeCaret(s, 1, 0);
       s.backspace();
       expect(s.blocks.length, 2);
-      expect(s.blocks[0].content.text, '第一段second');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段second');
 
       // emoji(代理对)按 grapheme 整删
       final s2 = EditorState.fromTexts(const ['a👨‍👩‍👧‍👦b']);
       placeCaret(s2, 0, 'a👨‍👩‍👧‍👦'.length);
       s2.backspace();
-      expect(s2.blocks[0].content.text, 'ab');
+      expect((s2.blocks[0] as TextBlock).content.text, 'ab');
     });
 
     test('deleteForward 段尾并下一段', () {
@@ -59,7 +59,7 @@ void main() {
       placeCaret(s, 0, 3);
       s.deleteForward();
       expect(s.blocks.length, 2);
-      expect(s.blocks[0].content.text, '第一段second');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段second');
       expect(s.selection!.extent.offset, 3);
     });
 
@@ -71,7 +71,7 @@ void main() {
       ));
       s.deleteSelection();
       expect(s.blocks.length, 1);
-      expect(s.blocks[0].content.text, '第');
+      expect((s.blocks[0] as TextBlock).content.text, '第');
       expect(s.selection!.isCollapsed, true);
       expect(s.selection!.extent.offset, 1);
     });
@@ -84,7 +84,7 @@ void main() {
       ));
       s.deleteSelection();
       expect(s.blocks.length, 1);
-      expect(s.blocks[0].content.text, '第');
+      expect((s.blocks[0] as TextBlock).content.text, '第');
     });
   });
 
@@ -127,9 +127,9 @@ void main() {
       s.insertText('a');
       s.insertText('b');
       s.insertText('c');
-      expect(s.blocks[0].content.text, '第一段abc');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段abc');
       s.undo();
-      expect(s.blocks[0].content.text, '第一段');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段');
       expect(s.canUndo, false);
     });
 
@@ -140,24 +140,24 @@ void main() {
       s.sealHistory();
       s.insertText('b');
       s.undo();
-      expect(s.blocks[0].content.text, '第一段a');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段a');
       s.undo();
-      expect(s.blocks[0].content.text, '第一段');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段');
     });
 
     test('结构操作(split)独立成步且可 redo', () {
       final s = makeState();
       placeCaret(s, 0, 1);
       s.insertText('x');
-      s.splitParagraph();
+      s.splitBlock();
       expect(s.blocks.length, 4);
       s.undo(); // 撤 split
       expect(s.blocks.length, 3);
-      expect(s.blocks[0].content.text, '第x一段');
+      expect((s.blocks[0] as TextBlock).content.text, '第x一段');
       s.undo(); // 撤 insert
-      expect(s.blocks[0].content.text, '第一段');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段');
       s.redo();
-      expect(s.blocks[0].content.text, '第x一段');
+      expect((s.blocks[0] as TextBlock).content.text, '第x一段');
       s.redo();
       expect(s.blocks.length, 4);
     });
@@ -180,7 +180,7 @@ void main() {
       placeCaret(s, 0, 3);
       s.imeReplace(id, 3, 3, 'ni', caretOffset: 5,
           composing: const TextRange(start: 3, end: 5));
-      expect(s.blocks[0].content.text, '第一段ni');
+      expect((s.blocks[0] as TextBlock).content.text, '第一段ni');
       expect(s.composing, const TextRange(start: 3, end: 5));
       expect(s.selection!.extent.offset, 5);
     });

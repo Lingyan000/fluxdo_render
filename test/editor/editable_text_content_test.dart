@@ -51,14 +51,148 @@ void main() {
       ]);
     });
 
-    test('M1 降级:emoji/mention 收编为投影文本', () {
+    test('M2 一等公民:emoji/mention 建原子(哨兵+身份)', () {
+      const emoji = EmojiRun(name: 'heart', url: 'u');
+      const mention = MentionRun(username: 'sam', href: '/u/sam');
       final c = EditableTextContent.fromInlines(const [
         TextRun('hi '),
-        EmojiRun(name: 'heart', url: 'u'),
+        emoji,
         TextRun(' '),
-        MentionRun(username: 'sam', href: '/u/sam'),
+        mention,
       ]);
-      expect(c.text, 'hi :heart: @sam');
+      expect(c.text, 'hi $kAtomChar $kAtomChar');
+      expect(c.atoms[3], same(emoji));
+      expect(c.atoms[5], same(mention));
+      // 树往返:原子原样吐回
+      expect(c.toInlines(), const [
+        TextRun('hi '),
+        emoji,
+        TextRun(' '),
+        mention,
+      ]);
+    });
+
+    test('sanitizeText 剥裸 FFFC;文本路径不产孤儿哨兵', () {
+      expect(EditableTextContent.sanitizeText('a${kAtomChar}b'), 'ab');
+      final c = EditableTextContent.fromInlines(
+        [TextRun('x${kAtomChar}y')],
+      );
+      expect(c.text, 'xy');
+      expect(c.atoms, isEmpty);
+    });
+  });
+
+  group('原子编辑原语', () {
+    const emoji = EmojiRun(name: 'heart', url: 'u');
+    // "ab￼cd",原子在 2
+    final base = EditableTextContent(text: 'ab', marks: const [])
+        .insert(2, 'cd')
+        .insertAtom(2, emoji);
+
+    test('insertAtom 建哨兵与身份', () {
+      expect(base.text, 'ab${kAtomChar}cd');
+      expect(base.atoms[2], same(emoji));
+      expect(base.isAtomAt(2), true);
+    });
+
+    test('原子前插入:offset 平移', () {
+      final r = base.insert(0, 'XX');
+      expect(r.text, 'XXab${kAtomChar}cd');
+      expect(r.atoms[4], same(emoji));
+      expect(r.atoms.length, 1);
+    });
+
+    test('原子后插入:offset 不动', () {
+      final r = base.insert(4, 'Y');
+      expect(r.atoms[2], same(emoji));
+    });
+
+    test('删除区间含原子:身份消失', () {
+      final r = base.delete(1, 4);
+      expect(r.text, 'ad');
+      expect(r.atoms, isEmpty);
+    });
+
+    test('删除原子前区间:offset 左移', () {
+      final r = base.delete(0, 1);
+      expect(r.text, 'b${kAtomChar}cd');
+      expect(r.atoms[1], same(emoji));
+    });
+
+    test('split 跨原子:原子归属正确侧', () {
+      final (before, after) = base.split(2);
+      expect(before.text, 'ab');
+      expect(before.atoms, isEmpty);
+      expect(after.text, '${kAtomChar}cd');
+      expect(after.atoms[0], same(emoji));
+    });
+
+    test('concat:右侧原子 offset 平移', () {
+      final r = base.concat(base);
+      expect(r.atoms.length, 2);
+      expect(r.atoms[2], same(emoji));
+      expect(r.atoms[7], same(emoji));
+    });
+  });
+
+  group('mark 区间代数', () {
+    final plain = EditableTextContent(text: 'abcdef');
+
+    test('applyMark 幂等 + 相邻合并', () {
+      final once = plain.applyMark(1, 3, MarkKind.strong);
+      final twice = once.applyMark(1, 3, MarkKind.strong);
+      expect(twice.marks, once.marks);
+      // 相邻区间合并为一条
+      final merged = once.applyMark(3, 5, MarkKind.strong);
+      expect(merged.marks, const [MarkSpan(start: 1, end: 5, kind: MarkKind.strong)]);
+    });
+
+    test('removeMark 部分覆盖:切两侧残段', () {
+      final c = plain
+          .applyMark(0, 6, MarkKind.em)
+          .removeMark(2, 4, MarkKind.em);
+      expect(c.marks, const [
+        MarkSpan(start: 0, end: 2, kind: MarkKind.em),
+        MarkSpan(start: 4, end: 6, kind: MarkKind.em),
+      ]);
+    });
+
+    test('isRangeFullyMarked:无缝拼接算覆盖,缝隙不算', () {
+      final seamless = plain
+          .applyMark(0, 3, MarkKind.strong)
+          .applyMark(3, 6, MarkKind.strong);
+      expect(seamless.isRangeFullyMarked(1, 5, MarkKind.strong), true);
+      final gapped = plain
+          .applyMark(0, 2, MarkKind.strong)
+          .applyMark(4, 6, MarkKind.strong);
+      expect(gapped.isRangeFullyMarked(1, 5, MarkKind.strong), false);
+    });
+
+    test('toggle:全覆盖移除、部分覆盖补齐、再 toggle 还原', () {
+      final partial = plain.applyMark(2, 4, MarkKind.em);
+      final filled = partial.toggleMarkInRange(0, 6, MarkKind.em);
+      expect(filled.isRangeFullyMarked(0, 6, MarkKind.em), true);
+      final cleared = filled.toggleMarkInRange(0, 6, MarkKind.em);
+      expect(cleared.marks.where((m) => m.kind == MarkKind.em), isEmpty);
+    });
+
+    test('applyExactMarks:清旧施新', () {
+      final c = plain
+          .applyMark(0, 6, MarkKind.em)
+          .applyExactMarks(2, 4, {MarkKind.strong});
+      expect(c.isRangeFullyMarked(2, 4, MarkKind.strong), true);
+      expect(c.isRangeFullyMarked(2, 4, MarkKind.em), false);
+      expect(c.isRangeFullyMarked(0, 2, MarkKind.em), true);
+    });
+
+    test('marksAt:取光标前字符样式;原子处为空', () {
+      const emoji = EmojiRun(name: 'x', url: 'u');
+      final c = plain
+          .applyMark(0, 3, MarkKind.strong)
+          .insertAtom(3, emoji);
+      expect(c.marksAt(2), {MarkKind.strong});
+      expect(c.marksAt(3), {MarkKind.strong}); // 前字符 'c'(2) 在粗体内
+      expect(c.marksAt(4), isEmpty); // 前字符是原子
     });
   });
 
