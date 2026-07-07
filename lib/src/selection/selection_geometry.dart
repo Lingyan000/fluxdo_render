@@ -7,6 +7,8 @@
 ///   逻辑投影只在复制那一刻转(见 projection.dart)
 library;
 
+import 'dart:ui' show TextAffinity;
+
 import 'package:flutter/foundation.dart';
 
 /// 可选文本块的稳定标识 = **逻辑文档序** `(chunkIndex, docOrder)`。
@@ -59,17 +61,28 @@ class SelectableBlockId {
 /// 文档内一个点:某块 + 块内渲染偏移。
 @immutable
 class DocumentPosition {
-  const DocumentPosition({required this.blockId, required this.renderOffset});
+  const DocumentPosition({
+    required this.blockId,
+    required this.renderOffset,
+    this.affinity = TextAffinity.downstream,
+  });
 
   final SelectableBlockId blockId;
 
   /// RenderParagraph 坐标系的字符偏移(￼ 各占 1)。
   final int renderOffset;
 
+  /// 软换行边界的归属侧(**渲染提示,不参与 ==**):同一 offset 在换行点
+  /// 有两个视觉位置 —— upstream=上一行行末,downstream=下一行行首。
+  /// 命中测试保留 getPositionForOffset 的原始 affinity,编辑光标据此
+  /// 画在用户点击的那一行(丢弃即"点行末光标跳下一行行首")。
+  final TextAffinity affinity;
+
   DocumentPosition copyWith({SelectableBlockId? blockId, int? renderOffset}) =>
       DocumentPosition(
         blockId: blockId ?? this.blockId,
         renderOffset: renderOffset ?? this.renderOffset,
+        affinity: affinity,
       );
 
   @override
@@ -84,7 +97,8 @@ class DocumentPosition {
   int get hashCode => Object.hash(blockId, renderOffset);
 
   @override
-  String toString() => 'DocumentPosition($blockId @$renderOffset)';
+  String toString() => 'DocumentPosition($blockId @$renderOffset'
+      '${affinity == TextAffinity.upstream ? "↑" : ""})';
 }
 
 /// 有向选区:[base] 锚点(起选不动)→ [extent] 浮标(跟手指/鼠标走)。

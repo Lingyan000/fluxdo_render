@@ -13,6 +13,8 @@ dependencies:
     sdk: flutter
   # HTML 解析(W3C 标准、Dart 官方维护),与主项目同款
   html: ^0.15.5
+  # 编辑内核(src/editor)按 grapheme 移动/删除光标
+  characters: ^1.4.1
 
 dev_dependencies:
   flutter_test:

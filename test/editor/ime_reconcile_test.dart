@@ -1,0 +1,267 @@
+/// IME 序列回放测试 —— 把 CJK composing 行为固化下来,不依赖真机。
+///
+/// 场景:模拟平台侧(输入法)按真实时序回调 updateEditingValue,断言
+/// 文档/composing/undo 的最终状态。回放值带 pad 前缀(与运行时平台
+/// 回显一致);pad 剥除、diff、事务映射全链路被覆盖。
+library;
+
+import 'package:characters/characters.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fluxdo_render/src/editor/input/editor_ime_client.dart';
+import 'package:fluxdo_render/src/editor/model/editor_state.dart';
+
+// pad \u4e0e\u8fd0\u884c\u65f6\u540c\u6e90(\u7a7a\u683c;\u66fe\u7528 ZWSP \u7591\u88ab macOS \u8f93\u5165\u4e0a\u4e0b\u6587\u5265\u79bb)
+final pad = EditorImeClient.padCharForTesting;
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  (EditorState, EditorImeClient) makeAttached({
+    List<String> paragraphs = const ['第一段', 'second'],
+    int blockIndex = 0,
+    int caret = 3,
+  }) {
+    final state = EditorState.fromTexts(paragraphs);
+    final block = state.blocks[blockIndex];
+    state.updateSelection(EditorSelection.collapsed(
+      EditorPosition(blockId: block.id, offset: caret),
+    ));
+    final ime = EditorImeClient(state: state);
+    ime.debugAttachToBlock(
+      block.id,
+      EditorImeClient.debugFormat(
+        TextEditingValue(
+          text: block.content.text,
+          selection: TextSelection.collapsed(offset: caret),
+        ),
+      ),
+    );
+    return (state, ime);
+  }
+
+  group('拼音 composing 全流程', () {
+    test('n → ni → 你 上屏', () {
+      final (state, ime) = makeAttached();
+
+      // 打 'n':composing [3,4)(未 pad 坐标)
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段n',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: const TextRange(start: 4, end: 5),
+      ));
+      expect(state.blocks[0].content.text, '第一段n');
+      expect(state.composing, const TextRange(start: 3, end: 4));
+      expect(state.hasComposing, true);
+
+      // 打 'i'
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段ni',
+        selection: const TextSelection.collapsed(offset: 6),
+        composing: const TextRange(start: 4, end: 6),
+      ));
+      expect(state.blocks[0].content.text, '第一段ni');
+      expect(state.composing, const TextRange(start: 3, end: 5));
+
+      // 空格上屏 '你':预编辑整段替换,composing 清空
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段你',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: TextRange.empty,
+      ));
+      expect(state.blocks[0].content.text, '第一段你');
+      expect(state.hasComposing, false);
+      expect(state.selection!.extent.offset, 4);
+    });
+
+    test('composing 中退格(ni → n)', () {
+      final (state, ime) = makeAttached();
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段ni',
+        selection: const TextSelection.collapsed(offset: 6),
+        composing: const TextRange(start: 4, end: 6),
+      ));
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段n',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: const TextRange(start: 4, end: 5),
+      ));
+      expect(state.blocks[0].content.text, '第一段n');
+      expect(state.composing, const TextRange(start: 3, end: 4));
+    });
+
+    test('一次拼音上屏 = 一个 undo 步(composition 结束 seal)', () {
+      final (state, ime) = makeAttached();
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段n',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: const TextRange(start: 4, end: 5),
+      ));
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段ni',
+        selection: const TextSelection.collapsed(offset: 6),
+        composing: const TextRange(start: 4, end: 6),
+      ));
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段你',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: TextRange.empty,
+      ));
+      expect(state.blocks[0].content.text, '第一段你');
+      state.undo();
+      // 整个 n→ni→你 过程一步撤销
+      expect(state.blocks[0].content.text, '第一段');
+    });
+
+    test('30 字长句连续上屏不丢字不乱序', () {
+      final (state, ime) = makeAttached(paragraphs: [''], caret: 0);
+      const sentence = '这是一个用来验证连续中文输入不丢字符也不乱序的完整长句子测试';
+      var committed = '';
+      for (final ch in sentence.characters) {
+        // 每个字:composing 'x' → 上屏 ch
+        ime.updateEditingValue(TextEditingValue(
+          text: '$pad${committed}x',
+          selection: TextSelection.collapsed(offset: committed.length + 2),
+          composing: TextRange(
+            start: committed.length + 1,
+            end: committed.length + 2,
+          ),
+        ));
+        committed += ch;
+        ime.updateEditingValue(TextEditingValue(
+          text: '$pad$committed',
+          selection: TextSelection.collapsed(offset: committed.length + 1),
+          composing: TextRange.empty,
+        ));
+      }
+      expect(state.blocks[0].content.text, sentence);
+    });
+  });
+
+  group('平台回显防御(macOS 引擎回显 setEditingState)', () {
+    test('无 composing 的纯选区回显不得移动编辑器选区(拖选不被折叠)', () {
+      final (state, ime) = makeAttached(paragraphs: ['1111111111'], caret: 2);
+      // 用户拖选 [3,8](手势路径写入)
+      final id = state.blocks[0].id;
+      state.updateSelection(EditorSelection(
+        base: EditorPosition(blockId: id, offset: 3),
+        extent: EditorPosition(blockId: id, offset: 8),
+      ));
+      // 平台滞后回显旧光标位置(无 composing、文本没变)
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}1111111111',
+        selection: const TextSelection.collapsed(offset: 3),
+        composing: TextRange.empty,
+      ));
+      // 选区必须保持 [3,8],不被回显折叠/搬走
+      expect(state.selection!.isCollapsed, false);
+      expect(state.selection!.base.offset, 3);
+      expect(state.selection!.extent.offset, 8);
+    });
+
+    test('composing 活跃时的光标通知仍被采纳(候选窗交互)', () {
+      final (state, ime) = makeAttached();
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段ni',
+        selection: const TextSelection.collapsed(offset: 6),
+        composing: const TextRange(start: 4, end: 6),
+      ));
+      // composing 中平台移动光标(仍在 composing)
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段ni',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: const TextRange(start: 4, end: 6),
+      ));
+      expect(state.selection!.extent.offset, 4);
+      expect(state.hasComposing, true);
+    });
+
+    test('attach 后的空值/陈旧回显不触发段落合并', () {
+      final (state, ime) = makeAttached(
+        paragraphs: const ['第一段', 'second'],
+        blockIndex: 1,
+        caret: 3,
+      );
+      // 平台回显完全陈旧的值(无 pad 且!= 上次值去 pad,如 attach 竞态)
+      ime.updateEditingValue(const TextEditingValue(
+        text: 'sec',
+        selection: TextSelection.collapsed(offset: 0),
+      ));
+      // 不得合并段落
+      expect(state.blocks.length, 2);
+      expect(state.blocks[1].content.text, 'second');
+    });
+  });
+
+  group('pad 段首退格', () {
+    test('pad 被删 → 与上一段合并', () {
+      final (state, ime) = makeAttached(
+        paragraphs: const ['第一段', 'second'],
+        blockIndex: 1,
+        caret: 0,
+      );
+      // 平台上报的文本不再以 pad 开头 = pad 被退格删掉
+      ime.updateEditingValue(const TextEditingValue(
+        text: 'second',
+        selection: TextSelection.collapsed(offset: 0),
+      ));
+      expect(state.blocks.length, 1);
+      expect(state.blocks[0].content.text, '第一段second');
+      expect(state.selection!.extent.offset, 3);
+    });
+  });
+
+  group('平台 quirk', () {
+    test('macOS composing collapsed → 视为无 composing', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      final (state, ime) = makeAttached();
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段n',
+        selection: const TextSelection.collapsed(offset: 5),
+        // collapsed composing(macOS 中文 IME 删净预编辑时的形态)
+        composing: const TextRange(start: 5, end: 5),
+      ));
+      expect(state.hasComposing, false);
+    });
+
+    test('IME 直插 \\n(不走 performAction 的回车)→ 分段', () {
+      final (state, ime) = makeAttached();
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一段\n',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: TextRange.empty,
+      ));
+      expect(state.blocks.length, 3);
+      expect(state.blocks[0].content.text, '第一段');
+      expect(state.blocks[1].content.text, '');
+    });
+  });
+
+  group('英文直输', () {
+    test('逐字符插入 + 光标跟随', () {
+      final (state, ime) = makeAttached(paragraphs: ['ab'], caret: 1);
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}aXb',
+        selection: const TextSelection.collapsed(offset: 3),
+        composing: TextRange.empty,
+      ));
+      expect(state.blocks[0].content.text, 'aXb');
+      expect(state.selection!.extent.offset, 2);
+    });
+
+    test('选中替换(平台侧一次性替换)', () {
+      final (state, ime) = makeAttached(paragraphs: ['hello world'], caret: 5);
+      // 平台把 'hello' 换成 'hi'
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}hi world',
+        selection: const TextSelection.collapsed(offset: 3),
+        composing: TextRange.empty,
+      ));
+      expect(state.blocks[0].content.text, 'hi world');
+      expect(state.selection!.extent.offset, 2);
+    });
+  });
+}

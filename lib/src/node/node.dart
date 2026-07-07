@@ -50,6 +50,13 @@ class ParagraphNode extends BlockNode {
   /// null = 默认(随文本方向起始对齐)。
   final TextAlign? textAlign;
 
+  /// 编辑器(src/editor)替换行内内容用;id/textAlign 保持。
+  ParagraphNode copyWith({List<InlineNode>? inlines}) => ParagraphNode(
+        id: id,
+        inlines: inlines ?? this.inlines,
+        textAlign: textAlign,
+      );
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||

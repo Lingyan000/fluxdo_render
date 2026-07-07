@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fluxdo_render/fluxdo_render.dart';
 
+import 'editor_demo_page.dart';
+
 void main() {
   runApp(const GalleryApp());
 }
@@ -68,6 +70,15 @@ class _GalleryPageState extends State<GalleryPage> {
         appBar: AppBar(
           title: Text('fluxdo_render gallery · ${allFixtures.length} fixtures'),
           actions: [
+            IconButton(
+              tooltip: '编辑内核 M1 demo',
+              icon: const Icon(Icons.edit_note),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const EditorDemoPage(),
+                ),
+              ),
+            ),
             IconButton(
               tooltip: 'Toggle theme',
               icon: Icon(

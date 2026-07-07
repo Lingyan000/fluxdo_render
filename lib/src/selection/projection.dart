@@ -14,6 +14,8 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../flatten/soft_break.dart' show kSoftBreakChar;
+
 /// 投影条目的来源类型(调试 + 占位符原子性判定用)。
 enum ProjectionKind {
   text,
@@ -128,6 +130,97 @@ class RenderTextProjection {
 
   /// 整段逻辑文本(渲染全区间投影)。
   String projectAll() => project(0, renderLength);
+
+  /// 整段逻辑文本长度(所有 entry 的 logicalText 长度和,**含**软换行 ZWSP)。
+  int get logicalLength =>
+      entries.fold(0, (sum, e) => sum + e.logicalText.length);
+
+  // -------------------------------------------------------------------
+  // 内容空间 ↔ 渲染空间(编辑器坐标换算,src/editor)
+  //
+  // **内容空间** = 编辑文档文本(EditableTextContent.text)的偏移系:
+  // - 软换行 ZWSP(kSoftBreakChar,soft_break 注入,渲染/投影都有)宽 0;
+  // - codePad(NBSP 粘性内边距,logicalText '')宽 0;
+  // - 文本类 entry 其余字符 1:1;
+  // - 原子类按其投影串计长(与 EditableTextContent.fromInlines 的降级
+  //   一致::name: / @username / alt)。
+  //
+  // 与「逻辑投影空间」(projectAll,含 ZWSP,给复制/HtmlTextMapper)是
+  // **两个不同空间** —— 编辑器曾直接混用,30 字符(软换行阈值)以上
+  // 光标错位、段尾无法选中,就是这个混淆。
+  // -------------------------------------------------------------------
+
+  /// 内容空间总长度。
+  int get contentLength {
+    var n = 0;
+    for (final e in entries) {
+      n += e.isAtomic ? e.logicalText.length : _contentLenOf(e.logicalText);
+    }
+    return n;
+  }
+
+  /// 内容偏移 → 渲染偏移。
+  ///
+  /// 语义:内容前 [contentOffset] 个字符之后的渲染位置。
+  /// - 边界(恰在某 entry 内容末)**延迟归属**:跳过零内容 entry
+  ///   (codePad/纯 ZWSP),落到下一个内容 entry 的 renderStart —— 光标
+  ///   不停在 NBSP 粘性内边距上;
+  /// - 原子内部归到原子末端(不可切);
+  /// - 入参越界自动 clamp。
+  int renderOffsetForContent(int contentOffset) {
+    var remaining = contentOffset.clamp(0, contentLength);
+    for (final e in entries) {
+      final entryContentLen = e.isAtomic
+          ? e.logicalText.length
+          : _contentLenOf(e.logicalText);
+      if (remaining <= 0) {
+        if (entryContentLen == 0) continue; // pad/ZWSP:光标不停这
+        return e.renderStart;
+      }
+      if (remaining < entryContentLen) {
+        if (e.isAtomic) return e.renderEnd; // 原子内部 → 末端
+        var seen = 0;
+        final s = e.logicalText;
+        for (var i = 0; i < s.length; i++) {
+          if (s[i] != kSoftBreakChar) {
+            seen++;
+            if (seen == remaining) return e.renderStart + i + 1;
+          }
+        }
+      }
+      remaining -= entryContentLen;
+    }
+    return renderLength;
+  }
+
+  static int _contentLenOf(String s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) {
+      if (s[i] != kSoftBreakChar) n++;
+    }
+    return n;
+  }
+
+  /// 渲染偏移 → 内容偏移(命中/选区结果换算到编辑坐标)。
+  int contentOffsetForRender(int renderOffset) {
+    final target = renderOffset.clamp(0, renderLength);
+    var content = 0;
+    for (final e in entries) {
+      if (target <= e.renderStart) return content;
+      if (e.isAtomic) {
+        if (target < e.renderEnd) return content + e.logicalText.length;
+        content += e.logicalText.length;
+      } else {
+        final s = e.logicalText;
+        final upTo = target < e.renderEnd ? target - e.renderStart : s.length;
+        for (var i = 0; i < upTo; i++) {
+          if (s[i] != kSoftBreakChar) content++;
+        }
+        if (target < e.renderEnd) return content;
+      }
+    }
+    return content;
+  }
 
   @override
   String toString() =>

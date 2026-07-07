@@ -5,6 +5,9 @@
 /// getPositionForOffset 拿块内渲染偏移。
 library;
 
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
 import 'selectable_block_handle.dart';
@@ -100,7 +103,11 @@ class SelectionHitTester {
     if (p == null) return null;
     final local = p.globalToLocal(global);
     final tp = p.getPositionForOffset(local);
-    return DocumentPosition(blockId: h.id, renderOffset: tp.offset);
+    return DocumentPosition(
+      blockId: h.id,
+      renderOffset: tp.offset,
+      affinity: tp.affinity,
+    );
   }
 
   /// 块内某渲染偏移处的「词」边界(长按选词用)。
@@ -126,6 +133,71 @@ class SelectionHitTester {
     final topLeft = p.localToGlobal(local);
     if (!topLeft.dx.isFinite || !topLeft.dy.isFinite) return null;
     return topLeft & Size(0, height);
+  }
+
+  /// 编辑光标的**全局矩形**(宽 0)—— 与 [caretRectAt] 的区别:高度是
+  /// 调用方传入的**固定行高**([lineHeight],由编辑器按 baseStyle 用
+  /// TextPainter.preferredLineHeight 算一次),垂直落位交给引擎的
+  /// caretPrototype 机制(getOffsetForCaret 第二参)。
+  ///
+  /// 这是 EditableText/RenderEditable 的官方做法:光标高度与内容无关、
+  /// 构造上恒定 —— 此前用 getFullHeightForCaret(段末回退裸字体度量)
+  /// 和行盒(tight/max、空段无盒)都会在不同位置给出不同高度,表现为
+  /// 光标"输入前后高矮不一"。
+  ///
+  /// [affinity] 决定软换行点的落行(见 DocumentPosition.affinity)。
+  Rect? editingCaretRectAt(DocumentPosition pos, {required double lineHeight}) {
+    final p = registry.byId(pos.blockId)?.paragraph;
+    if (p == null || !p.attached || !p.hasSize) return null;
+    final local =
+        editingCaretRectIn(p, pos.renderOffset, lineHeight, pos.affinity);
+    final topLeft = p.localToGlobal(local.topLeft);
+    if (!topLeft.dx.isFinite || !topLeft.dy.isFinite) return null;
+    return topLeft & local.size;
+  }
+
+  /// [editingCaretRectAt] 的段落内实现(局部坐标;独立出来可单测)。
+  ///
+  /// - x/top:getOffsetForCaret(带 [affinity] —— 软换行点 upstream 落
+  ///   上一行行末,downstream 落下一行行首,跟用户点击的行走);
+  /// - 高度:恒 [lineHeight](构造保证一致);
+  /// - top:getOffsetForCaret 的 dy 在**段末**回退字体度量(实测 3.71 vs
+  ///   行内 0.4)→ 用相邻字符的**整行盒**(BoxHeightStyle.max)top 校正;
+  ///   前后盒都有时取与 dy 更近的那个;无盒(空段落)保留 dy。
+  @visibleForTesting
+  static Rect editingCaretRectIn(
+    RenderParagraph p,
+    int offset,
+    double lineHeight, [
+    TextAffinity affinity = TextAffinity.downstream,
+  ]) {
+    final prototype = Rect.fromLTWH(0, 0, 2, lineHeight);
+    final position = TextPosition(offset: offset, affinity: affinity);
+    final local = p.getOffsetForCaret(position, prototype);
+
+    double top = local.dy;
+    TextBox? nearest;
+    if (offset > 0) {
+      final before = p.getBoxesForSelection(
+        TextSelection(baseOffset: offset - 1, extentOffset: offset),
+        boxHeightStyle: ui.BoxHeightStyle.max,
+      );
+      if (before.isNotEmpty) nearest = before.last;
+    }
+    final after = p.getBoxesForSelection(
+      TextSelection(baseOffset: offset, extentOffset: offset + 1),
+      boxHeightStyle: ui.BoxHeightStyle.max,
+    );
+    if (after.isNotEmpty) {
+      final a = after.first;
+      if (nearest == null ||
+          (a.top - local.dy).abs() < (nearest.top - local.dy).abs()) {
+        nearest = a;
+      }
+    }
+    if (nearest != null) top = nearest.top;
+
+    return Offset(local.dx, top) & Size(0, lineHeight);
   }
 
   /// 块的渲染总长度(三击选段用)。走逻辑块表 → 回收块也能取。未注册返回 null。
