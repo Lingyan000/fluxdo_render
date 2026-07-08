@@ -259,19 +259,44 @@ class _EditorTableGridState extends State<EditorTableGrid> {
     final scheme = Theme.of(context).colorScheme;
     final textStyle = Theme.of(context).textTheme.bodyMedium;
     final borderColor = scheme.outlineVariant.withValues(alpha: 0.6);
+    // cells 区总宽(固定 cell 宽 + 列分隔线),外框覆盖层同宽
+    final tableWidth = _cols * _kCellWidth + (_cols - 1);
 
-    final table = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
+    // 行区:每行 = 行柄 + cells(cells 只画分隔线;外框与圆角由
+    // 覆盖层统一画 —— 逐行画外框会丢圆角)。
+    final rowsArea = Stack(
       children: [
-        for (var r = 0; r < _rows; r++)
-          _buildRow(r, scheme, textStyle, borderColor),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var r = 0; r < _rows; r++)
+              _buildRow(r, scheme, textStyle, borderColor),
+          ],
+        ),
+        // 圆角外框覆盖层(只描边不拦事件;选中态 primary 加粗)
+        Positioned(
+          left: _kHandleThickness + 2,
+          top: 0,
+          bottom: 0,
+          width: tableWidth,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: widget.selected ? scheme.primary : borderColor,
+                  width: widget.selected ? 2 : 1,
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
 
-    // 主体 = 列柄条(顶) + [行柄嵌行左缘的表格 + 右加列条] + 下加行条。
-    // 行柄放进每一行内部(而非平行 Column)—— 高度天然随行,无对齐/
-    // 无限高问题。全部在 MetaData 自管区内;块级选择柄单独在区外。
+    // 主体 = 列柄条(顶) + [行区 + 右加列条] + 下加行条。
+    // 全部在 MetaData 自管区内;块级选择柄单独在区外。
     final body = MetaData(
       metaData: kEditorSelfManagedRegion,
       behavior: HitTestBehavior.opaque,
@@ -281,13 +306,15 @@ class _EditorTableGridState extends State<EditorTableGrid> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 顶部列柄条(hover 该列时亮起)
+            // 顶部列柄条(hover 表格淡显全部,hover 该列高亮)
             Padding(
               padding: const EdgeInsets.only(left: _kHandleThickness + 2),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 for (var c = 0; c < _cols; c++)
                   _ColHandle(
-                    visible: _hoverGrid && _hoverCol == c,
+                    opacity: !_hoverGrid
+                        ? 0
+                        : (_hoverCol == c ? 1.0 : 0.35),
                     width: _kCellWidth + (c > 0 ? 1 : 0),
                     onTapDown: (pos) => _showColMenu(c, pos),
                     onHover: (h) =>
@@ -302,7 +329,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  table,
+                  rowsArea,
                   // 右缘加列条
                   _EdgeAddBar(
                     axis: Axis.vertical,
@@ -320,7 +347,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
                 axis: Axis.horizontal,
                 visible: _hoverGrid,
                 tooltip: '添加行',
-                length: _cols * _kCellWidth + (_cols - 1),
+                length: tableWidth,
                 onTap: () => _insertRow(_rows),
               ),
             ),
@@ -394,9 +421,12 @@ class _EditorTableGridState extends State<EditorTableGrid> {
     Color borderColor,
   ) {
     final isHeader = _hasHeader && r == 0;
-    final selectedBorder = widget.selected ? scheme.primary : borderColor;
-    // 行 = 左缘行柄 + cells(IntrinsicHeight 让行柄随行高;首末行圆角
-    // 由外层边框视觉近似 —— cell 区贴边框内侧)。
+    // cells 容器只管:表头/选中底色、行间分隔线、首末行内侧圆角裁剪
+    // (外框+圆角描边由覆盖层统一画,见 build 的 rowsArea)。
+    final radius = BorderRadius.vertical(
+      top: r == 0 ? const Radius.circular(8) : Radius.zero,
+      bottom: r == _rows - 1 ? const Radius.circular(8) : Radius.zero,
+    );
     return MouseRegion(
       onEnter: (_) => setState(() => _hoverRow = r),
       child: IntrinsicHeight(
@@ -405,51 +435,41 @@ class _EditorTableGridState extends State<EditorTableGrid> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _RowHandle(
-              visible: _hoverGrid && _hoverRow == r,
+              opacity: !_hoverGrid ? 0 : (_hoverRow == r ? 1.0 : 0.35),
               onTapDown: (pos) => _showRowMenu(r, pos),
               onHover: (h) => setState(() => _hoverRow = h ? r : null),
             ),
             const SizedBox(width: 2),
-            Container(
-              decoration: BoxDecoration(
-                color: isHeader
-                    ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
-                    : (widget.selected
-                        ? scheme.primary.withValues(alpha: 0.06)
-                        : null),
-                border: Border(
-                  left: BorderSide(
-                      color: selectedBorder,
-                      width: widget.selected ? 2 : 1),
-                  right: BorderSide(
-                      color: selectedBorder,
-                      width: widget.selected ? 2 : 1),
-                  top: r == 0
-                      ? BorderSide(
-                          color: selectedBorder,
-                          width: widget.selected ? 2 : 1)
-                      : BorderSide(color: borderColor),
-                  bottom: r == _rows - 1
-                      ? BorderSide(
-                          color: selectedBorder,
-                          width: widget.selected ? 2 : 1)
-                      : BorderSide.none,
+            ClipRRect(
+              borderRadius: radius,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isHeader
+                      ? scheme.surfaceContainerHighest
+                          .withValues(alpha: 0.55)
+                      : (widget.selected
+                          ? scheme.primary.withValues(alpha: 0.06)
+                          : null),
+                  border: r > 0
+                      ? Border(top: BorderSide(color: borderColor))
+                      : null,
                 ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var c = 0; c < _cols; c++)
-                    Container(
-                      decoration: c > 0
-                          ? BoxDecoration(
-                              border: Border(
-                                  left: BorderSide(color: borderColor)),
-                            )
-                          : null,
-                      child: _buildCell(r, c, isHeader, textStyle, scheme),
-                    ),
-                ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var c = 0; c < _cols; c++)
+                      Container(
+                        decoration: c > 0
+                            ? BoxDecoration(
+                                border: Border(
+                                    left: BorderSide(color: borderColor)),
+                              )
+                            : null,
+                        child:
+                            _buildCell(r, c, isHeader, textStyle, scheme),
+                      ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -519,16 +539,16 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   }
 }
 
-/// 顶部列柄:hover 该列时亮起的胶囊小条,点击弹列菜单。
+/// 顶部列柄:hover 表格淡显、hover 该列高亮的胶囊小条,点击弹列菜单。
 class _ColHandle extends StatelessWidget {
   const _ColHandle({
-    required this.visible,
+    required this.opacity,
     required this.width,
     required this.onTapDown,
     required this.onHover,
   });
 
-  final bool visible;
+  final double opacity;
   final double width;
   final void Function(Offset globalPos) onTapDown;
   final ValueChanged<bool> onHover;
@@ -548,12 +568,13 @@ class _ColHandle extends StatelessWidget {
           child: Center(
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 120),
-              opacity: visible ? 1 : 0,
+              opacity: opacity,
               child: Container(
                 width: 28,
                 height: 5,
                 decoration: BoxDecoration(
-                  color: scheme.onSurfaceVariant.withValues(alpha: 0.45),
+                  color: scheme.onSurfaceVariant
+                      .withValues(alpha: opacity >= 1 ? 0.7 : 0.45),
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -565,15 +586,15 @@ class _ColHandle extends StatelessWidget {
   }
 }
 
-/// 左侧行柄:hover 该行时亮起的胶囊小条,点击弹行菜单。
+/// 左侧行柄:hover 表格淡显、hover 该行高亮的胶囊小条,点击弹行菜单。
 class _RowHandle extends StatelessWidget {
   const _RowHandle({
-    required this.visible,
+    required this.opacity,
     required this.onTapDown,
     required this.onHover,
   });
 
-  final bool visible;
+  final double opacity;
   final void Function(Offset globalPos) onTapDown;
   final ValueChanged<bool> onHover;
 
@@ -591,12 +612,13 @@ class _RowHandle extends StatelessWidget {
           child: Center(
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 120),
-              opacity: visible ? 1 : 0,
+              opacity: opacity,
               child: Container(
                 width: 5,
                 height: 22,
                 decoration: BoxDecoration(
-                  color: scheme.onSurfaceVariant.withValues(alpha: 0.45),
+                  color: scheme.onSurfaceVariant
+                      .withValues(alpha: opacity >= 1 ? 0.7 : 0.45),
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
