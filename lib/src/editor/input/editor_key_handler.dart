@@ -19,6 +19,10 @@ import '../model/editor_state.dart';
 /// [onMoveVertical]:上下键的垂直光标移动。需要行几何(RenderParagraph),
 /// 纯 EditorState 做不了 → 由 FluxdoEditor 注入实现。
 ///
+/// [onClipboardCopy]/[onClipboardCut]/[onClipboardPaste]:剪贴板三键。
+/// 剪贴板 IO(Clipboard API)与粘贴的 markdown 导入(cook 链路,异步)
+/// 都不属于纯状态层 → 由 FluxdoEditor 注入;未注入时按键不处理(ignored)。
+///
 /// 退格/删除/回车在**框架侧本地处理**并返回 handled(EditableText +
 /// DefaultTextEditingShortcuts 同款,平台不再收到该键)。与平台 insertText
 /// 流的一致性由两道围栏保证:macOS 键盘管理器逐键串行(应答前不路由下一
@@ -29,6 +33,9 @@ KeyEventResult handleEditorKeyEvent(
   KeyEvent event, {
   required void Function() onEdited,
   void Function(int direction, {required bool extend})? onMoveVertical,
+  void Function()? onClipboardCopy,
+  void Function()? onClipboardCut,
+  void Function()? onClipboardPaste,
 }) {
   if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
     return KeyEventResult.ignored;
@@ -115,6 +122,25 @@ KeyEventResult handleEditorKeyEvent(
     case LogicalKeyboardKey.keyX when primary && shift:
       state.toggleMark(MarkKind.lineThrough);
       onEdited();
+    // ---- 剪贴板 ----
+    case LogicalKeyboardKey.keyC when primary:
+      if (onClipboardCopy == null) {
+        handled = false;
+      } else {
+        onClipboardCopy();
+      }
+    case LogicalKeyboardKey.keyX when primary:
+      if (onClipboardCut == null) {
+        handled = false;
+      } else {
+        onClipboardCut();
+      }
+    case LogicalKeyboardKey.keyV when primary:
+      if (onClipboardPaste == null) {
+        handled = false;
+      } else {
+        onClipboardPaste();
+      }
     case LogicalKeyboardKey.keyA when primary:
       state.selectAll();
     case LogicalKeyboardKey.keyZ when primary && shift:
@@ -126,5 +152,21 @@ KeyEventResult handleEditorKeyEvent(
     default:
       handled = false;
   }
-  return handled ? KeyEventResult.handled : KeyEventResult.ignored;
+  if (handled) return KeyEventResult.handled;
+
+  // 无修饰可打印字符:skipRemainingHandlers —— 事件交还平台走 IME
+  // insertText 路径(注:不能 handled,否则嵌入层不再路由给
+  // NSTextInputContext,字符进不了输入通道),同时**不冒泡** Flutter
+  // 框架内的上层 handler。否则宿主 app 的全局单键快捷键(j/k/d/s
+  // 话题导航等,其文本输入豁免只认 EditableText 祖先)会把字母抢走,
+  // 表现为"很多字母打不出来"。
+  final ch = event.character;
+  if (!primary &&
+      ch != null &&
+      ch.isNotEmpty &&
+      ch.codeUnitAt(0) >= 0x20 &&
+      ch.codeUnitAt(0) != 0x7f) {
+    return KeyEventResult.skipRemainingHandlers;
+  }
+  return KeyEventResult.ignored;
 }

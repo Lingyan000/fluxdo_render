@@ -10,6 +10,7 @@
 /// - 光标 overlay(EditorCaret)。
 library;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -33,6 +34,7 @@ class FluxdoEditor extends StatefulWidget {
     this.baseTextStyle,
     this.autofocus = false,
     this.nodeFactory,
+    this.markdownImporter,
   });
 
   final EditorState state;
@@ -44,6 +46,14 @@ class FluxdoEditor extends StatefulWidget {
   /// 孤岛块的渲染工厂(主项目注入带 emoji/image builder 的实例;
   /// null 用子包默认 fallback —— demo/测试可用)。
   final NodeFactory? nodeFactory;
+
+  /// 粘贴的 markdown → 编辑块导入器(主项目注入 cook 链路:
+  /// markdown → cook → parse → blockNodesToDoc)。null / 返回 null 时
+  /// 粘贴降级为纯文本(pastePlainText)。
+  ///
+  /// 剪贴板策略:复制/剪切写 markdown 文本(跨 app 通用、粘回自身经
+  /// cook 还原富内容 —— Discourse 官方富文本 composer 同款语义)。
+  final Future<List<EditorBlock>?> Function(String markdown)? markdownImporter;
 
   @override
   State<FluxdoEditor> createState() => _FluxdoEditorState();
@@ -57,13 +67,13 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'FluxdoEditor');
   final GlobalKey _rootKey = GlobalKey();
 
-  /// 编辑器局部坐标系的光标矩形(帧后由 hit_tester 计算)。
-  Rect? _caretRect;
-
-  /// 本次 [_caretRect] 对应的文档修订号:光标位置是帧后回算的,与
-  /// docRevision 的自增不同帧 —— 必须在回算时捕获配对,EditorCaret 才能
-  /// 正确区分「编辑帧(瞬时贴上)」与「纯导航(滑行)」。
-  int _caretRevision = 0;
+  /// 编辑器局部坐标系的光标矩形 + 配对修订号(帧后由 hit_tester 计算)。
+  ///
+  /// 用 ValueNotifier 而非 setState:光标位置每键都变,走整树 setState
+  /// 会造成"每键两帧全量 build"(JANK 日志的第二帧 vsyncOverhead 20ms+
+  /// 就是它);Notifier 只重建 caret overlay 一个叶子。修订号语义见
+  /// EditorCaret.moveGeneration。
+  final ValueNotifier<(Rect?, int)> _caretInfo = ValueNotifier((null, 0));
 
   @override
   void initState() {
@@ -79,6 +89,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
 
   @override
   void dispose() {
+    _caretInfo.dispose();
     widget.state.removeListener(_onStateChanged);
     _ime.detach();
     _focusNode.dispose();
@@ -90,8 +101,12 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   // 状态联动
   // -----------------------------------------------------------------
 
+  /// 编辑帧耗时插桩(debug;>8ms 打印,定位打字卡顿)。
+  Stopwatch? _editFrameWatch;
+
   void _onStateChanged() {
     if (!mounted) return;
+    if (kDebugMode) _editFrameWatch = Stopwatch()..start();
     // 外部变更(undo/redo 按钮、程序化改文档)→ IME 的 diff 基准已过期,
     // 必须重喂;IME 自身回调引发的通知、以及拖选进行中(高频选区变化,
     // 结束时 _onPanEnd 统一喂)除外。
@@ -126,16 +141,22 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   /// 帧后:镜像选区给高亮层 + 重算光标矩形 + 回喂 IME 几何。
   void _afterFrame() {
     if (!mounted) return;
+    final w = _editFrameWatch;
+    if (w != null) {
+      _editFrameWatch = null;
+      w.stop();
+      if (w.elapsedMilliseconds > 8) {
+        debugPrint('[EditorPerf] edit frame ${w.elapsedMilliseconds}ms '
+            '(blocks=${widget.state.blocks.length})');
+      }
+    }
     // 失焦时高亮层也清掉(选区数据保留在 EditorState,聚焦回来即恢复)。
     _controller.selection =
         _focusNode.hasFocus ? _toDocumentSelection(widget.state.selection) : null;
 
     final newCaret = _computeLocalCaretRect();
-    if (newCaret != _caretRect) {
-      setState(() {
-        _caretRect = newCaret;
-        _caretRevision = widget.state.docRevision;
-      });
+    if (newCaret != _caretInfo.value.$1) {
+      _caretInfo.value = (newCaret, widget.state.docRevision);
     }
 
     final rootBox = _rootKey.currentContext?.findRenderObject();
@@ -277,6 +298,56 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     if (rootBox is! RenderBox || !rootBox.attached) return null;
     final topLeft = rootBox.globalToLocal(globalRect.topLeft);
     return topLeft & globalRect.size;
+  }
+
+  // -----------------------------------------------------------------
+  // 剪贴板
+  // -----------------------------------------------------------------
+
+  /// 复制:选区 → markdown 写系统剪贴板(跨 app 通用;粘回自身经
+  /// markdownImporter 还原富内容)。
+  void _clipboardCopy() {
+    final md = widget.state.copySelectionAsMarkdown();
+    if (md.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: md));
+  }
+
+  void _clipboardCut() {
+    final md = widget.state.copySelectionAsMarkdown();
+    if (md.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: md));
+    widget.state.deleteSelection();
+    _ime.syncFromState(show: false);
+  }
+
+  /// 粘贴序号:异步 cook 期间用户再按一次 Cmd+V / 继续打字时,旧结果
+  /// 作废(防乱序插入)。
+  int _pasteTicket = 0;
+
+  Future<void> _clipboardPaste() async {
+    final ticket = ++_pasteTicket;
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+    if (!mounted || ticket != _pasteTicket) return;
+
+    final importer = widget.markdownImporter;
+    List<EditorBlock>? fragment;
+    if (importer != null) {
+      try {
+        fragment = await importer(text);
+      } catch (_) {
+        fragment = null; // 导入失败降级纯文本
+      }
+      if (!mounted || ticket != _pasteTicket) return;
+    }
+
+    if (fragment != null && fragment.isNotEmpty) {
+      widget.state.pasteBlocks(fragment);
+    } else {
+      widget.state.pastePlainText(text);
+    }
+    _ime.syncFromState(show: false);
   }
 
   // -----------------------------------------------------------------
@@ -478,6 +549,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
           event,
           onEdited: () => _ime.syncFromState(show: false),
           onMoveVertical: _moveCaretVertical,
+          onClipboardCopy: _clipboardCopy,
+          onClipboardCut: _clipboardCut,
+          onClipboardPaste: _clipboardPaste,
         );
       },
       child: MouseRegion(
@@ -497,11 +571,14 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: children,
                 ),
-                EditorCaret(
-                  caretRect: _caretRect,
-                  color: Theme.of(context).colorScheme.primary,
-                  alwaysVisible: state.hasComposing,
-                  moveGeneration: _caretRevision,
+                ValueListenableBuilder<(Rect?, int)>(
+                  valueListenable: _caretInfo,
+                  builder: (context, info, _) => EditorCaret(
+                    caretRect: info.$1,
+                    color: Theme.of(context).colorScheme.primary,
+                    alwaysVisible: state.hasComposing,
+                    moveGeneration: info.$2,
+                  ),
                 ),
               ],
             ),

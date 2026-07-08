@@ -202,6 +202,9 @@ class LinkRun extends InlineNode {
     required this.children,
     this.isAttachment = false,
     this.filename = '',
+    this.origHref,
+    this.hashtagRef,
+    this.isOneboxLink = false,
   });
 
   /// 已解析的链接 URL(parser 阶段不做 CDN 重写,显示给 LinkHandler)。
@@ -219,6 +222,24 @@ class LinkRun extends InlineNode {
   /// 可能为空串(锚点无文本时,主项目下载器会回退到 HEAD/URL 推断)。
   final String filename;
 
+  /// `data-orig-href` 的 `upload://` 短链(客户端 cook 预览的附件形态:
+  /// `href="/404" data-orig-href="upload://…"`)。markdown 序列化写回
+  /// `[name|attachment](短链)` 时优先用它。服务端 baked 无此属性 → null。
+  final String? origHref;
+
+  /// hashtag 引用串(`<a class="hashtag-cooked">` 时非 null:取
+  /// `data-ref` 优先,缺失时 `data-slug`)。markdown 序列化写回 `#{ref}`
+  /// 而非普通链接 —— 否则往返后 hashtag 退化成死链接。渲染不受影响
+  /// (仍走普通 LinkRun 链路)。
+  final String? hashtagRef;
+
+  /// onebox 系链接(`<a class="inline-onebox">` 行内 onebox,或
+  /// `<a class="onebox">` 未展开的裸链)。两者 raw 里都是裸 URL:
+  /// 行内 onebox 的锚文本是 cook 异步取回的页面标题(不能固化进 raw),
+  /// 裸 onebox 链接的锚文本就是 URL 本身(写 `[url](url)` 会失去
+  /// 独行 onebox 展开资格)。markdown 序列化一律写回裸 [href]。
+  final bool isOneboxLink;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -227,15 +248,19 @@ class LinkRun extends InlineNode {
           href == other.href &&
           isAttachment == other.isAttachment &&
           filename == other.filename &&
+          origHref == other.origHref &&
+          hashtagRef == other.hashtagRef &&
+          isOneboxLink == other.isOneboxLink &&
           listEquals(children, other.children);
 
   @override
-  int get hashCode =>
-      Object.hash(href, isAttachment, filename, Object.hashAll(children));
+  int get hashCode => Object.hash(href, isAttachment, filename, origHref,
+      hashtagRef, isOneboxLink, Object.hashAll(children));
 
   @override
   String toString() => 'LinkRun($href'
       '${isAttachment ? ", attachment=$filename" : ""}'
+      '${hashtagRef == null ? "" : ", #$hashtagRef"}'
       ', ${children.length} children)';
 }
 
@@ -392,6 +417,7 @@ class ImageRun extends InlineNode {
     this.height,
     this.indexInPost = 0,
     this.lightboxUrl,
+    this.origSrc,
   });
 
   /// 完整图片 URL(parser 不做任何重写;含 upload:// 短链时由主项目解析)。
@@ -399,6 +425,16 @@ class ImageRun extends InlineNode {
   /// **缩略图**(若是 lightbox 包装):指向 `_2_690x52` 这种压缩版,
   /// 列表渲染用。
   final String src;
+
+  /// `data-orig-src` 的 `upload://` 短链(客户端 cook 预览形态才有;
+  /// 服务端 baked cooked 无此属性 → null)。
+  ///
+  /// 客户端 cook 会把 raw 里的 `upload://` 图渲染成
+  /// `src="/images/transparent.png" data-orig-src="upload://…"`(真实 URL
+  /// 只有服务端知道)。parser 遇到该形态时把 [src] 还原为短链(渲染层
+  /// 走 upload:// 解析),同时在这里保留原始短链 —— **markdown 序列化
+  /// 必须写短链**(raw 的规范形态),写 CDN/占位 URL 都是错的。
+  final String? origSrc;
 
   /// alt 文本,a11y + 加载失败时占位。
   final String alt;
@@ -434,11 +470,12 @@ class ImageRun extends InlineNode {
           width == other.width &&
           height == other.height &&
           indexInPost == other.indexInPost &&
-          lightboxUrl == other.lightboxUrl;
+          lightboxUrl == other.lightboxUrl &&
+          origSrc == other.origSrc;
 
   @override
   int get hashCode =>
-      Object.hash(src, alt, width, height, indexInPost, lightboxUrl);
+      Object.hash(src, alt, width, height, indexInPost, lightboxUrl, origSrc);
 
   @override
   String toString() =>

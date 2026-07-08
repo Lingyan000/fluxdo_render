@@ -31,6 +31,7 @@ import 'package:flutter/foundation.dart';
 import '../../node/node.dart';
 import 'editable_text_content.dart';
 import 'editor_block.dart';
+import 'markdown_serializer.dart';
 
 export 'editor_block.dart';
 
@@ -999,6 +1000,226 @@ class EditorState extends ChangeNotifier {
             : b.quoteDepth + 1,
       ),
     );
+  }
+
+  // -----------------------------------------------------------------
+  // 剪贴板(复制/剪切/粘贴)
+  // -----------------------------------------------------------------
+
+  /// 提取当前选区为独立块片段(复制)。空/折叠选区返回空表。
+  ///
+  /// 端点四象限与 [deleteSelection] 同口径:岛端点 @0/@1 决定计入与否;
+  /// 文本块取 slice 子区间。块属性(kind/depth/quote)原样保留 ——
+  /// 序列化 markdown 后列表/标题/引用结构不丢。
+  List<EditorBlock> copySelectionAsBlocks() {
+    final norm = normalizedSelection();
+    if (norm == null || _selection!.isCollapsed) return const [];
+    var (from, to) = norm;
+    var fi = indexOfBlock(from.blockId);
+    var ti = indexOfBlock(to.blockId);
+    if (fi < 0 || ti < 0) return const [];
+
+    // 岛端点归一(deleteSelection 同款四象限)
+    if (_blocks[fi] is IslandBlock && from.offset >= 1) {
+      fi += 1;
+      if (fi > ti) return const [];
+      from = EditorPosition(blockId: _blocks[fi].id, offset: 0);
+    }
+    if (_blocks[ti] is IslandBlock && to.offset <= 0) {
+      ti -= 1;
+      if (ti < fi) return const [];
+      to = EditorPosition(
+        blockId: _blocks[ti].id,
+        offset: _blocks[ti].selectionLength,
+      );
+    }
+
+    final out = <EditorBlock>[];
+    for (var i = fi; i <= ti; i++) {
+      final b = _blocks[i];
+      if (b is IslandBlock) {
+        out.add(b); // 原引用直存(不可变节点,共享安全)
+        continue;
+      }
+      b as TextBlock;
+      final s = i == fi ? from.offset.clamp(0, b.content.length) : 0;
+      final e = i == ti ? to.offset.clamp(0, b.content.length) : b.content.length;
+      out.add(b.copyWith(content: b.content.slice(s, e)));
+    }
+    return out;
+  }
+
+  /// 当前选区 → markdown(系统剪贴板文本;跨 app 粘贴通用格式)。
+  String copySelectionAsMarkdown() {
+    final blocks = copySelectionAsBlocks();
+    if (blocks.isEmpty) return '';
+    return docToMarkdown(blocks);
+  }
+
+  /// 粘贴块片段(内部结构化路径;markdown → 块由视图层经 cook 链路转)。
+  ///
+  /// 拼接语义(主流编辑器):
+  /// - 片段首块与光标块**内联合并**(纯文本类内容接在光标处,光标块
+  ///   属性胜出);
+  /// - 中间块整块插入(re-id 防碰撞);
+  /// - 片段尾块与光标块尾段合并;单块片段=纯内联插入。
+  /// - 首/尾块是岛 → 不合并,按整块插入。
+  void pasteBlocks(List<EditorBlock> fragment) {
+    if (fragment.isEmpty) return;
+    if (normalizedSelection() == null) return;
+    if (!(_selection?.isCollapsed ?? true)) {
+      deleteSelection();
+    }
+    final pos = _selection!.extent;
+    final i = indexOfBlock(pos.blockId);
+    if (i < 0) return;
+    final host = _blocks[i];
+
+    sealHistory();
+    _clearPending();
+
+    // 光标在岛上(理论只有整选态,防御):落到岛后插整段
+    if (host is! TextBlock) {
+      final newBlocks = [..._blocks];
+      final inserted = <EditorBlock>[
+        for (final b in fragment) _reIdBlock(b),
+      ];
+      newBlocks.insertAll(i + 1, inserted);
+      final last = inserted.last;
+      _commit(
+        newBlocks,
+        EditorSelection.collapsed(
+          EditorPosition(blockId: last.id, offset: last.selectionLength),
+        ),
+        groupWithPrevious: false,
+      );
+      sealHistory();
+      return;
+    }
+
+    final offset = pos.offset.clamp(0, host.content.length);
+    final first = fragment.first;
+
+    // 单文本块片段:纯内联并入(不分裂宿主)
+    if (fragment.length == 1 && first is TextBlock) {
+      final newBlocks = [..._blocks];
+      newBlocks[i] = host.copyWith(
+        content: _spliceContent(host.content, offset, first.content),
+      );
+      _commit(
+        newBlocks,
+        EditorSelection.collapsed(
+          pos.copyWith(offset: offset + first.content.length),
+        ),
+        groupWithPrevious: false,
+      );
+      sealHistory();
+      return;
+    }
+
+    // 多块:宿主在光标处劈开,首块并入前半,尾块并入后半
+    final (head, tail) = host.content.split(offset);
+    final newBlocks = [..._blocks];
+    newBlocks.removeAt(i);
+
+    final assembled = <EditorBlock>[];
+    final firstText = first is TextBlock ? first : null;
+    assembled.add(host.copyWith(
+      content: firstText != null
+          ? _spliceContent(head, head.length, firstText.content)
+          : head,
+    ));
+
+    final last = fragment.last;
+    final lastText =
+        (fragment.length > 1 && last is TextBlock) ? last : null;
+
+    for (var k = (firstText != null ? 1 : 0);
+        k < fragment.length - (lastText != null ? 1 : 0);
+        k++) {
+      assembled.add(_reIdBlock(fragment[k]));
+    }
+
+    EditorPosition caret;
+    if (lastText != null) {
+      // 尾块继承片段块属性(粘贴的列表项保持列表),tail 接在其后
+      final tailId = _nextId();
+      assembled.add(TextBlock(
+        id: tailId,
+        content: lastText.content.concat(tail),
+        kind: lastText.kind,
+        headingLevel: lastText.headingLevel,
+        ordered: lastText.ordered,
+        depth: lastText.depth,
+        listStart: lastText.listStart,
+        quoteDepth: lastText.quoteDepth,
+      ));
+      caret = EditorPosition(blockId: tailId, offset: lastText.content.length);
+    } else {
+      // 尾块是岛:tail 残余单独成段
+      final tailId = _nextId();
+      assembled.add(TextBlock(
+        id: tailId,
+        content: tail,
+        kind: host.kind,
+        headingLevel: host.headingLevel,
+        ordered: host.ordered,
+        depth: host.depth,
+        quoteDepth: host.quoteDepth,
+      ));
+      caret = EditorPosition(blockId: tailId, offset: 0);
+    }
+
+    newBlocks.insertAll(i, assembled);
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(caret),
+      groupWithPrevious: false,
+    );
+    sealHistory();
+  }
+
+  /// 纯文本粘贴降级(cook 不可用/剪贴板无结构):按换行拆段插入。
+  void pastePlainText(String text) {
+    final sanitized = EditableTextContent.sanitizeText(text)
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n');
+    if (sanitized.isEmpty) return;
+    // 双换行 = 分段;单换行 = 段内硬换行(与 markdown 语义一致)
+    final paras = sanitized.split('\n\n');
+    var n = 0;
+    pasteBlocks([
+      for (final p in paras)
+        TextBlock(
+          id: 'p_${n++}',
+          content: EditableTextContent(text: p),
+        ),
+    ]);
+  }
+
+  /// 片段块重发 id(粘贴片段可能来自本文档自身的复制,原 id 会碰撞)。
+  EditorBlock _reIdBlock(EditorBlock b) => switch (b) {
+        final TextBlock tb => TextBlock(
+            id: _nextId(),
+            content: tb.content,
+            kind: tb.kind,
+            headingLevel: tb.headingLevel,
+            ordered: tb.ordered,
+            depth: tb.depth,
+            listStart: tb.listStart,
+            quoteDepth: tb.quoteDepth,
+          ),
+        final IslandBlock ib => IslandBlock(id: _nextId(), node: ib.node),
+      };
+
+  /// 在 [content] 的 [offset] 处拼入另一段内容(text+marks+atoms 全量)。
+  static EditableTextContent _spliceContent(
+    EditableTextContent content,
+    int offset,
+    EditableTextContent inserted,
+  ) {
+    final (head, tail) = content.split(offset);
+    return head.concat(inserted).concat(tail);
   }
 
   // -----------------------------------------------------------------

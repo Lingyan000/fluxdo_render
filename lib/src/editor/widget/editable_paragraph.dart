@@ -12,6 +12,7 @@
 /// 经 projection 转渲染坐标后,在 RenderParagraph 的 selection boxes 底边画线。
 library;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -57,10 +58,18 @@ class _EditableParagraphState extends State<EditableParagraph> {
 
   FlattenResult _ensureResult() {
     // block.content 不可变 → 引用相等即缓存有效。
-    return _result ??= _flattener.flatten(
+    final cached = _result;
+    if (cached != null) return cached;
+    final sw = kDebugMode ? (Stopwatch()..start()) : null;
+    final r = _result = _flattener.flatten(
       widget.block.content.toInlines(),
       _effectiveStyle,
     );
+    if (sw != null && sw.elapsedMilliseconds > 4) {
+      debugPrint('[EditorPerf] flatten ${sw.elapsedMilliseconds}ms '
+          '(${widget.block.content.length} chars)');
+    }
+    return r;
   }
 
   @override

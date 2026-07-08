@@ -11,20 +11,80 @@ import 'package:flutter/material.dart';
 import '../model/editable_text_content.dart';
 import '../model/editor_state.dart';
 
-class EditorToolbar extends StatelessWidget {
+class EditorToolbar extends StatefulWidget {
   const EditorToolbar({super.key, required this.state});
 
   final EditorState state;
 
   @override
+  State<EditorToolbar> createState() => _EditorToolbarState();
+}
+
+/// 工具栏关心的派生状态签名。**纯打字时签名不变 → 工具栏零重建**——
+/// 10 个带 Tooltip(内部 OverlayPortal+MouseRegion)的按钮每键全量重建
+/// 单项就 ~20ms,是打字卡顿的最大单一来源(JANK-PROF 实测)。
+typedef _ToolbarSig = ({
+  int marksBits,
+  int kindIndex,
+  int headingLevel,
+  bool ordered,
+  bool inQuote,
+});
+
+class _EditorToolbarState extends State<EditorToolbar> {
+  late _ToolbarSig _sig = _compute();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.addListener(_onState);
+  }
+
+  @override
+  void didUpdateWidget(covariant EditorToolbar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.removeListener(_onState);
+      widget.state.addListener(_onState);
+      _sig = _compute();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.state.removeListener(_onState);
+    super.dispose();
+  }
+
+  void _onState() {
+    final next = _compute();
+    if (next != _sig && mounted) {
+      setState(() => _sig = next);
+    }
+  }
+
+  _ToolbarSig _compute() {
+    final state = widget.state;
+    final marks = state.effectiveMarksAtCaret();
+    final sel = state.selection;
+    final block =
+        sel == null ? null : state.textBlockById(sel.extent.blockId);
+    return (
+      marksBits: marks.fold(0, (a, k) => a | (1 << k.index)),
+      kindIndex: block?.kind.index ?? -1,
+      headingLevel: block?.isHeading == true ? block!.headingLevel : 0,
+      ordered: block?.isListItem == true && block!.ordered,
+      inQuote: (block?.quoteDepth ?? 0) > 0,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: state,
-      builder: (context, _) {
-        final marks = state.effectiveMarksAtCaret();
-        final sel = state.selection;
-        final block =
-            sel == null ? null : state.textBlockById(sel.extent.blockId);
+    final state = widget.state;
+    final marks = state.effectiveMarksAtCaret();
+    final sel = state.selection;
+    final block =
+        sel == null ? null : state.textBlockById(sel.extent.blockId);
 
         return Wrap(
           spacing: 2,
@@ -83,8 +143,6 @@ class EditorToolbar extends StatelessWidget {
             ),
           ],
         );
-      },
-    );
   }
 }
 

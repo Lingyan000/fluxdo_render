@@ -369,6 +369,15 @@ class ParagraphParser {
                   inlines: List.unmodifiable(inlines),
                   textAlign: _readTextAlign(node),
                 ));
+              case 'ol' when node.classes.contains('footnotes-list'):
+                // 客户端 cook 的脚注区形态:裸 <ol class="footnotes-list">
+                // (服务端才包 <section class="footnotes">)。必须先于
+                // 通用 ul/ol case,否则走普通列表 → 序列化吐
+                // `1. 正文 [↩︎](#fnref1)` 垃圾。
+                out.add(FootnotesSectionNode(
+                  id: nextId(),
+                  entries: _parseFootnoteEntries(node, nextImageIndex),
+                ));
               case 'ul' || 'ol':
                 out.add(_parseList(
                   node,
@@ -799,6 +808,9 @@ class ParagraphParser {
     final username = asideEl.attributes['data-username']?.trim() ?? '';
     final topicId = int.tryParse(asideEl.attributes['data-topic'] ?? '');
     final postNumber = int.tryParse(asideEl.attributes['data-post'] ?? '');
+    // raw 往返字段:full:true / 显示名(序列化写回 [quote=…] 参数用)
+    final full = asideEl.attributes['data-full']?.trim() == 'true';
+    final displayName = asideEl.attributes['data-display-name']?.trim();
 
     final avatarEl = asideEl.querySelector('img.avatar');
     final avatarUrl = avatarEl?.attributes['src']?.trim();
@@ -861,6 +873,9 @@ class ParagraphParser {
       categoryTextColor: categoryTextColor,
       categoryHref: categoryHref,
       children: children,
+      full: full,
+      displayName:
+          (displayName == null || displayName.isEmpty) ? null : displayName,
     );
   }
 
@@ -1219,17 +1234,7 @@ class ParagraphParser {
     final img = wrapperEl.querySelector('a.lightbox > img') ??
         wrapperEl.querySelector('img');
     if (img == null) return null;
-    final src = img.attributes['src']?.trim() ?? '';
-    final alt = img.attributes['alt']?.trim() ?? '';
-    final w = double.tryParse(img.attributes['width'] ?? '');
-    final h = double.tryParse(img.attributes['height'] ?? '');
-    return ImageRun(
-      src: src,
-      alt: alt,
-      width: w,
-      height: h,
-      indexInPost: nextImageIndex(),
-    );
+    return _imageRunFromImg(img, nextImageIndex);
   }
 
   ImageRun? _imageRunFromLightboxAnchor(
@@ -1238,19 +1243,18 @@ class ParagraphParser {
   ) {
     final img = aEl.querySelector('img');
     if (img == null) return null;
-    final src = img.attributes['src']?.trim() ?? '';
-    if (src.isEmpty) return null;
+    final run = _imageRunFromImg(img, nextImageIndex);
+    if (run == null) return null;
     final lightboxUrl = aEl.attributes['href']?.trim();
-    final alt = img.attributes['alt']?.trim() ?? '';
-    final w = double.tryParse(img.attributes['width'] ?? '');
-    final h = double.tryParse(img.attributes['height'] ?? '');
+    if (lightboxUrl == null || lightboxUrl.isEmpty) return run;
     return ImageRun(
-      src: src,
-      alt: alt,
-      width: w,
-      height: h,
-      indexInPost: nextImageIndex(),
-      lightboxUrl: (lightboxUrl ?? '').isEmpty ? null : lightboxUrl,
+      src: run.src,
+      alt: run.alt,
+      width: run.width,
+      height: run.height,
+      indexInPost: run.indexInPost,
+      lightboxUrl: lightboxUrl,
+      origSrc: run.origSrc,
     );
   }
 
@@ -1412,11 +1416,20 @@ class ParagraphParser {
 
   /// 从一个普通 `<img>` 元素提 ImageRun(src/alt/width/height + indexInPost)。
   /// src 为空返回 null。emoji / skip 判定由调用方负责。
+  ///
+  /// **客户端 cook 预览形态**:raw 里的 `upload://` 图被 cook 成
+  /// `src="/images/transparent.png" data-orig-src="upload://…"`(真实 URL
+  /// 只有服务端知道)。此时把 src 还原为短链(渲染层 DiscourseImage 能解析
+  /// upload://),origSrc 存原始短链供 markdown 序列化写回。
   ImageRun? _imageRunFromImg(
     dom.Element img,
     int Function() nextImageIndex,
   ) {
-    final src = img.attributes['src']?.trim() ?? '';
+    var src = img.attributes['src']?.trim() ?? '';
+    final origSrc = img.attributes['data-orig-src']?.trim();
+    if (origSrc != null && origSrc.startsWith('upload://')) {
+      src = origSrc;
+    }
     if (src.isEmpty) return null;
     final alt = img.attributes['alt']?.trim() ?? '';
     final w = double.tryParse(img.attributes['width'] ?? '');
@@ -1427,6 +1440,7 @@ class ParagraphParser {
       width: w,
       height: h,
       indexInPost: nextImageIndex(),
+      origSrc: (origSrc == null || origSrc.isEmpty) ? null : origSrc,
     );
   }
 
@@ -1525,18 +1539,8 @@ class ParagraphParser {
     for (final img in gridEl.querySelectorAll('img')) {
       if (consumedImgs.contains(img)) continue;
       if (_isSkipImage(img)) continue;
-      final src = img.attributes['src']?.trim() ?? '';
-      if (src.isEmpty) continue;
-      final alt = img.attributes['alt']?.trim() ?? '';
-      final w = double.tryParse(img.attributes['width'] ?? '');
-      final h = double.tryParse(img.attributes['height'] ?? '');
-      images.add(ImageRun(
-        src: src,
-        alt: alt,
-        width: w,
-        height: h,
-        indexInPost: nextImageIndex(),
-      ));
+      final run = _imageRunFromImg(img, nextImageIndex);
+      if (run != null) images.add(run);
     }
 
     return ImageGridNode(
@@ -1806,12 +1810,14 @@ class ParagraphParser {
     double? height;
     String? mime;
     bool loop = false;
+    String? origSrc;
 
     if (isDiv && videoEl == null) {
       // 纯 placeholder：只有 data-video-src / data-thumbnail-src
+      origSrc = el.attributes['data-orig-src']?.trim();
       src = (el.attributes['data-video-src']?.trim().isNotEmpty == true
               ? el.attributes['data-video-src']
-              : el.attributes['data-orig-src']) ??
+              : origSrc) ??
           '';
       final thumb = el.attributes['data-thumbnail-src']?.trim();
       poster = (thumb == null || thumb.isEmpty) ? null : thumb;
@@ -1820,6 +1826,7 @@ class ParagraphParser {
       final source = videoEl.querySelector('source');
       final srcAttr = source?.attributes['src']?.trim();
       final origAttr = source?.attributes['data-orig-src']?.trim();
+      origSrc = origAttr;
       final videoSrcAttr = videoEl.attributes['src']?.trim();
       src = (srcAttr != null && srcAttr.isNotEmpty)
           ? srcAttr
@@ -1845,6 +1852,7 @@ class ParagraphParser {
       height: height,
       mime: (mime == null || mime.isEmpty) ? null : mime,
       loop: loop,
+      origSrc: (origSrc == null || origSrc.isEmpty) ? null : origSrc,
     );
   }
 
@@ -1867,6 +1875,7 @@ class ParagraphParser {
       src: src,
       title: (title == null || title.isEmpty) ? null : title,
       mime: (mime == null || mime.isEmpty) ? null : mime,
+      origSrc: (origAttr == null || origAttr.isEmpty) ? null : origAttr,
     );
   }
 
@@ -2034,6 +2043,13 @@ class ParagraphParser {
             children: List.unmodifiable(children)));
       case 'a':
         final href = el.attributes['href']?.trim() ?? '';
+        // heading 自带锚(`<h2><a class="anchor" href="#h-2"></a>标题</h2>`):
+        // 无可见内容的纯导航节点,产 LinkRun 会让 heading 因白名单外节点
+        // 整体岛化(编辑已有帖子时所有标题不可编辑),序列化还会吐
+        // `[](#h-2)` 垃圾 —— 直接跳过。
+        if (el.classes.contains('anchor') && children.isEmpty) {
+          return;
+        }
         if (href.isEmpty) {
           // 空 href:fallback 为纯样式(展平子节点,不可点)
           out.addAll(children);
@@ -2075,6 +2091,11 @@ class ParagraphParser {
             children: List.unmodifiable(children),
             isAttachment: true,
             filename: filenameBuf.toString().trim(),
+            origHref: () {
+              // 客户端 cook 预览:href="/404" + data-orig-href="upload://…"
+              final orig = el.attributes['data-orig-href']?.trim();
+              return (orig == null || orig.isEmpty) ? null : orig;
+            }(),
           ));
         } else if (el.classes.contains('lightbox')) {
           var hasImage = false;
@@ -2088,6 +2109,7 @@ class ParagraphParser {
                 height: child.height,
                 indexInPost: child.indexInPost,
                 lightboxUrl: href,
+                origSrc: child.origSrc,
               ));
             } else {
               out.add(child);
@@ -2097,8 +2119,29 @@ class ParagraphParser {
             out.removeRange(out.length - children.length, out.length);
             out.add(LinkRun(href: href, children: List.unmodifiable(children)));
           }
+        } else if (el.classes.contains('hashtag-cooked')) {
+          // hashtag(#分类/#标签):渲染当普通链接,但记 hashtagRef ——
+          // markdown 序列化写回 `#{ref}` 保持 hashtag 语义(写 URL 会
+          // 让往返后的 raw 退化成死链接)。data-ref 只在带层级/显式类型
+          // 后缀时出现,缺失时 data-slug 就是 ref。
+          final ref = el.attributes['data-ref']?.trim().isNotEmpty == true
+              ? el.attributes['data-ref']!.trim()
+              : el.attributes['data-slug']?.trim();
+          out.add(LinkRun(
+            href: href,
+            children: List.unmodifiable(children),
+            hashtagRef: (ref == null || ref.isEmpty) ? null : ref,
+          ));
         } else {
-          out.add(LinkRun(href: href, children: List.unmodifiable(children)));
+          out.add(LinkRun(
+            href: href,
+            children: List.unmodifiable(children),
+            // onebox 系链接:inline-onebox(行内,锚文本=动态取回的页面
+            // 标题)与 onebox(未展开的裸链)。raw 里都是裸 URL ——
+            // 序列化写回裸 href,不能固化 `[标题](url)` 形态。
+            isOneboxLink: el.classes.contains('inline-onebox') ||
+                el.classes.contains('onebox'),
+          ));
         }
       case 'code':
         // 浏览器 `<code>` 的实际语义:展示原始字面值,内部 markup 视觉
@@ -2118,16 +2161,24 @@ class ParagraphParser {
             isOnlyEmoji: el.classes.contains('only-emoji'),
           ));
         } else {
-          // 普通内容图片走 ImageRun(主项目注入 builder)
+          // 普通内容图片走 ImageRun(主项目注入 builder)。
+          // 客户端 cook 预览形态(src=transparent.png + data-orig-src=
+          // upload://):src 还原为短链,origSrc 供 markdown 序列化写回。
+          var imgSrc = src;
+          final origSrc = el.attributes['data-orig-src']?.trim();
+          if (origSrc != null && origSrc.startsWith('upload://')) {
+            imgSrc = origSrc;
+          }
           final alt = el.attributes['alt']?.trim() ?? '';
           final w = double.tryParse(el.attributes['width'] ?? '');
           final h = double.tryParse(el.attributes['height'] ?? '');
           out.add(ImageRun(
-            src: src,
+            src: imgSrc,
             alt: alt,
             width: w,
             height: h,
             indexInPost: nextImageIndex(),
+            origSrc: (origSrc == null || origSrc.isEmpty) ? null : origSrc,
           ));
         }
       case 'picture':
@@ -2141,9 +2192,59 @@ class ParagraphParser {
         // 行内场景跳过(srcset 的取用在块级 _parsePictureBlock 里处理)。
         return;
       case 'span':
+        // 客户端 cook 预览的图片编辑控件(image-controls feature,
+        // previewing=true 才注入):
+        // - span.image-wrapper:包住 img + 控件,透明拆壳(children 里的
+        //   ImageRun 已收好,直接展平);
+        // - span.button-wrapper:缩放按钮/alt 编辑等纯 UI,整棵丢弃 ——
+        //   不丢的话按钮文字("100% 75% 50%"等)混进正文。
+        if (el.classes.contains('image-wrapper')) {
+          out.addAll(children);
+          return;
+        }
+        if (el.classes.contains('button-wrapper')) {
+          return;
+        }
+        // span.chcklst-box:checklist 复选框(cook 产物,靠 class 表达
+        //勾选态,无文本)。序列化写回 `[x]`/`[ ]`,渲染层暂当纯文本
+        // 方框(编辑场景保真优先;阅读端 fixture 无此形态)。
+        if (el.classes.any((c) => c == 'chcklst-box')) {
+          out.add(TextRun(el.classes.contains('checked')
+              ? (el.classes.contains('permanent') ? '[X]' : '[x]')
+              : '[ ]'));
+          return;
+        }
         // span.spoiler / span.spoiled → SpoilerRun
         if (el.classes.contains('spoiler') || el.classes.contains('spoiled')) {
           out.add(SpoilerRun(children: List.unmodifiable(children)));
+          return;
+        }
+        // span.hashtag-raw:未验证 hashtag(#nonexist 预览降级形态)——
+        // 文本就是 `#slug` 本身,展平 children 即还原
+        if (el.classes.contains('hashtag-raw')) {
+          out.addAll(children);
+          return;
+        }
+        // BBCode 直译 span(cook 对 [u]/[b]/[i]/[s] 的产物;服务端同形态):
+        // bbcode-u/-s 已有 StyledRun 语义;bbcode-b/-i 对齐 strong/em。
+        if (el.classes.contains('bbcode-u')) {
+          out.add(StyledRun(
+              kind: InlineStyleKind.underline,
+              children: List.unmodifiable(children)));
+          return;
+        }
+        if (el.classes.contains('bbcode-s')) {
+          out.add(StyledRun(
+              kind: InlineStyleKind.lineThrough,
+              children: List.unmodifiable(children)));
+          return;
+        }
+        if (el.classes.contains('bbcode-b')) {
+          out.add(StrongRun(children: List.unmodifiable(children)));
+          return;
+        }
+        if (el.classes.contains('bbcode-i')) {
+          out.add(EmRun(children: List.unmodifiable(children)));
           return;
         }
         // span.discourse-local-date → LocalDateRun(主项目接 builder 渲染

@@ -367,6 +367,13 @@ class EditableTextContent {
     );
   }
 
+  /// 取 `[start, end)` 子区间(复制/选区片段提取)。
+  /// marks/atoms 随区间裁剪平移(delete 组合,先尾后头保偏移正确)。
+  EditableTextContent slice(int start, int end) {
+    assert(start >= 0 && end <= text.length && start <= end);
+    return delete(end, text.length).delete(0, start);
+  }
+
   /// 替换 `[start, end)` 为 [replacement](IME composing 更新的主路径)。
   EditableTextContent replace(int start, int end, String replacement) =>
       delete(start, end).insert(start, replacement);

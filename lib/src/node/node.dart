@@ -391,11 +391,21 @@ class QuoteCardNode extends BlockNode {
     this.categoryTextColor,
     this.categoryHref,
     this.children = const [],
+    this.full = false,
+    this.displayName,
   });
 
   /// `data-username`,主项目用它构造用户卡跳转(同 MentionRun.username)。
   /// 缺失时空串。
   final String username;
+
+  /// `data-full="true"`(raw 里 `full:true` —— 引用了原帖全文)。
+  /// markdown 序列化写回时必须保留,否则"全文引用"退化成"节选"。
+  final bool full;
+
+  /// `data-display-name`(raw 里 `[quote="张三, …, username:sam"]` 的
+  /// 显示名形态)。null = raw 第一段就是 username。序列化写回用。
+  final String? displayName;
 
   /// `img.avatar` 的 src(原始 URL,parser 不重写)。
   /// 缺失时 null,渲染走首字母 chip fallback。
@@ -449,6 +459,8 @@ class QuoteCardNode extends BlockNode {
           categoryColor == other.categoryColor &&
           categoryTextColor == other.categoryTextColor &&
           categoryHref == other.categoryHref &&
+          full == other.full &&
+          displayName == other.displayName &&
           listEquals(children, other.children);
 
   @override
@@ -464,6 +476,8 @@ class QuoteCardNode extends BlockNode {
         categoryColor,
         categoryTextColor,
         categoryHref,
+        full,
+        displayName,
         Object.hashAll(children),
       );
 
@@ -1265,11 +1279,17 @@ class VideoNode extends BlockNode {
     this.height,
     this.mime,
     this.loop = false,
+    this.origSrc,
   });
 
   /// 播放源 URL(`data-video-src` / 首个 `source[src]` / `video[src]`)。
   /// 可能是 `upload://` 短链;空串表示无有效源。
   final String src;
+
+  /// `data-orig-src` 的 `upload://` 短链(baked/预览 cooked 都可能带)。
+  /// markdown 序列化写回 `![|video](短链)` 用 —— raw 的规范形态是短链,
+  /// 写 CDN URL 会让服务端把站内上传当外链重新拉取。
+  final String? origSrc;
 
   /// 封面图 URL(`data-thumbnail-src` / `video[poster]`),可空。
   final String? poster;
@@ -1296,10 +1316,12 @@ class VideoNode extends BlockNode {
           width == other.width &&
           height == other.height &&
           mime == other.mime &&
-          loop == other.loop;
+          loop == other.loop &&
+          origSrc == other.origSrc;
 
   @override
-  int get hashCode => Object.hash(src, poster, width, height, mime, loop);
+  int get hashCode =>
+      Object.hash(src, poster, width, height, mime, loop, origSrc);
 
   @override
   String toString() =>
@@ -1329,11 +1351,16 @@ class AudioNode extends BlockNode {
     required this.src,
     this.title,
     this.mime,
+    this.origSrc,
   });
 
   /// 播放源 URL(首个 `source[src]` / `audio[src]`)。可能是 `upload://` 短链;
   /// 空串表示无有效源。
   final String src;
+
+  /// `data-orig-src` 的 `upload://` 短链。markdown 序列化写回
+  /// `![|audio](短链)` 用(同 VideoNode.origSrc)。
+  final String? origSrc;
 
   /// 内层 `<a>` 文本(常是 URL),fallback 占位卡显示用,可空。
   final String? title;
@@ -1348,10 +1375,11 @@ class AudioNode extends BlockNode {
           runtimeType == other.runtimeType &&
           src == other.src &&
           title == other.title &&
-          mime == other.mime;
+          mime == other.mime &&
+          origSrc == other.origSrc;
 
   @override
-  int get hashCode => Object.hash(src, title, mime);
+  int get hashCode => Object.hash(src, title, mime, origSrc);
 
   @override
   String toString() => 'AudioNode($id, $src)';

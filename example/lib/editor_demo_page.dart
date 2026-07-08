@@ -78,6 +78,28 @@ class _EditorDemoPageState extends State<EditorDemoPage> {
       appBar: AppBar(
         title: const Text('编辑内核 M2 demo'),
         actions: [
+          IconButton(
+            tooltip: '导出 markdown(控制台)',
+            focusNode: FocusNode(canRequestFocus: false, skipTraversal: true),
+            icon: const Icon(Icons.output),
+            onPressed: () {
+              final md = docToMarkdown(_state.blocks);
+              debugPrint('===== markdown =====\n$md\n===== end =====');
+              showDialog<void>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('markdown 导出'),
+                  content: SingleChildScrollView(
+                    child: SelectableText(
+                      md,
+                      style: const TextStyle(
+                          fontFamily: 'monospace', fontSize: 12),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
           ListenableBuilder(
             listenable: _state,
             builder: (context, _) => Row(
