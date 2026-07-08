@@ -1,16 +1,22 @@
 /// 编辑文档 ↔ 阅读端 BlockNode 树 双向互转。
 ///
 /// **零丢失原则**:
-/// - 不可编辑的 inline(link/image/spoiler/... M2 暂不进编辑白名单)→
-///   所在块**整体岛化**(IslandBlock 原引用直存),不做有损降级;
-/// - 列表含块级子节点 / 引用内含不可编辑块 → 整棵树岛化(不拆半棵);
+/// - 不可编辑的 inline(image/footnote/... 白名单外)→ 所在块**整体
+///   岛化**(IslandBlock 原引用直存),不做有损降级;
+/// - 列表含块级子节点 → 整棵树岛化(不拆半棵);
 /// - IslandBlock 导出时原 node 引用直出(identity 保真)。
 ///
-/// 列表/引用的树 ↔ 扁平转换:
+/// **容器化(M5-B,对齐官方 ProseMirror composer)**:
+/// blockquote / quote 卡 / 块级 spoiler / details / callout 是**可进入
+/// 容器**而非岛 —— 展平为子块的 [TextBlock.containers] 栈帧;光标直接
+/// 进去编辑。容器内出现不可编辑块(岛)时整棵容器岛化(M5-B 范围:
+/// 容器内容全可编辑才容器化;混合内容留给岛 + 源码编辑兜底)。
+///
+/// 列表/容器的树 ↔ 扁平转换:
 /// - 导入:ListNode DFS 展平为连续 `TextBlock(listItem, depth)` run;
-///   BlockquoteNode 递归展平,途经块 quoteDepth+1;
-/// - 导出:连续 listItem run 深度栈重建 ListNode 树;连续 quoteDepth>0
-///   run 递归包 BlockquoteNode。
+///   容器节点递归展平,途经块 containers 头部压帧;
+/// - 导出:相邻块 containers 公共前缀分组,逐层重建容器节点树;连续
+///   listItem run 深度栈重建 ListNode 树。
 library;
 
 import '../../node/node.dart';
@@ -68,7 +74,7 @@ List<EditorBlock> blockNodesToDoc(
     bool ordered = false,
     int depth = 0,
     int listStart = 1,
-    int quoteDepth = 0,
+    List<ContainerFrame> containers = const [],
   }) {
     out.add(TextBlock(
       id: nextId(),
@@ -78,7 +84,7 @@ List<EditorBlock> blockNodesToDoc(
       ordered: ordered,
       depth: depth,
       listStart: listStart,
-      quoteDepth: quoteDepth,
+      containers: containers,
     ));
   }
 
@@ -95,7 +101,7 @@ List<EditorBlock> blockNodesToDoc(
   }
 
   /// 展平列表(已验证可编辑)。首项带 listStart。
-  void flattenList(ListNode list, int depth, int quoteDepth) {
+  void flattenList(ListNode list, int depth, List<ContainerFrame> containers) {
     for (var i = 0; i < list.items.length; i++) {
       final item = list.items[i];
       addText(
@@ -104,22 +110,27 @@ List<EditorBlock> blockNodesToDoc(
         ordered: list.ordered,
         depth: depth,
         listStart: i == 0 && depth == 0 ? list.start : 1,
-        quoteDepth: quoteDepth,
+        containers: containers,
       );
       for (final sub in item.children ?? const <ListNode>[]) {
-        flattenList(sub, depth + 1, quoteDepth);
+        flattenList(sub, depth + 1, containers);
       }
     }
   }
 
-  /// 引用整树可编辑性:children 全部是可编辑段落/标题/列表/嵌套引用/空行。
-  bool quoteEditable(BlockquoteNode quote) {
-    for (final child in quote.children) {
+  /// 子节点序列是否全部可编辑(容器可进入化判据:段落/标题/列表/空行/
+  /// 嵌套可编辑容器)。
+  bool blocksEditable(List<BlockNode> children) {
+    for (final child in children) {
       final ok = switch (child) {
         ParagraphNode(:final inlines) => _allEditable(inlines),
         HeadingNode(:final inlines) => _allEditable(inlines),
         final ListNode list => listEditable(list),
-        final BlockquoteNode nested => quoteEditable(nested),
+        BlockquoteNode(:final children) => blocksEditable(children),
+        QuoteCardNode(:final children) => blocksEditable(children),
+        SpoilerBlockNode(:final children) => blocksEditable(children),
+        DetailsNode(:final children) => blocksEditable(children),
+        CalloutNode(:final children) => blocksEditable(children),
         BlankLineNode() => true,
         _ => false,
       };
@@ -128,12 +139,12 @@ List<EditorBlock> blockNodesToDoc(
     return true;
   }
 
-  void walk(BlockNode node, int quoteDepth) {
+  void walk(BlockNode node, List<ContainerFrame> containers) {
     switch (node) {
       case ParagraphNode(:final inlines):
         if (_allEditable(inlines)) {
           addText(EditableTextContent.fromInlines(inlines),
-              quoteDepth: quoteDepth);
+              containers: containers);
         } else {
           addIsland(node);
         }
@@ -143,34 +154,104 @@ List<EditorBlock> blockNodesToDoc(
             EditableTextContent.fromInlines(inlines),
             kind: TextBlockKind.heading,
             headingLevel: level,
-            quoteDepth: quoteDepth,
+            containers: containers,
           );
         } else {
           addIsland(node);
         }
       case ListNode():
         if (listEditable(node)) {
-          flattenList(node, node.depth, quoteDepth);
+          flattenList(node, node.depth, containers);
         } else {
           addIsland(node);
         }
       case BlockquoteNode(:final children):
-        if (quoteEditable(node)) {
+        if (blocksEditable(children)) {
+          final frame = [...containers, const QuoteFrame()];
           for (final child in children) {
-            walk(child, quoteDepth + 1);
+            walk(child, frame);
+          }
+        } else {
+          addIsland(node);
+        }
+      case QuoteCardNode(:final children):
+        if (blocksEditable(children)) {
+          final frame = [
+            ...containers,
+            QuoteCardFrame(
+              username: node.username,
+              displayName: node.displayName,
+              postNumber: node.postNumber,
+              topicId: node.topicId,
+              full: node.full,
+            ),
+          ];
+          // 空引用卡:补一个空段(容器可进入的最小内容)
+          if (children.isEmpty) {
+            addText(EditableTextContent.empty, containers: frame);
+          }
+          for (final child in children) {
+            walk(child, frame);
+          }
+        } else {
+          addIsland(node);
+        }
+      case SpoilerBlockNode(:final children):
+        if (blocksEditable(children)) {
+          final frame = [...containers, const SpoilerFrame()];
+          if (children.isEmpty) {
+            addText(EditableTextContent.empty, containers: frame);
+          }
+          for (final child in children) {
+            walk(child, frame);
+          }
+        } else {
+          addIsland(node);
+        }
+      case DetailsNode(:final summary, :final children, :final initiallyOpen):
+        if (blocksEditable(children)) {
+          final frame = [
+            ...containers,
+            DetailsFrame(summary: summary, open: initiallyOpen),
+          ];
+          if (children.isEmpty) {
+            addText(EditableTextContent.empty, containers: frame);
+          }
+          for (final child in children) {
+            walk(child, frame);
+          }
+        } else {
+          addIsland(node);
+        }
+      case CalloutNode():
+        if (blocksEditable(node.children)) {
+          final frame = [
+            ...containers,
+            CalloutFrame(
+              kind: node.kind,
+              typeRaw: node.typeRaw,
+              title: node.title,
+              foldable: node.foldable,
+            ),
+          ];
+          if (node.children.isEmpty) {
+            addText(EditableTextContent.empty, containers: frame);
+          }
+          for (final child in node.children) {
+            walk(child, frame);
           }
         } else {
           addIsland(node);
         }
       case BlankLineNode():
-        addText(EditableTextContent.empty, quoteDepth: quoteDepth);
+        addText(EditableTextContent.empty, containers: containers);
       default:
         addIsland(node);
     }
   }
 
   for (final node in nodes) {
-    walk(node, 0);
+    walk(node, const []);
   }
   // 注意:不在此补"至少一个 TextBlock"—— 那是 EditorState 的文档不变量
   // (其构造器自动补空段);converter 保持纯转换,否则全岛输入的往返
@@ -178,15 +259,25 @@ List<EditorBlock> blockNodesToDoc(
   return out;
 }
 
-/// 编辑文档 → 阅读端节点树(给阅读端渲染/M3 markdown 序列化)。
+/// 编辑文档 → 阅读端节点树(给阅读端渲染/markdown 序列化)。
 List<BlockNode> docToBlockNodes(List<EditorBlock> doc) {
   var idCounter = 0;
   String nextId() => 'b_${idCounter++}';
+  return _buildLevel(doc, 0, nextId);
+}
 
+/// 递归重建:处理 [doc] 中所有块在容器栈深度 [level] 上的分组。
+///
+/// 相邻块 containers[level] 相等(且都有该层)→ 同一容器实例,递归
+/// 包装;无该层 → 顶层内容(列表 run / 单块)。
+List<BlockNode> _buildLevel(
+  List<EditorBlock> doc,
+  int level,
+  String Function() nextId,
+) {
   final out = <BlockNode>[];
   var i = 0;
 
-  // 顶层游标推进;引用 run / 列表 run 由子函数消费连续段。
   while (i < doc.length) {
     final block = doc[i];
 
@@ -197,19 +288,23 @@ List<BlockNode> docToBlockNodes(List<EditorBlock> doc) {
     }
     block as TextBlock;
 
-    if (block.quoteDepth > 0) {
-      // 连续 quoteDepth>0 run → 递归包 BlockquoteNode
-      final run = <TextBlock>[];
+    if (block.containers.length > level) {
+      // 收集相同容器帧的连续 run,递归下一层
+      final frame = block.containers[level];
+      final run = <EditorBlock>[];
       while (i < doc.length) {
         final b = doc[i];
-        if (b is TextBlock && b.quoteDepth > 0) {
+        if (b is TextBlock &&
+            b.containers.length > level &&
+            b.containers[level] == frame) {
           run.add(b);
           i++;
         } else {
           break;
         }
       }
-      out.add(_buildQuote(run, 1, nextId));
+      final children = _buildLevel(run, level + 1, nextId);
+      out.add(_wrapInFrame(frame, children, nextId));
       continue;
     }
 
@@ -217,7 +312,9 @@ List<BlockNode> docToBlockNodes(List<EditorBlock> doc) {
       final run = <TextBlock>[];
       while (i < doc.length) {
         final b = doc[i];
-        if (b is TextBlock && b.isListItem && b.quoteDepth == 0) {
+        if (b is TextBlock &&
+            b.isListItem &&
+            b.containers.length <= level) {
           run.add(b);
           i++;
         } else {
@@ -233,6 +330,48 @@ List<BlockNode> docToBlockNodes(List<EditorBlock> doc) {
   }
   return out;
 }
+
+/// 容器帧 → 对应的阅读端容器节点。
+BlockNode _wrapInFrame(
+  ContainerFrame frame,
+  List<BlockNode> children,
+  String Function() nextId,
+) =>
+    switch (frame) {
+      QuoteFrame() => BlockquoteNode(id: nextId(), children: children),
+      QuoteCardFrame(
+        :final username,
+        :final displayName,
+        :final postNumber,
+        :final topicId,
+        :final full,
+      ) =>
+        QuoteCardNode(
+          id: nextId(),
+          username: username,
+          displayName: displayName,
+          postNumber: postNumber,
+          topicId: topicId,
+          full: full,
+          children: children,
+        ),
+      SpoilerFrame() => SpoilerBlockNode(id: nextId(), children: children),
+      DetailsFrame(:final summary, :final open) => DetailsNode(
+          id: nextId(),
+          summary: summary,
+          children: children,
+          initiallyOpen: open,
+        ),
+      CalloutFrame(:final kind, :final typeRaw, :final title, :final foldable) =>
+        CalloutNode(
+          id: nextId(),
+          kind: kind,
+          typeRaw: typeRaw,
+          title: title,
+          foldable: foldable,
+          children: children,
+        ),
+    };
 
 /// 单个非列表文本块 → 节点。
 BlockNode _textBlockToNode(TextBlock block, String Function() nextId) {
@@ -262,43 +401,7 @@ List<InlineNode> _exportInlines(TextBlock block) {
   return inlines;
 }
 
-/// 连续 quoteDepth ≥ [level] 的 run → BlockquoteNode(递归处理更深层)。
-BlockquoteNode _buildQuote(
-  List<TextBlock> run,
-  int level,
-  String Function() nextId,
-) {
-  final children = <BlockNode>[];
-  var i = 0;
-  while (i < run.length) {
-    final b = run[i];
-    if (b.quoteDepth > level) {
-      final deeper = <TextBlock>[];
-      while (i < run.length && run[i].quoteDepth > level) {
-        deeper.add(run[i]);
-        i++;
-      }
-      children.add(_buildQuote(deeper, level + 1, nextId));
-      continue;
-    }
-    if (b.isListItem) {
-      final listRun = <TextBlock>[];
-      while (i < run.length &&
-          run[i].isListItem &&
-          run[i].quoteDepth == level) {
-        listRun.add(run[i]);
-        i++;
-      }
-      children.addAll(_buildLists(listRun, 0, nextId));
-      continue;
-    }
-    children.add(_textBlockToNode(b, nextId));
-    i++;
-  }
-  return BlockquoteNode(id: nextId(), children: children);
-}
-
-/// 连续 listItem run(同 quoteDepth)→ ListNode 树(深度栈重建)。
+/// 连续 listItem run(同容器层)→ ListNode 树(深度栈重建)。
 ///
 /// 相邻同 depth 且 ordered 不同 → 关组开新列表(对齐 HTML ul/ol 分家)。
 List<ListNode> _buildLists(

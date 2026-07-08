@@ -16,35 +16,50 @@ import 'editable_text_content.dart';
 import 'editor_block.dart';
 
 /// 整篇文档 → markdown。
-String docToMarkdown(List<EditorBlock> doc) {
+///
+/// M5-B:按 [TextBlock.containers] 栈递归分组 —— 相邻块同容器帧 = 同一
+/// 容器实例,内层序列化完包上容器语法(`> ` 前缀 / `[quote]` / `[spoiler]`
+/// / `[details]` / callout 标记行)。
+String docToMarkdown(List<EditorBlock> doc) => _serializeLevel(doc, 0);
+
+String _serializeLevel(List<EditorBlock> doc, int level) {
   final chunks = <String>[];
   var i = 0;
   while (i < doc.length) {
     final block = doc[i];
 
-    if (block is TextBlock && block.quoteDepth > 0) {
-      // 连续 quote run 作为一个 chunk:块间用 `>` 前缀空行连接(裸空行
-      // 会把一个 blockquote 劈成两个 —— cook 实测)。
-      final run = <TextBlock>[];
+    if (block is IslandBlock) {
+      chunks.add(serializeIslandNode(block.node));
+      i++;
+      continue;
+    }
+    block as TextBlock;
+
+    if (block.containers.length > level) {
+      // 相同容器帧的连续 run → 递归内层后包容器语法
+      final frame = block.containers[level];
+      final run = <EditorBlock>[];
       while (i < doc.length) {
         final b = doc[i];
-        if (b is TextBlock && b.quoteDepth > 0) {
+        if (b is TextBlock &&
+            b.containers.length > level &&
+            b.containers[level] == frame) {
           run.add(b);
           i++;
         } else {
           break;
         }
       }
-      chunks.add(_serializeQuoteRun(run));
+      chunks.add(_serializeFrame(frame, run, level));
       continue;
     }
 
-    if (block is TextBlock && block.isListItem) {
+    if (block.isListItem) {
       // 连续 listItem run 作为一个 chunk(项间单换行,序号连续计算)
       final run = <TextBlock>[];
       while (i < doc.length) {
         final b = doc[i];
-        if (b is TextBlock && b.isListItem && b.quoteDepth == 0) {
+        if (b is TextBlock && b.isListItem && b.containers.length <= level) {
           run.add(b);
           i++;
         } else {
@@ -55,17 +70,63 @@ String docToMarkdown(List<EditorBlock> doc) {
       continue;
     }
 
-    chunks.add(_serializeBlock(block));
+    chunks.add(_serializeTextBlock(block));
     i++;
   }
   // 块间空行;过滤全空 chunk(如未知岛)后拼接
   return chunks.where((c) => c.isNotEmpty).join('\n\n');
 }
 
-String _serializeBlock(EditorBlock block) => switch (block) {
-      final TextBlock tb => _serializeTextBlock(tb),
-      final IslandBlock ib => serializeIslandNode(ib.node),
-    };
+/// 容器帧 → markdown 包装。
+///
+/// Quote/Callout 的 `>` 前缀规则(cook 实测):同一 blockquote 内的
+/// 块间分隔必须是 **`>` 前缀空行**(裸空行劈成两个相邻 blockquote);
+/// 内层 join('\n\n') 产生的空行经前缀映射为 `>`,嵌套时外层再叠
+/// 一层前缀 —— 深浅交界的分隔行自然是浅侧前缀。
+String _serializeFrame(ContainerFrame frame, List<EditorBlock> run, int level) {
+  final inner = _serializeLevel(run, level + 1);
+  String prefixQuote(String s) =>
+      s.split('\n').map((l) => l.isEmpty ? '>' : '> $l').join('\n');
+
+  switch (frame) {
+    case QuoteFrame():
+      return prefixQuote(inner);
+    case CalloutFrame(:final typeRaw, :final title, :final foldable):
+      final fold = switch (foldable) { true => '+', false => '-', null => '' };
+      final t = (title ?? '').isEmpty ? '' : ' $title';
+      final lines = <String>['> [!$typeRaw]$fold$t'];
+      if (inner.isNotEmpty) lines.add(prefixQuote(inner));
+      return lines.join('\n');
+    case QuoteCardFrame(
+        :final username,
+        :final displayName,
+        :final postNumber,
+        :final topicId,
+        :final full,
+      ):
+      final parts = <String>[];
+      if (displayName != null) {
+        parts.add(displayName);
+      } else if (username.isNotEmpty) {
+        parts.add(username);
+      }
+      if (postNumber != null) parts.add('post:$postNumber');
+      if (topicId != null) parts.add('topic:$topicId');
+      if (displayName != null && username.isNotEmpty) {
+        parts.add('username:$username');
+      }
+      if (full) parts.add('full:true');
+      final open =
+          parts.isEmpty ? '[quote]' : '[quote="${parts.join(', ')}"]';
+      return '$open\n$inner\n[/quote]';
+    case SpoilerFrame():
+      return '[spoiler]\n$inner\n[/spoiler]';
+    case DetailsFrame(:final summary, :final open):
+      final summaryAttr = summary.isEmpty ? '' : '="$summary"';
+      final openAttr = open ? ' open' : '';
+      return '[details$summaryAttr$openAttr]\n$inner\n[/details]';
+  }
+}
 
 String _serializeTextBlock(TextBlock block) {
   var text = _inlineToMarkdown(block.content);
@@ -129,56 +190,6 @@ String _serializeListRun(List<TextBlock> run) {
       .where((s) => s.isNotEmpty)
       .map((s) => s.join('\n'))
       .join('\n\n');
-}
-
-/// 连续 quoteDepth>0 run → 单个引用 chunk。
-///
-/// 关键(cook 实测):同一 blockquote 内的块间分隔必须是 **`>` 前缀空行**
-/// (`> A\n>\n> B`)—— 裸空行(`> A\n\n> B`)会劈成两个相邻 blockquote,
-/// 往返后结构漂移。深度不同的相邻块,分隔行用较浅侧深度的前缀
-/// (`> 外\n>\n> > 内` 合并为嵌套,同样实测)。
-String _serializeQuoteRun(List<TextBlock> run) {
-  // 先按"连续 listItem(同 depth 组内自然连续)/单块"分组,组内不插空行
-  final groups = <List<TextBlock>>[];
-  for (final b in run) {
-    if (b.isListItem &&
-        groups.isNotEmpty &&
-        groups.last.last.isListItem &&
-        groups.last.last.quoteDepth == b.quoteDepth) {
-      groups.last.add(b);
-    } else {
-      groups.add([b]);
-    }
-  }
-
-  final lines = <String>[];
-  int? prevDepth;
-  for (final g in groups) {
-    final depth = g.first.quoteDepth;
-    if (prevDepth != null) {
-      // 组间分隔:较浅侧深度的 `>` 空行(去尾空格)
-      final sepDepth = depth < prevDepth ? depth : prevDepth;
-      lines.add(('> ' * sepDepth).trimRight());
-    }
-    prevDepth = depth;
-
-    if (g.first.isListItem) {
-      final prefix = '> ' * depth;
-      // 列表组:项间单换行,组内序号连续
-      final body = _serializeListRun([
-        for (final b in g) b.copyWith(quoteDepth: 0),
-      ]);
-      lines.addAll(body.split('\n').map((l) => '$prefix$l'));
-    } else {
-      final b = g.single;
-      final prefix = '> ' * depth;
-      var text = _inlineToMarkdown(b.content);
-      if (b.isHeading) text = '${'#' * b.headingLevel} $text';
-      lines.addAll(
-          text.split('\n').map((l) => l.isEmpty ? prefix.trimRight() : '$prefix$l'));
-    }
-  }
-  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------

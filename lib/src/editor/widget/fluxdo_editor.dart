@@ -25,6 +25,7 @@ import '../input/editor_key_handler.dart';
 import '../model/editor_state.dart';
 import 'editable_paragraph.dart';
 import 'editor_caret.dart';
+import 'editor_container_shell.dart';
 import 'editor_island.dart';
 
 class FluxdoEditor extends StatefulWidget {
@@ -499,44 +500,85 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
       counters.removeWhere((k, _) => k.$2 > b.depth);
     }
 
-    final children = <Widget>[
-      for (var i = 0; i < state.blocks.length; i++)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: switch (state.blocks[i]) {
-            // key 绑块 id:分段/合并时 Element 正确复用/重建
-            final TextBlock tb => EditableParagraph(
-                key: ValueKey(tb.id),
-                block: tb,
-                documentOrder: i,
-                baseStyle: baseStyle,
-                composing: tb.id == composingBlockId
-                    ? state.composing
-                    : TextRange.empty,
-                listMarkerOrdinal: ordinals[i],
-              ),
-            // 孤岛:NodeFactory 渲染,tap 整选,双击请求编辑,选中态描边
-            final IslandBlock ib => EditorIsland(
-                key: ValueKey(ib.id),
-                node: ib.node,
-                nodeFactory: _islandFactory,
-                selected: _isIslandSelected(ib.id),
-                onTapSelect: () {
-                  _focusNode.requestFocus();
-                  widget.state.sealHistory();
-                  widget.state.updateSelection(EditorSelection(
-                    base: EditorPosition(blockId: ib.id, offset: 0),
-                    extent: EditorPosition(blockId: ib.id, offset: 1),
-                  ));
-                  _ime.syncFromState(show: false);
-                },
-                onEditRequest: widget.onIslandEditRequest == null
-                    ? null
-                    : () => widget.onIslandEditRequest!(ib),
-              ),
-          },
-        ),
-    ];
+    /// 单块 → widget(文本段落/岛)。
+    Widget buildBlock(int i) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: switch (state.blocks[i]) {
+          // key 绑块 id:分段/合并时 Element 正确复用/重建
+          final TextBlock tb => EditableParagraph(
+              key: ValueKey(tb.id),
+              block: tb,
+              documentOrder: i,
+              baseStyle: baseStyle,
+              composing: tb.id == composingBlockId
+                  ? state.composing
+                  : TextRange.empty,
+              listMarkerOrdinal: ordinals[i],
+            ),
+          // 孤岛:NodeFactory 渲染,tap 整选,双击请求编辑,选中态描边
+          final IslandBlock ib => EditorIsland(
+              key: ValueKey(ib.id),
+              node: ib.node,
+              nodeFactory: _islandFactory,
+              selected: _isIslandSelected(ib.id),
+              onTapSelect: () {
+                _focusNode.requestFocus();
+                widget.state.sealHistory();
+                widget.state.updateSelection(EditorSelection(
+                  base: EditorPosition(blockId: ib.id, offset: 0),
+                  extent: EditorPosition(blockId: ib.id, offset: 1),
+                ));
+                _ime.syncFromState(show: false);
+              },
+              onEditRequest: widget.onIslandEditRequest == null
+                  ? null
+                  : () => widget.onIslandEditRequest!(ib),
+            ),
+        },
+      );
+    }
+
+    /// 递归分组(M5-B):`[from, to)` 内容器栈深度 [level] 上的分组渲染。
+    /// 相邻块 containers[level] 相等 → 同容器实例,包 EditorContainerShell
+    /// 后递归下一层;无该层帧 → 直接渲染块本体。
+    List<Widget> buildLevel(int from, int to, int level) {
+      final out = <Widget>[];
+      var i = from;
+      while (i < to) {
+        final b = state.blocks[i];
+        final frames = b is TextBlock ? b.containers : const <ContainerFrame>[];
+        if (frames.length > level) {
+          final frame = frames[level];
+          final runStart = i;
+          while (i < to) {
+            final c = state.blocks[i];
+            final cf = c is TextBlock ? c.containers : const <ContainerFrame>[];
+            if (cf.length > level && cf[level] == frame) {
+              i++;
+            } else {
+              break;
+            }
+          }
+          out.add(Padding(
+            // 容器壳自身与外界的间距(块本体的 vertical 4 在壳内)
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: EditorContainerShell(
+              // key 绑首块 id + 层级:分组随编辑变动时子树正确重建
+              key: ValueKey('shell_${state.blocks[runStart].id}_$level'),
+              frame: frame,
+              children: buildLevel(runStart, i, level + 1),
+            ),
+          ));
+          continue;
+        }
+        out.add(buildBlock(i));
+        i++;
+      }
+      return out;
+    }
+
+    final children = buildLevel(0, state.blocks.length, 0);
 
     return Focus(
       focusNode: _focusNode,

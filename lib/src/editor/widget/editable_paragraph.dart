@@ -225,26 +225,9 @@ class _EditableParagraphState extends State<EditableParagraph> {
       );
     }
 
-    // 引用装饰:左 4px 竖条 + 浅底(阅读端 buildBlockquote 视觉;相邻
-    // quote 块各画各的,首尾圆角合并留 M3 打磨)。
-    if (block.quoteDepth > 0) {
-      final scheme = Theme.of(context).colorScheme;
-      boxed = Padding(
-        padding: EdgeInsets.only(left: 12.0 * (block.quoteDepth - 1)),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
-            border: Border(
-              left: BorderSide(color: scheme.outlineVariant, width: 4),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-            child: boxed,
-          ),
-        ),
-      );
-    }
+    // 容器装饰(quote 竖条/spoiler 底纹/details 框…)不在本 widget:
+    // 由 FluxdoEditor 按相邻块容器栈分组统一画壳(M5-B),块本体只管
+    // 文本渲染。
 
     return boxed;
   }

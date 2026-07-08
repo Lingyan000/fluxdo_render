@@ -623,7 +623,7 @@ class EditorState extends ChangeNotifier {
     block as TextBlock;
 
     if (pos.offset == 0) {
-      // 列表项/引用块首退格:先降级(语义表),不合并。
+      // 列表项/容器块首退格:先降级(语义表),不合并。
       if (block.isListItem) {
         if (block.depth > 0) {
           _updateBlockAttrs(i, block.copyWith(depth: block.depth - 1));
@@ -632,8 +632,15 @@ class EditorState extends ChangeNotifier {
         }
         return;
       }
-      if (block.quoteDepth > 0) {
-        _updateBlockAttrs(i, block.copyWith(quoteDepth: block.quoteDepth - 1));
+      if (block.containers.isNotEmpty) {
+        // 弹出最内层容器(退出 quote/spoiler/details/callout 一层)
+        _updateBlockAttrs(
+          i,
+          block.copyWith(
+            containers:
+                block.containers.sublist(0, block.containers.length - 1),
+          ),
+        );
         return;
       }
       if (i == 0) return;
@@ -745,11 +752,17 @@ class EditorState extends ChangeNotifier {
       }
       return;
     }
-    // 引用内空段回车:退出引用。
-    if (block.quoteDepth > 0 &&
+    // 容器内空段回车:弹出最内层容器(逐级退出 quote/spoiler/…)。
+    if (block.containers.isNotEmpty &&
         block.isParagraph &&
         block.content.length == 0) {
-      _updateBlockAttrs(i, block.copyWith(quoteDepth: block.quoteDepth - 1));
+      _updateBlockAttrs(
+        i,
+        block.copyWith(
+          containers:
+              block.containers.sublist(0, block.containers.length - 1),
+        ),
+      );
       return;
     }
 
@@ -758,14 +771,14 @@ class EditorState extends ChangeNotifier {
     final newId = _nextId();
 
     // 新块属性:heading 尾回车 → 段落;其余继承(heading 中部两半同级,
-    // listItem 同 kind/depth,quote 同深)。
+    // listItem 同 kind/depth,容器同栈)。
     final atTail = pos.offset >= block.content.length;
     final TextBlock newBlock;
     if (block.isHeading && atTail) {
       newBlock = TextBlock(
         id: newId,
         content: after,
-        quoteDepth: block.quoteDepth,
+        containers: block.containers,
       );
     } else {
       newBlock = block
@@ -778,7 +791,7 @@ class EditorState extends ChangeNotifier {
                 ordered: b.ordered,
                 depth: b.depth,
                 // listStart 只属于 run 首项,分裂出的新项不带
-                quoteDepth: b.quoteDepth,
+                containers: b.containers,
               ));
     }
 
@@ -1026,7 +1039,7 @@ class EditorState extends ChangeNotifier {
     }
   }
 
-  /// toggle 引用:选区覆盖块全在引用内 → 全部 -1;否则全部 +1。
+  /// toggle 引用:选区覆盖块全在引用内 → 弹出最外层 Quote;否则包一层。
   void toggleQuote() {
     final range = _selectedTextBlockRange();
     if (range == null) return;
@@ -1035,13 +1048,27 @@ class EditorState extends ChangeNotifier {
         .whereType<TextBlock>()
         .toList();
     if (all.isEmpty) return;
-    final isAll = all.every((b) => b.quoteDepth > 0);
+    final isAll = all.every((b) => b.containers.any((f) => f is QuoteFrame));
+    _mapSelectedTextBlocks((b) {
+      if (isAll) {
+        // 弹出最内层的 QuoteFrame(保留其他容器)
+        final idx = b.containers.lastIndexWhere((f) => f is QuoteFrame);
+        if (idx < 0) return b;
+        final next = [...b.containers]..removeAt(idx);
+        return b.copyWith(containers: next);
+      }
+      // 外面再包一层引用(栈头插入 —— 语义上新引用包住现有容器)
+      return b.copyWith(
+        containers: [const QuoteFrame(), ...b.containers],
+      );
+    });
+  }
+
+  /// 对选区覆盖块统一包一层容器(工具栏/插入菜单:spoiler/details/
+  /// callout 可进入化)。包在最外层。
+  void wrapInContainer(ContainerFrame frame) {
     _mapSelectedTextBlocks(
-      (b) => b.copyWith(
-        quoteDepth: isAll
-            ? math.max(0, b.quoteDepth - 1)
-            : b.quoteDepth + 1,
-      ),
+      (b) => b.copyWith(containers: [frame, ...b.containers]),
     );
   }
 
@@ -1195,7 +1222,7 @@ class EditorState extends ChangeNotifier {
         ordered: lastText.ordered,
         depth: lastText.depth,
         listStart: lastText.listStart,
-        quoteDepth: lastText.quoteDepth,
+        containers: lastText.containers,
       ));
       caret = EditorPosition(blockId: tailId, offset: lastText.content.length);
     } else {
@@ -1208,7 +1235,7 @@ class EditorState extends ChangeNotifier {
         headingLevel: host.headingLevel,
         ordered: host.ordered,
         depth: host.depth,
-        quoteDepth: host.quoteDepth,
+        containers: host.containers,
       ));
       caret = EditorPosition(blockId: tailId, offset: 0);
     }
@@ -1250,7 +1277,7 @@ class EditorState extends ChangeNotifier {
             ordered: tb.ordered,
             depth: tb.depth,
             listStart: tb.listStart,
-            quoteDepth: tb.quoteDepth,
+            containers: tb.containers,
           ),
         final IslandBlock ib => IslandBlock(id: _nextId(), node: ib.node),
       };
