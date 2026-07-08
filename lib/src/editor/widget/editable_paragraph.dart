@@ -57,12 +57,19 @@ class _EditableParagraphState extends State<EditableParagraph> {
   FlattenResult? _result;
 
   FlattenResult _ensureResult() {
-    // block.content 不可变 → 引用相等即缓存有效。
+    // block.content 不可变 → 引用相等即缓存有效(linkColor 变化走
+    // didChangeDependencies 失效)。
     final cached = _result;
     if (cached != null) return cached;
     final sw = kDebugMode ? (Stopwatch()..start()) : null;
     final r = _result = _flattener.flatten(
-      widget.block.content.toInlines(),
+      // forEditing:spoiler=淡底纹(内容可见)、link=主题色下划线纯文本
+      // (真 SpoilerRun 的粒子 WidgetSpan / LinkRun 的 recognizer 都会
+      // 破坏编辑手势与光标)。
+      widget.block.content.toInlines(
+        forEditing: true,
+        editingLinkColor: _linkColor,
+      ),
       _effectiveStyle,
     );
     if (sw != null && sw.elapsedMilliseconds > 4) {
@@ -70,6 +77,18 @@ class _EditableParagraphState extends State<EditableParagraph> {
           '(${widget.block.content.length} chars)');
     }
     return r;
+  }
+
+  Color? _linkColor;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = Theme.of(context).colorScheme.primary;
+    if (next != _linkColor) {
+      _linkColor = next;
+      _disposeResult();
+    }
   }
 
   @override

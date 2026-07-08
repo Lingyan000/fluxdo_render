@@ -249,14 +249,27 @@ void main() {
       }
     });
 
-    test('含链接段落整块岛化(白名单外零丢失)', () {
+    test('普通链接段落可编辑(M5 link mark);特种链接仍岛化', () {
+      // 普通链接:mark 化,不岛化
       final nodes = parser.parse('<p>看 <a href="https://x.com">这里</a></p>');
       final doc = blockNodesToDoc(nodes, idGen());
-      expect(doc.whereType<IslandBlock>().length, 1);
-      // converter 保持纯转换(不补空段);不变量由 EditorState 构造器兜
-      final state = EditorState(blocks: doc);
-      expect(state.blocks.whereType<TextBlock>(), isNotEmpty);
-      state.dispose();
+      expect(doc.whereType<IslandBlock>(), isEmpty);
+      final tb = doc.single as TextBlock;
+      expect(tb.content.text, '看 这里');
+      expect(
+        tb.content.marks.single,
+        const MarkSpan(
+            start: 2, end: 4, kind: MarkKind.link, attr: 'https://x.com'),
+      );
+      // 往返:toInlines 还原 LinkRun
+      final back = tb.content.toInlines();
+      expect(back.whereType<LinkRun>().single.href, 'https://x.com');
+
+      // 特种链接(attachment)仍岛化
+      final att = parser.parse(
+          '<p><a class="attachment" href="/404" data-orig-href="upload://d.pdf">d.pdf</a></p>');
+      final attDoc = blockNodesToDoc(att, idGen());
+      expect(attDoc.whereType<IslandBlock>().length, 1);
     });
 
     test('列表含块级子节点:整棵岛化', () {

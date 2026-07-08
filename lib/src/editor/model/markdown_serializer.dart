@@ -185,9 +185,11 @@ String _serializeQuoteRun(List<TextBlock> run) {
 // 行内序列化:扁平模型(text + marks + atoms)→ markdown 标记对
 // ---------------------------------------------------------------------
 
-/// mark 开/闭标记(嵌套固定序:strong > em > underline > lineThrough;
-/// inlineCode 独占由 toInlines 语义保证,这里同优先级处理即可)。
+/// mark 开/闭标记(嵌套固定序:spoiler > link > strong > em > underline >
+/// lineThrough;inlineCode 独占由 toInlines 语义保证,这里同优先级处理即可)。
 const _markOrder = [
+  MarkKind.spoilerInline,
+  MarkKind.link,
   MarkKind.strong,
   MarkKind.em,
   MarkKind.underline,
@@ -195,22 +197,26 @@ const _markOrder = [
   MarkKind.inlineCode,
 ];
 
-String _openTag(MarkKind kind, {required bool htmlEmphasis}) =>
-    switch (kind) {
+String _openTag(MarkSpan m, {required bool htmlEmphasis}) =>
+    switch (m.kind) {
       MarkKind.strong => htmlEmphasis ? '<strong>' : '**',
       MarkKind.em => htmlEmphasis ? '<em>' : '*',
       MarkKind.inlineCode => '`',
       MarkKind.underline => '[u]',
       MarkKind.lineThrough => '~~',
+      MarkKind.spoilerInline => '[spoiler]',
+      MarkKind.link => '[',
     };
 
-String _closeTag(MarkKind kind, {required bool htmlEmphasis}) =>
-    switch (kind) {
+String _closeTag(MarkSpan m, {required bool htmlEmphasis}) =>
+    switch (m.kind) {
       MarkKind.strong => htmlEmphasis ? '</strong>' : '**',
       MarkKind.em => htmlEmphasis ? '</em>' : '*',
       MarkKind.inlineCode => '`',
       MarkKind.underline => '[/u]',
       MarkKind.lineThrough => '~~',
+      MarkKind.spoilerInline => '[/spoiler]',
+      MarkKind.link => '](${m.attr ?? ''})',
     };
 
 /// 是否存在交错区间(a.start < b.start < a.end < b.end)。
@@ -237,57 +243,60 @@ String _inlineToMarkdown(EditableTextContent content) {
 
   final htmlEmphasis = _hasCrossingMarks(content.marks);
 
-  // 边界事件表:offset → 该处闭合/开启的 kinds
-  final opens = <int, List<MarkKind>>{};
-  final closes = <int, List<MarkKind>>{};
+  // 边界事件表:offset → 该处闭合/开启的 mark 区间
+  final opens = <int, List<MarkSpan>>{};
+  final closes = <int, List<MarkSpan>>{};
   for (final m in content.marks) {
-    opens.putIfAbsent(m.start, () => []).add(m.kind);
-    closes.putIfAbsent(m.end, () => []).add(m.kind);
+    opens.putIfAbsent(m.start, () => []).add(m);
+    closes.putIfAbsent(m.end, () => []).add(m);
   }
 
   final buf = StringBuffer();
   // 活动栈(开启顺序);闭合时按 LIFO 补闭到目标再重开(处理交错区间)
-  final active = <MarkKind>[];
+  final active = <MarkSpan>[];
 
   void emitCloses(int offset) {
     final toClose = closes[offset];
     if (toClose == null) return;
     // 需要闭合的集合;从栈顶弹到全部闭完,途中被迫闭合的重开
-    final pending = {...toClose};
-    final reopen = <MarkKind>[];
+    final pending = [...toClose];
+    final reopen = <MarkSpan>[];
     while (pending.isNotEmpty && active.isNotEmpty) {
       final top = active.removeLast();
       buf.write(_closeTag(top, htmlEmphasis: htmlEmphasis));
       if (!pending.remove(top)) reopen.add(top);
     }
-    for (final kind in reopen.reversed) {
-      buf.write(_openTag(kind, htmlEmphasis: htmlEmphasis));
-      active.add(kind);
+    for (final m in reopen.reversed) {
+      buf.write(_openTag(m, htmlEmphasis: htmlEmphasis));
+      active.add(m);
     }
   }
 
   void emitOpens(int offset) {
     final toOpen = opens[offset];
     if (toOpen == null) return;
-    // 固定序开启(strong 最外)
+    // 固定序开启(spoiler/link 最外)
     final sorted = [...toOpen]
-      ..sort((a, b) => _markOrder.indexOf(a).compareTo(_markOrder.indexOf(b)));
-    for (final kind in sorted) {
-      buf.write(_openTag(kind, htmlEmphasis: htmlEmphasis));
-      active.add(kind);
+      ..sort((a, b) =>
+          _markOrder.indexOf(a.kind).compareTo(_markOrder.indexOf(b.kind)));
+    for (final m in sorted) {
+      buf.write(_openTag(m, htmlEmphasis: htmlEmphasis));
+      active.add(m);
     }
   }
+
+  bool activeHas(MarkKind kind) => active.any((m) => m.kind == kind);
 
   var inCode = false;
   for (var i = 0; i <= text.length; i++) {
     emitCloses(i);
     if (i < text.length) {
       // code 状态跟踪(code 内不转义 markdown 元字符)
-      inCode = active.contains(MarkKind.inlineCode);
+      inCode = activeHas(MarkKind.inlineCode);
     }
     emitOpens(i);
     if (i >= text.length) break;
-    inCode = active.contains(MarkKind.inlineCode);
+    inCode = activeHas(MarkKind.inlineCode);
 
     final ch = text[i];
     if (ch == kAtomChar) {

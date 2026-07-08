@@ -839,7 +839,10 @@ class EditorState extends ChangeNotifier {
   // -----------------------------------------------------------------
 
   /// toggle 行内样式:选区非空 → 区间 toggle;折叠 → pending(下次输入生效)。
+  ///
+  /// [MarkKind.link] 不走本方法(带 href,用 [applyLink]/[removeLink])。
   void toggleMark(MarkKind kind) {
+    assert(kind != MarkKind.link, 'link 用 applyLink/removeLink');
     final sel = _selection;
     if (sel == null) return;
 
@@ -872,6 +875,46 @@ class EditorState extends ChangeNotifier {
           block.content.toggleMarkInRange(from.offset, to.offset, kind),
     );
     _commit(newBlocks, sel, groupWithPrevious: false);
+    sealHistory();
+  }
+
+  /// 对选区施加链接(单块选区;覆盖旧链接)。折叠选区无操作 ——
+  /// 视图层负责"无选区时插入 [text](url) 文本"的路径。
+  void applyLink(String href) {
+    final norm = normalizedSelection();
+    if (norm == null || _selection!.isCollapsed) return;
+    final (from, to) = norm;
+    if (from.blockId != to.blockId) return;
+    final i = indexOfBlock(from.blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    sealHistory();
+    final newBlocks = [..._blocks];
+    newBlocks[i] = block.copyWith(
+      content: block.content
+          .applyMark(from.offset, to.offset, MarkKind.link, attr: href),
+    );
+    _commit(newBlocks, _selection, groupWithPrevious: false);
+    sealHistory();
+  }
+
+  /// 移除选区上的链接(单块选区)。
+  void removeLink() {
+    final norm = normalizedSelection();
+    if (norm == null || _selection!.isCollapsed) return;
+    final (from, to) = norm;
+    if (from.blockId != to.blockId) return;
+    final i = indexOfBlock(from.blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    sealHistory();
+    final newBlocks = [..._blocks];
+    newBlocks[i] = block.copyWith(
+      content: block.content.removeMark(from.offset, to.offset, MarkKind.link),
+    );
+    _commit(newBlocks, _selection, groupWithPrevious: false);
     sealHistory();
   }
 

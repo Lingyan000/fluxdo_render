@@ -18,11 +18,27 @@ import 'editable_text_content.dart';
 import 'editor_block.dart';
 
 /// M2 编辑白名单:能进 TextBlock 的 inline 类型。
+///
+/// M5 扩容:行内 SpoilerRun / **普通** LinkRun 进入白名单(mark 化,
+/// 内容可编辑)。特种链接除外 —— attachment(`[name|attachment](短链)`)、
+/// hashtag(`#ref`)、inline-onebox(裸 URL)的序列化语义都不是
+/// `[text](href)`,mark 化会毁写法,保持岛化。
 bool isEditableInline(InlineNode n) => switch (n) {
       TextRun() || LineBreakRun() || EmojiRun() || MentionRun() => true,
       EmRun(:final children) => children.every(isEditableInline),
       StrongRun(:final children) => children.every(isEditableInline),
       InlineCodeRun() => true,
+      SpoilerRun(:final children) => children.every(isEditableInline),
+      LinkRun(
+        :final children,
+        :final isAttachment,
+        :final hashtagRef,
+        :final isOneboxLink,
+      ) =>
+        !isAttachment &&
+            hashtagRef == null &&
+            !isOneboxLink &&
+            children.every(isEditableInline),
       StyledRun(:final kind, :final children) => switch (kind) {
           InlineStyleKind.underline ||
           InlineStyleKind.lineThrough =>

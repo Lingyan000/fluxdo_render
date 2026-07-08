@@ -19,6 +19,8 @@
 /// 保证编辑态与阅读态视觉零差异(行内代码 NBSP 灰底等精调全部复用)。
 library;
 
+import 'dart:ui' show Color;
+
 import 'package:flutter/foundation.dart';
 
 import '../../node/inline_node.dart';
@@ -33,21 +35,45 @@ enum MarkKind {
   inlineCode,
   underline,
   lineThrough,
+
+  /// 行内剧透 `[spoiler]…[/spoiler]`(SpoilerRun)。编辑态显示淡遮罩
+  /// 底纹(内容可见可编辑,对齐官方 rich editor 的 spoiler-blurred
+  /// decoration 思路的简化版)。
+  spoilerInline,
+
+  /// 链接 `[text](href)`(LinkRun)。唯一带 attr(href)的 mark ——
+  /// 见 [MarkSpan.attr]。编辑态蓝色下划线,不可点(编辑器语义)。
+  link,
 }
 
 /// 一段样式区间 `[start, end)`(扁平文本坐标)。
+///
+/// [attr]:mark 的附加值(目前仅 [MarkKind.link] 的 href)。同 kind
+/// 不同 attr 的区间**不合并**(两个不同链接相邻仍是两个链接)。
 @immutable
 class MarkSpan {
-  const MarkSpan({required this.start, required this.end, required this.kind});
+  const MarkSpan({
+    required this.start,
+    required this.end,
+    required this.kind,
+    this.attr,
+  });
 
   final int start;
   final int end;
   final MarkKind kind;
 
+  /// kind 相关附加值:link=href;其余 null。
+  final String? attr;
+
   bool get isEmpty => start >= end;
 
-  MarkSpan copyWith({int? start, int? end}) =>
-      MarkSpan(start: start ?? this.start, end: end ?? this.end, kind: kind);
+  MarkSpan copyWith({int? start, int? end}) => MarkSpan(
+        start: start ?? this.start,
+        end: end ?? this.end,
+        kind: kind,
+        attr: attr,
+      );
 
   @override
   bool operator ==(Object other) =>
@@ -56,13 +82,15 @@ class MarkSpan {
           runtimeType == other.runtimeType &&
           start == other.start &&
           end == other.end &&
-          kind == other.kind;
+          kind == other.kind &&
+          attr == other.attr;
 
   @override
-  int get hashCode => Object.hash(start, end, kind);
+  int get hashCode => Object.hash(start, end, kind, attr);
 
   @override
-  String toString() => 'MarkSpan($kind [$start,$end))';
+  String toString() =>
+      'MarkSpan($kind [$start,$end)${attr == null ? "" : " $attr"})';
 }
 
 /// 段落的扁平可编辑内容(不可变;编辑原语返回新实例)。
@@ -117,9 +145,9 @@ class EditableTextContent {
   ///
   /// 支持:TextRun / EmRun / StrongRun / InlineCodeRun /
   /// StyledRun(underline|lineThrough) / LineBreakRun(转 '\n')/
-  /// **EmojiRun / MentionRun(原子,M2)**。
+  /// **EmojiRun / MentionRun(原子,M2)/ SpoilerRun / LinkRun(M5)**。
   ///
-  /// 其余节点(link/image/spoiler/...)不在编辑白名单 —— 调用方
+  /// 其余节点(image/footnote/...)不在编辑白名单 —— 调用方
   /// (doc_converter.isEditableInline)负责拦截整块岛化,此处的降级
   /// 分支仅作纯文本兜底(防御,不应在正常链路走到)。
   factory EditableTextContent.fromInlines(List<InlineNode> inlines) {
@@ -134,12 +162,13 @@ class EditableTextContent {
     );
   }
 
+  /// 活动 mark 帧:kind + 可选 attr(link 的 href)。
   static void _flattenInto(
     List<InlineNode> nodes,
     StringBuffer buf,
     List<MarkSpan> marks,
     Map<int, InlineNode> atoms,
-    List<MarkKind> activeKinds,
+    List<(MarkKind, String?)> activeKinds,
   ) {
     for (final node in nodes) {
       switch (node) {
@@ -148,16 +177,16 @@ class EditableTextContent {
         case LineBreakRun():
           _appendText(buf, marks, activeKinds, '\n');
         case EmRun(:final children):
-          _flattenInto(
-              children, buf, marks, atoms, [...activeKinds, MarkKind.em]);
+          _flattenInto(children, buf, marks, atoms,
+              [...activeKinds, (MarkKind.em, null)]);
         case StrongRun(:final children):
-          _flattenInto(
-              children, buf, marks, atoms, [...activeKinds, MarkKind.strong]);
+          _flattenInto(children, buf, marks, atoms,
+              [...activeKinds, (MarkKind.strong, null)]);
         case InlineCodeRun(:final text):
           _appendText(
             buf,
             marks,
-            [...activeKinds, MarkKind.inlineCode],
+            [...activeKinds, (MarkKind.inlineCode, null)],
             sanitizeText(text),
           );
         case StyledRun(:final kind, :final children):
@@ -171,8 +200,15 @@ class EditableTextContent {
             buf,
             marks,
             atoms,
-            mapped == null ? activeKinds : [...activeKinds, mapped],
+            mapped == null ? activeKinds : [...activeKinds, (mapped, null)],
           );
+        // ---- M5 白名单:行内剧透 / 链接(mark 化,内容可编辑) ----
+        case SpoilerRun(:final children):
+          _flattenInto(children, buf, marks, atoms,
+              [...activeKinds, (MarkKind.spoilerInline, null)]);
+        case LinkRun(:final href, :final children):
+          _flattenInto(children, buf, marks, atoms,
+              [...activeKinds, (MarkKind.link, href)]);
         // ---- 原子(一等公民):哨兵占位 + 身份入表 ----
         case EmojiRun():
           atoms[buf.length] = node;
@@ -181,12 +217,8 @@ class EditableTextContent {
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
         // ---- 白名单外(防御降级,正常链路由 doc_converter 拦截岛化) ----
-        case LinkRun(:final children):
-          _flattenInto(children, buf, marks, atoms, activeKinds);
         case ImageRun(:final alt):
           _appendText(buf, marks, activeKinds, sanitizeText(alt));
-        case SpoilerRun(:final children):
-          _flattenInto(children, buf, marks, atoms, activeKinds);
         case ColoredRun(:final children):
           _flattenInto(children, buf, marks, atoms, activeKinds);
         case FootnoteRefRun():
@@ -201,7 +233,7 @@ class EditableTextContent {
   static void _appendText(
     StringBuffer buf,
     List<MarkSpan> marks,
-    List<MarkKind> activeKinds,
+    List<(MarkKind, String?)> activeKinds,
     String text,
   ) {
     if (text.isEmpty) return;
@@ -210,13 +242,17 @@ class EditableTextContent {
     final end = buf.length;
     // 去重:嵌套同类标签(<em><strong><em>)会让 kind 重复出现,
     // 重复处理会产出重叠区间(破坏"同 kind 不重叠"语义与往返不动点)。
-    for (final kind in {...activeKinds}) {
-      // 与紧邻的同 kind 区间合并(嵌套展开会产生相邻碎段)。
-      final lastIdx = marks.lastIndexWhere((m) => m.kind == kind);
+    // link 按 (kind, attr) 去重 —— 不同 href 的嵌套链接理论不存在
+    // (HTML 不允许 a 嵌 a),同帧只会有一个 href。
+    for (final frame in {...activeKinds}) {
+      final (kind, attr) = frame;
+      // 与紧邻的同 kind 同 attr 区间合并(嵌套展开会产生相邻碎段)。
+      final lastIdx =
+          marks.lastIndexWhere((m) => m.kind == kind && m.attr == attr);
       if (lastIdx >= 0 && marks[lastIdx].end == start) {
         marks[lastIdx] = marks[lastIdx].copyWith(end: end);
       } else {
-        marks.add(MarkSpan(start: start, end: end, kind: kind));
+        marks.add(MarkSpan(start: start, end: end, kind: kind, attr: attr));
       }
     }
   }
@@ -224,9 +260,20 @@ class EditableTextContent {
   /// 转回 InlineNode 树(渲染用)。
   ///
   /// 策略:按所有区间边界 + 原子位置切文本为片段;原子片段直接吐回
-  /// [atoms] 里的原节点(样式区间对原子不生效 —— emoji 图片没有粗体)。
-  /// 嵌套顺序固定:strong > em > underline > lineThrough;inlineCode 独占。
-  List<InlineNode> toInlines() {
+  /// [atoms] 里的原节点(样式区间对原子不生效 —— emoji 图片没有粗体;
+  /// 但 spoiler/link 包装保留,原子也在剧透/链接里)。
+  /// 嵌套顺序固定:spoiler > link > strong > em > underline > lineThrough;
+  /// inlineCode 独占。
+  ///
+  /// [forEditing]:编辑段落渲染模式。spoilerInline/link **不包装**为
+  /// SpoilerRun/LinkRun(前者是 WidgetSpan 粒子遮罩会破坏文本编辑,
+  /// 后者的 TapGestureRecognizer 会抢编辑器手势),改用纯 TextSpan 视觉
+  /// 替代:spoiler=淡灰底纹(内容可见可编辑,对齐官方 rich editor 光标
+  /// 内显形语义的简化),link=[editingLinkColor] 字色 + 下划线。
+  List<InlineNode> toInlines({
+    bool forEditing = false,
+    Color? editingLinkColor,
+  }) {
     if (text.isEmpty) return const [];
 
     // 1. 收集切点
@@ -255,39 +302,100 @@ class EditableTextContent {
         out.add(const LineBreakRun());
         continue;
       }
-      if (piece == kAtomChar) {
-        final atom = atoms[s];
-        if (atom != null) {
-          out.add(atom);
-        }
-        // 无身份的孤儿哨兵(不变量破坏,构造器断言防):静默丢弃。
-        continue;
-      }
       final kinds = <MarkKind>{
         for (final m in marks)
           if (m.start <= s && m.end >= e) m.kind,
       };
-      out.add(_wrapPiece(piece, kinds));
+      // link href:覆盖片段的 link mark 的 attr(同帧唯一)
+      String? href;
+      for (final m in marks) {
+        if (m.kind == MarkKind.link && m.start <= s && m.end >= e) {
+          href = m.attr;
+          break;
+        }
+      }
+      if (piece == kAtomChar) {
+        final atom = atoms[s];
+        if (atom != null) {
+          // 原子保留 spoiler/link 包装(基础样式对原子不生效)
+          out.add(_wrapAtom(atom, kinds, href, forEditing: forEditing));
+        }
+        // 无身份的孤儿哨兵(不变量破坏,构造器断言防):静默丢弃。
+        continue;
+      }
+      out.add(_wrapPiece(piece, kinds, href,
+          forEditing: forEditing, editingLinkColor: editingLinkColor));
     }
     return out;
   }
 
-  static InlineNode _wrapPiece(String piece, Set<MarkKind> kinds) {
+  static InlineNode _wrapAtom(
+    InlineNode atom,
+    Set<MarkKind> kinds,
+    String? href, {
+    required bool forEditing,
+  }) {
+    if (forEditing) return atom; // 编辑态原子裸渲染(遮罩/链接壳都不加)
+    InlineNode node = atom;
+    if (kinds.contains(MarkKind.link)) {
+      node = LinkRun(href: href ?? '', children: [node]);
+    }
+    if (kinds.contains(MarkKind.spoilerInline)) {
+      node = SpoilerRun(children: [node]);
+    }
+    return node;
+  }
+
+  static InlineNode _wrapPiece(
+    String piece,
+    Set<MarkKind> kinds,
+    String? href, {
+    required bool forEditing,
+    Color? editingLinkColor,
+  }) {
+    InlineNode node;
     if (kinds.contains(MarkKind.inlineCode)) {
-      return InlineCodeRun(piece);
+      node = InlineCodeRun(piece);
+    } else {
+      node = TextRun(piece);
+      if (kinds.contains(MarkKind.lineThrough)) {
+        node = StyledRun(kind: InlineStyleKind.lineThrough, children: [node]);
+      }
+      if (kinds.contains(MarkKind.underline) ||
+          (forEditing && kinds.contains(MarkKind.link))) {
+        // 编辑态 link 借下划线样式(真 LinkRun 的 recognizer 会抢手势)
+        node = StyledRun(kind: InlineStyleKind.underline, children: [node]);
+      }
+      if (kinds.contains(MarkKind.em)) {
+        node = EmRun(children: [node]);
+      }
+      if (kinds.contains(MarkKind.strong)) {
+        node = StrongRun(children: [node]);
+      }
     }
-    InlineNode node = TextRun(piece);
-    if (kinds.contains(MarkKind.lineThrough)) {
-      node = StyledRun(kind: InlineStyleKind.lineThrough, children: [node]);
+    if (forEditing) {
+      // 编辑态视觉替代:字色/底纹经 ColoredRun(纯 TextSpan,投影
+      // 透明,选区/光标/IME 全不受扰)。
+      if (kinds.contains(MarkKind.link)) {
+        node = ColoredRun(
+          color: editingLinkColor ?? const Color(0xFF1F7AED),
+          children: [node],
+        );
+      }
+      if (kinds.contains(MarkKind.spoilerInline)) {
+        node = ColoredRun(
+          background: const Color(0x24888888),
+          children: [node],
+        );
+      }
+      return node;
     }
-    if (kinds.contains(MarkKind.underline)) {
-      node = StyledRun(kind: InlineStyleKind.underline, children: [node]);
+    // link/spoiler 包最外(阅读端 <a>/<span class=spoiler> 里嵌样式的形态)
+    if (kinds.contains(MarkKind.link)) {
+      node = LinkRun(href: href ?? '', children: [node]);
     }
-    if (kinds.contains(MarkKind.em)) {
-      node = EmRun(children: [node]);
-    }
-    if (kinds.contains(MarkKind.strong)) {
-      node = StrongRun(children: [node]);
+    if (kinds.contains(MarkKind.spoilerInline)) {
+      node = SpoilerRun(children: [node]);
     }
     return node;
   }
@@ -429,15 +537,25 @@ class EditableTextContent {
   }
 
   /// 对 `[start, end)` 应用 [kind](幂等;与既有区间合并归一)。
-  EditableTextContent applyMark(int start, int end, MarkKind kind) {
+  ///
+  /// [attr]:link 的 href。合并只发生在**同 kind 同 attr** 之间 ——
+  /// 相邻两个不同 href 的链接不吞并。施加带 attr 的 mark 前先移除
+  /// 区间上同 kind 异 attr 的旧区间(改链接 = 覆盖旧链接)。
+  EditableTextContent applyMark(int start, int end, MarkKind kind,
+      {String? attr}) {
     assert(start >= 0 && end <= text.length && start <= end);
     if (start == end) return this;
+    // 先清区间上同 kind 异 attr 的部分(removeMark 全清后重加同 attr 的)
+    var base = this;
+    if (kind == MarkKind.link) {
+      base = base.removeMark(start, end, kind);
+    }
     final same = <MarkSpan>[];
     final others = <MarkSpan>[];
-    for (final m in marks) {
-      (m.kind == kind ? same : others).add(m);
+    for (final m in base.marks) {
+      (m.kind == kind && m.attr == attr ? same : others).add(m);
     }
-    // 与 [start,end) 相交/相邻的同 kind 区间合并成一条
+    // 与 [start,end) 相交/相邻的同 kind 同 attr 区间合并成一条
     var ns = start;
     var ne = end;
     final keep = <MarkSpan>[];
@@ -451,7 +569,11 @@ class EditableTextContent {
     }
     return EditableTextContent(
       text: text,
-      marks: [...others, ...keep, MarkSpan(start: ns, end: ne, kind: kind)],
+      marks: [
+        ...others,
+        ...keep,
+        MarkSpan(start: ns, end: ne, kind: kind, attr: attr),
+      ],
       atoms: atoms,
     );
   }
@@ -485,9 +607,14 @@ class EditableTextContent {
 
   /// 对 `[start, end)` 精确设置 marks 集合(pending style 应用:
   /// 先清区间上全部 kind,再施加 [kinds])。
+  ///
+  /// **link 不参与**:pending 机制不带 attr,applyMark(link) 会产
+  /// href=null 的坏链接;链接中间打字的延续由 [insert] 的区间拉伸
+  /// 天然保证,边界打字不延续(主流编辑器语义)。
   EditableTextContent applyExactMarks(int start, int end, Set<MarkKind> kinds) {
     var c = this;
     for (final kind in MarkKind.values) {
+      if (kind == MarkKind.link) continue;
       c = kinds.contains(kind)
           ? c.applyMark(start, end, kind)
           : c.removeMark(start, end, kind);
@@ -497,6 +624,7 @@ class EditableTextContent {
 
   /// [offset] 光标处的"当前样式集"(pending 初值/工具栏高亮):
   /// 取光标**前一个字符**上的 marks(行首取后一个);原子字符视为无样式。
+  /// link 不计入(不参与 pending,见 [applyExactMarks])。
   Set<MarkKind> marksAt(int offset) {
     assert(offset >= 0 && offset <= text.length);
     if (text.isEmpty) return const {};
@@ -504,8 +632,22 @@ class EditableTextContent {
     if (isAtomAt(probe)) return const {};
     return {
       for (final m in marks)
-        if (m.start <= probe && probe < m.end) m.kind,
+        if (m.kind != MarkKind.link && m.start <= probe && probe < m.end)
+          m.kind,
     };
+  }
+
+  /// [offset] 光标处覆盖的 link href(工具栏"编辑链接"预填用);无 → null。
+  String? linkHrefAt(int offset) {
+    assert(offset >= 0 && offset <= text.length);
+    if (text.isEmpty) return null;
+    final probe = offset > 0 ? offset - 1 : 0;
+    for (final m in marks) {
+      if (m.kind == MarkKind.link && m.start <= probe && probe < m.end) {
+        return m.attr;
+      }
+    }
+    return null;
   }
 
   @override
