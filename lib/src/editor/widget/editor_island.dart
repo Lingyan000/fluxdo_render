@@ -23,6 +23,7 @@ class EditorIsland extends StatefulWidget {
     required this.nodeFactory,
     required this.selected,
     required this.onTapSelect,
+    this.onEditRequest,
   });
 
   final BlockNode node;
@@ -33,6 +34,9 @@ class EditorIsland extends StatefulWidget {
 
   /// 点击 → 编辑器整选本岛。
   final VoidCallback onTapSelect;
+
+  /// 双击 → 请求编辑本岛(宿主弹源码对话框;null = 岛不可编辑)。
+  final VoidCallback? onEditRequest;
 
   @override
   State<EditorIsland> createState() => _EditorIslandState();
@@ -80,6 +84,7 @@ class _EditorIslandState extends State<EditorIsland> {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onTapSelect,
+      onDoubleTap: widget.onEditRequest,
       child: MouseRegion(
         cursor: SystemMouseCursors.basic,
         child: content,

@@ -35,6 +35,7 @@ class FluxdoEditor extends StatefulWidget {
     this.autofocus = false,
     this.nodeFactory,
     this.markdownImporter,
+    this.onIslandEditRequest,
   });
 
   final EditorState state;
@@ -54,6 +55,10 @@ class FluxdoEditor extends StatefulWidget {
   /// 剪贴板策略:复制/剪切写 markdown 文本(跨 app 通用、粘回自身经
   /// cook 还原富内容 —— Discourse 官方富文本 composer 同款语义)。
   final Future<List<EditorBlock>?> Function(String markdown)? markdownImporter;
+
+  /// 双击岛 → 请求编辑(宿主弹源码对话框,改完调 state.replaceIsland)。
+  /// null = 岛只读不可编辑。
+  final void Function(IslandBlock island)? onIslandEditRequest;
 
   @override
   State<FluxdoEditor> createState() => _FluxdoEditorState();
@@ -510,7 +515,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                     : TextRange.empty,
                 listMarkerOrdinal: ordinals[i],
               ),
-            // 孤岛:NodeFactory 渲染,tap 整选,选中态描边
+            // 孤岛:NodeFactory 渲染,tap 整选,双击请求编辑,选中态描边
             final IslandBlock ib => EditorIsland(
                 key: ValueKey(ib.id),
                 node: ib.node,
@@ -525,6 +530,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                   ));
                   _ime.syncFromState(show: false);
                 },
+                onEditRequest: widget.onIslandEditRequest == null
+                    ? null
+                    : () => widget.onIslandEditRequest!(ib),
               ),
           },
         ),

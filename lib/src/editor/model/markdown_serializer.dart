@@ -11,8 +11,6 @@ library;
 
 import 'dart:ui' show Color;
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
-
 import '../../node/node.dart';
 import 'editable_text_content.dart';
 import 'editor_block.dart';
@@ -382,7 +380,8 @@ bool islandSerializable(BlockNode node) => switch (node) {
 /// 目标形态 = **raw 的规范写法**(bbcode / markdown / 白名单 HTML),使
 /// 「serialize 产物再 cook」与「原 raw 的 cook」等价。语法均经 cook bundle
 /// 探针实测(details/spoiler/grid/quote/date/footnote/…)。
-@visibleForTesting
+///
+/// 公开 API:岛源码编辑(双击岛 → 对话框初值)与测试都用。
 String serializeIslandNode(BlockNode node) {
   switch (node) {
     case ParagraphNode(:final inlines):

@@ -186,4 +186,54 @@ void main() {
       expect((s.blocks.single as TextBlock).content.text, 'a\nbc');
     });
   });
+
+  group('replaceIsland(岛源码编辑)', () {
+    test('单块替换:re-id,光标落片段末尾', () {
+      final s = buildState([
+        tb('e_0', 'AA'),
+        const IslandBlock(id: 'e_isl', node: HorizontalRuleNode(id: 'b_hr')),
+        tb('e_2', 'BB'),
+      ]);
+      s.replaceIsland('e_isl', [tb('p_0', 'XYZ')]);
+      expect(s.blocks, hasLength(3));
+      final mid = s.blocks[1] as TextBlock;
+      expect(mid.content.text, 'XYZ');
+      expect(mid.id, isNot('p_0')); // re-id
+      expect(s.selection!.extent.blockId, mid.id);
+      expect(s.selection!.extent.offset, 3);
+    });
+
+    test('多块替换(编辑后 cook 出两块)', () {
+      final s = buildState([
+        const IslandBlock(id: 'e_isl', node: HorizontalRuleNode(id: 'b_hr')),
+        tb('e_1', 'tail'),
+      ]);
+      s.replaceIsland('e_isl', [
+        tb('p_0', '甲'),
+        const IslandBlock(id: 'p_1', node: HorizontalRuleNode(id: 'b_hr2')),
+      ]);
+      expect(s.blocks, hasLength(3));
+      expect((s.blocks[0] as TextBlock).content.text, '甲');
+      expect(s.blocks[1], isA<IslandBlock>());
+    });
+
+    test('空片段=删岛;undo 恢复', () {
+      final s = buildState([
+        tb('e_0', 'AA'),
+        const IslandBlock(id: 'e_isl', node: HorizontalRuleNode(id: 'b_hr')),
+      ]);
+      s.replaceIsland('e_isl', const []);
+      expect(s.blocks, hasLength(1));
+      s.undo();
+      expect(s.blocks, hasLength(2));
+      expect(s.blocks[1], isA<IslandBlock>());
+    });
+
+    test('非岛 id / 不存在 id:无操作', () {
+      final s = buildState([tb('e_0', 'AA')]);
+      s.replaceIsland('e_0', [tb('p_0', 'X')]);
+      s.replaceIsland('ghost', [tb('p_0', 'X')]);
+      expect((s.blocks.single as TextBlock).content.text, 'AA');
+    });
+  });
 }

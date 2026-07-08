@@ -1212,6 +1212,48 @@ class EditorState extends ChangeNotifier {
         final IslandBlock ib => IslandBlock(id: _nextId(), node: ib.node),
       };
 
+  /// 用 [fragment] 整体替换 [islandId] 岛(岛源码编辑确认后调用)。
+  ///
+  /// 编辑后的 markdown 可能 cook 出多块(如 details 改成两段),故接受
+  /// 片段;空片段 = 删岛(用户清空源码)。片段 re-id;光标落片段末尾。
+  void replaceIsland(String islandId, List<EditorBlock> fragment) {
+    final i = indexOfBlock(islandId);
+    if (i < 0 || _blocks[i] is! IslandBlock) return;
+    sealHistory();
+    _clearPending();
+    final newBlocks = [..._blocks];
+    newBlocks.removeAt(i);
+    if (fragment.isEmpty) {
+      // 删岛:光标落原位邻块(clamp 兜底)
+      final anchor = i < newBlocks.length
+          ? EditorPosition(blockId: newBlocks[i].id, offset: 0)
+          : (newBlocks.isEmpty
+              ? null
+              : EditorPosition(
+                  blockId: newBlocks.last.id,
+                  offset: newBlocks.last.selectionLength,
+                ));
+      _commit(
+        newBlocks,
+        anchor == null ? null : EditorSelection.collapsed(anchor),
+        groupWithPrevious: false,
+      );
+      sealHistory();
+      return;
+    }
+    final inserted = [for (final b in fragment) _reIdBlock(b)];
+    newBlocks.insertAll(i, inserted);
+    final last = inserted.last;
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(
+        EditorPosition(blockId: last.id, offset: last.selectionLength),
+      ),
+      groupWithPrevious: false,
+    );
+    sealHistory();
+  }
+
   /// 在 [content] 的 [offset] 处拼入另一段内容(text+marks+atoms 全量)。
   static EditableTextContent _spliceContent(
     EditableTextContent content,
