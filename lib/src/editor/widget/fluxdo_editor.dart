@@ -646,6 +646,11 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
       focusNode: _focusNode,
       autofocus: widget.autofocus,
       onKeyEvent: (node, event) {
+        // 焦点在子树内其他可聚焦组件(表格 cell TextField / 壳内输入)
+        // 时**完全让路**:此时 primaryFocus 是那个组件,事件只是沿焦点
+        // 链冒泡经过本编辑器 —— 拦截会把退格/方向键/回车吞掉,cell
+        // 变成"只能覆盖不能编辑"。
+        if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
         // 非上下键的任何按键动作都终结 goal column 记忆
         if (event is KeyDownEvent &&
             event.logicalKey != LogicalKeyboardKey.arrowUp &&
