@@ -2,6 +2,7 @@
 /// 不能被编辑器 Focus.onKeyEvent 拦走(症状:只能覆盖不能删改)。
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -148,6 +149,50 @@ void main() {
       findsOneWidget,
       reason: 'cell TextField 应持有 primary focus',
     );
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('选择柄整选表格:描边 + 退格删整表', (tester) async {
+    var n = 0;
+    final state = EditorState(
+        blocks: blockNodesToDoc(
+            ParagraphParser().parse(
+                '<p>前</p>'
+                '<div class="md-table"><table><tbody><tr><td>T</td></tr></tbody></table></div>'),
+            () => 'e_${n++}'));
+    addTearDown(state.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: FluxdoEditor(state: state, onTableEdited: (i, m) {}),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // hover 表格显出选择柄
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(find.text('T')));
+    await tester.pump();
+    final handle = find.byIcon(Icons.drag_indicator);
+    expect(handle, findsOneWidget, reason: 'hover 应显选择柄');
+
+    // 点柄整选
+    await tester.tap(handle);
+    await tester.pump();
+    final island = state.blocks.whereType<IslandBlock>().single;
+    expect(state.selection!.base.blockId, island.id);
+    expect(state.selection!.extent.offset, 1);
+
+    // 退格删整表
+    state.backspace();
+    await tester.pump();
+    expect(state.blocks.whereType<IslandBlock>(), isEmpty,
+        reason: '整选态退格应删整个表格');
+    expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 1));
   });
 }

@@ -594,6 +594,18 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
             key: ValueKey('table_${block.id}'),
             node: block.node as TableNode,
             onChanged: (md) => widget.onTableEdited!(block, md),
+            selected: _isIslandSelected(block.id),
+            // 左上角选择柄:整选表格块(选中后退格/Delete 删整表)。
+            // cell 区自管让路后,这是表格作为"块"的唯一选择入口。
+            onSelectRequest: () {
+              _focusNode.requestFocus();
+              widget.state.sealHistory();
+              widget.state.updateSelection(EditorSelection(
+                base: EditorPosition(blockId: block.id, offset: 0),
+                extent: EditorPosition(blockId: block.id, offset: 1),
+              ));
+              _ime.syncFromState(show: false);
+            },
           ),
         );
       }

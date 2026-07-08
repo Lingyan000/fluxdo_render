@@ -33,12 +33,21 @@ class EditorTableGrid extends StatefulWidget {
     super.key,
     required this.node,
     required this.onChanged,
+    this.selected = false,
+    this.onSelectRequest,
   });
 
   final TableNode node;
 
   /// 变更后的 markdown 表格文本(cook → replaceIsland 由宿主做)。
   final ValueChanged<String> onChanged;
+
+  /// 整选态(编辑器选区恰覆盖本表格块):primary 描边。
+  final bool selected;
+
+  /// 左上角选择柄点击 → 编辑器整选本表格块(选中后退格/Delete 删整表;
+  /// cell 区自管让路后这是块级选择的唯一入口)。
+  final VoidCallback? onSelectRequest;
 
   @override
   State<EditorTableGrid> createState() => _EditorTableGridState();
@@ -159,47 +168,112 @@ class _EditorTableGridState extends State<EditorTableGrid> {
     _emit();
   }
 
+  bool _hoverGrid = false;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textStyle = Theme.of(context).textTheme.bodyMedium;
     final borderColor = scheme.outlineVariant.withValues(alpha: 0.6);
 
+    final table = Container(
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: widget.selected ? scheme.primary : borderColor,
+          width: widget.selected ? 2 : 1,
+        ),
+        borderRadius: BorderRadius.circular(8),
+        color: widget.selected
+            ? scheme.primary.withValues(alpha: 0.06)
+            : null,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var r = 0; r < _rows; r++)
+              _buildRow(r, scheme, textStyle, borderColor),
+          ],
+        ),
+      ),
+    );
+
     // MetaData 标记自管区:编辑器 tap/pan 命中本子树时让路(焦点/光标
     // 由 cell TextField 自管,见 kEditorSelfManagedRegion)。
-    return MetaData(
-      metaData: kEditorSelfManagedRegion,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: borderColor),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var r = 0; r < _rows; r++)
-                  _buildRow(r, scheme, textStyle, borderColor),
-              ],
+    // 选择柄不在标记内 —— 点它走编辑器整选。
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hoverGrid = true),
+      onExit: (_) => setState(() => _hoverGrid = false),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Padding(
+            // 给左上角选择柄留出悬挂空间
+            padding: const EdgeInsets.only(top: 6),
+            child: MetaData(
+              metaData: kEditorSelfManagedRegion,
+              behavior: HitTestBehavior.opaque,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  table,
+                  // 底部操作条:加行/加列(常显小按钮;删除挂行列 hover)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Row(children: [
+                      _MiniAction(
+                          icon: Icons.add, label: '行', onTap: _addRow),
+                      const SizedBox(width: 8),
+                      _MiniAction(
+                          icon: Icons.add, label: '列', onTap: _addCol),
+                    ]),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        // 底部操作条:加行/加列(常显小按钮;删除挂在行列 hover 上)
-        Padding(
-          padding: const EdgeInsets.only(top: 2),
-          child: Row(children: [
-            _MiniAction(icon: Icons.add, label: '行', onTap: _addRow),
-            const SizedBox(width: 8),
-            _MiniAction(icon: Icons.add, label: '列', onTap: _addCol),
-          ]),
-        ),
-      ],
+          // 左上角选择柄(hover 表格或已选中时显示;在 MetaData 外 ——
+          // 点击走编辑器整选,选中后退格删整表)
+          if (widget.onSelectRequest != null &&
+              (_hoverGrid || widget.selected))
+            Positioned(
+              left: -4,
+              top: -6,
+              child: Material(
+                type: MaterialType.transparency,
+                child: Tooltip(
+                  message: '选中表格(选中后退格删除)',
+                  child: InkWell(
+                    onTap: widget.onSelectRequest,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: widget.selected
+                            ? scheme.primary
+                            : scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: widget.selected
+                              ? scheme.primary
+                              : scheme.outlineVariant,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.drag_indicator,
+                        size: 12,
+                        color: widget.selected
+                            ? scheme.onPrimary
+                            : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
