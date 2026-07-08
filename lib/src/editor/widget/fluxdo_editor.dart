@@ -14,7 +14,7 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../node/node.dart' show TableNode;
+import '../../node/node.dart' show InlineNode, LocalDateRun, TableNode;
 import '../../render/block_text_styles.dart';
 import '../../render/node_factory.dart';
 import '../../selection/hit_tester.dart';
@@ -41,6 +41,7 @@ class FluxdoEditor extends StatefulWidget {
     this.onIslandEditRequest,
     this.onContainerTitleEdit,
     this.onTableEdited,
+    this.onAtomTap,
   });
 
   final EditorState state;
@@ -72,6 +73,10 @@ class FluxdoEditor extends StatefulWidget {
   /// 表格 cell 编辑确认 → 新 markdown 表格文本(宿主 cook 后
   /// state.replaceIsland)。null = 表格走通用只读岛。
   final void Function(IslandBlock island, String markdown)? onTableEdited;
+
+  /// 单击可编辑原子(date chip)→ 请求编辑(宿主弹属性对话框,确认后
+  /// state.replaceAtomAt)。null = 原子只读。
+  final void Function(String blockId, int offset, InlineNode atom)? onAtomTap;
 
   @override
   State<FluxdoEditor> createState() => _FluxdoEditorState();
@@ -455,6 +460,22 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     widget.state.sealHistory();
     widget.state.updateSelection(EditorSelection.collapsed(hit.$1));
     _ime.syncFromState();
+
+    // 可编辑原子(date chip)单击 → 请求编辑(对齐官方:chip 是节点,
+    // 点击/工具栏弹 modal 改属性)。命中位置左右各探一格:tap 落点在
+    // 原子字符两侧边界都算点中它。
+    final onAtomTap = widget.onAtomTap;
+    if (onAtomTap == null) return;
+    final block = widget.state.textBlockById(hit.$1.blockId);
+    if (block == null) return;
+    for (final off in [hit.$1.offset, hit.$1.offset - 1]) {
+      if (off < 0) continue;
+      final atom = block.content.atoms[off];
+      if (atom is LocalDateRun) {
+        onAtomTap(hit.$1.blockId, off, atom);
+        return;
+      }
+    }
   }
 
   EditorPosition? _dragBase;

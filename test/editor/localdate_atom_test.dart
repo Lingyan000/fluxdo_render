@@ -72,4 +72,27 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 1));
   });
+
+  test('replaceAtomAt:换 date 原子属性,undo 一步', () {
+    final nodes = ParagraphParser().parse(
+        '<p>a<span class="discourse-local-date" data-date="2026-01-01">x</span>b</p>');
+    var n = 0;
+    final state = EditorState(blocks: blockNodesToDoc(nodes, () => 'e_${n++}'));
+    addTearDown(state.dispose);
+    final tb = state.blocks.single as TextBlock;
+    state.replaceAtomAt(tb.id, 1, const LocalDateRun(
+      date: '2027-05-05', time: '08:00', fallbackText: '2027-05-05 08:00',
+    ));
+    final after = state.blocks.single as TextBlock;
+    final atom = after.content.atoms[1] as LocalDateRun;
+    expect(atom.date, '2027-05-05');
+    expect(atom.time, '08:00');
+    // 非原子位置无操作
+    state.replaceAtomAt(tb.id, 0, const LocalDateRun(date: 'x', fallbackText: 'x'));
+    expect(((state.blocks.single as TextBlock).content.atoms[1] as LocalDateRun).date,
+        '2027-05-05');
+    state.undo();
+    expect(((state.blocks.single as TextBlock).content.atoms[1] as LocalDateRun).date,
+        '2026-01-01');
+  });
 }

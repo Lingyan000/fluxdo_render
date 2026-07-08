@@ -424,6 +424,31 @@ class EditorState extends ChangeNotifier {
     sealHistory();
   }
 
+  /// 替换 [blockId] 块 [offset] 处的原子(date chip 编辑确认)。
+  /// 该位置不是原子时无操作。undo 一步。
+  void replaceAtomAt(String blockId, int offset, InlineNode newAtom) {
+    final i = indexOfBlock(blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    if (!block.content.isAtomAt(offset)) return;
+    sealHistory();
+    final newBlocks = [..._blocks];
+    newBlocks[i] = block.copyWith(
+      content: block.content
+          .delete(offset, offset + 1)
+          .insertAtom(offset, newAtom),
+    );
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(
+        EditorPosition(blockId: blockId, offset: offset + 1),
+      ),
+      groupWithPrevious: false,
+    );
+    sealHistory();
+  }
+
   /// 在 [blockId] 之后插入孤岛块。
   void insertIslandAfter(String blockId, BlockNode node) {
     final i = indexOfBlock(blockId);
