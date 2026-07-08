@@ -12,6 +12,7 @@ library;
 
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show BoxHitTestResult, RenderMetaData;
 import 'package:flutter/services.dart';
 
 import '../../node/node.dart' show InlineNode, LocalDateRun, TableNode;
@@ -133,16 +134,24 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     // 外部变更(undo/redo 按钮、程序化改文档)→ IME 的 diff 基准已过期,
     // 必须重喂;IME 自身回调引发的通知、以及拖选进行中(高频选区变化,
     // 结束时 _onPanEnd 统一喂)除外。
-    if (!_ime.isApplyingPlatformUpdate && _dragBase == null && _focusNode.hasFocus) {
+    // hasPrimaryFocus(非 hasFocus):焦点在子输入框(表格 cell)时
+    // 编辑器 IME 必须闭嘴 —— 重喂会跟 TextField 抢输入连接。
+    if (!_ime.isApplyingPlatformUpdate &&
+        _dragBase == null &&
+        _focusNode.hasPrimaryFocus) {
       _ime.syncFromState(show: false);
     }
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) => _afterFrame());
   }
 
+  /// 上一次观察到的 primary 焦点态(区分三态迁移用)。
+  bool _hadPrimaryFocus = false;
+
   void _onFocusChanged() {
-    if (_focusNode.hasFocus) {
-      // 重新聚焦(Tab / 键盘遍历 / 程序化 requestFocus):恢复光标可编辑。
+    final primary = _focusNode.hasPrimaryFocus;
+    if (primary) {
+      // 聚焦编辑器正文(Tab / 点击 / 从 cell 输入框回来):恢复光标可编辑。
       // 无选区时落到文档末尾(常规编辑器语义)。
       if (widget.state.selection == null) {
         final last = widget.state.blocks.last;
@@ -151,12 +160,14 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
         ));
       }
       _ime.syncFromState();
-    } else {
-      // 失焦:关 IME + 封历史口;清光标(选区保留 —— 用户可能是去点
-      // 工具栏按钮,回来还在原处)。
+    } else if (_hadPrimaryFocus) {
+      // 焦点离开编辑器正文(→ 子输入框如表格 cell,或 → 编辑器外):
+      // 关编辑器 IME + 封历史口;光标随 hasPrimaryFocus 消失(见
+      // _computeLocalCaretRect),否则与 cell TextField 双光标。
       _ime.detach();
       widget.state.sealHistory();
     }
+    _hadPrimaryFocus = primary;
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) => _afterFrame());
   }
@@ -173,9 +184,11 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
             '(blocks=${widget.state.blocks.length})');
       }
     }
-    // 失焦时高亮层也清掉(选区数据保留在 EditorState,聚焦回来即恢复)。
-    _controller.selection =
-        _focusNode.hasFocus ? _toDocumentSelection(widget.state.selection) : null;
+    // 失焦时高亮层也清掉(选区数据保留在 EditorState,聚焦回来即恢复);
+    // 焦点在 cell 输入框时同理(hasPrimaryFocus)。
+    _controller.selection = _focusNode.hasPrimaryFocus
+        ? _toDocumentSelection(widget.state.selection)
+        : null;
 
     final newCaret = _computeLocalCaretRect();
     if (newCaret != _caretInfo.value.$1) {
@@ -311,7 +324,11 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
 
   Rect? _computeLocalCaretRect() {
     final sel = widget.state.selection;
-    if (sel == null || !sel.isCollapsed || !_focusNode.hasFocus) return null;
+    // hasPrimaryFocus:焦点在表格 cell 等子输入框时编辑器光标必须消失
+    // (否则与 TextField 自己的光标形成双光标)。
+    if (sel == null || !sel.isCollapsed || !_focusNode.hasPrimaryFocus) {
+      return null;
+    }
     final docPos = _toDocumentPosition(sel.extent, affinity: _caretAffinity);
     if (docPos == null) return null;
     final globalRect =
@@ -452,6 +469,10 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   EditorPosition? _positionAtGlobal(Offset global) => _hitAtGlobal(global)?.$1;
 
   void _onTapDown(TapDownDetails details) {
+    // 点在表格网格等自管交互区:编辑器手势完全让路 —— 抢焦点/设选区/
+    // 弹 IME 都不做(否则:选区兜底跳到邻块 + 编辑器光标与 cell
+    // TextField 光标并存 = 双光标,焦点还来回闪)。
+    if (_hitsSelfManagedRegion(details.globalPosition)) return;
     final hit = _hitAtGlobal(details.globalPosition);
     _focusNode.requestFocus();
     if (hit == null) return;
@@ -478,9 +499,27 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     }
   }
 
+  /// [global] 是否落在自管交互区(表格网格)内 —— 命中路径上找
+  /// 区域标记 RenderMetaData。
+  bool _hitsSelfManagedRegion(Offset global) {
+    final rootBox = _rootKey.currentContext?.findRenderObject();
+    if (rootBox is! RenderBox || !rootBox.attached) return false;
+    final result = BoxHitTestResult();
+    rootBox.hitTest(result, position: rootBox.globalToLocal(global));
+    for (final entry in result.path) {
+      final t = entry.target;
+      if (t is RenderMetaData && t.metaData == kEditorSelfManagedRegion) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   EditorPosition? _dragBase;
 
   void _onPanStart(DragStartDetails details) {
+    // 自管交互区(表格网格)内不启动编辑器拖选
+    if (_hitsSelfManagedRegion(details.globalPosition)) return;
     _dragBase = _positionAtGlobal(details.globalPosition);
     _focusNode.requestFocus();
   }

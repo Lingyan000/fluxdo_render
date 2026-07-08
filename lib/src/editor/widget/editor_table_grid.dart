@@ -16,6 +16,16 @@ import 'package:flutter/material.dart';
 import '../../node/node.dart';
 import '../model/markdown_serializer.dart';
 
+/// 编辑器自管交互区的命中标记(MetaData.metaData):FluxdoEditor 的
+/// tap/pan 手势命中带此标记的子树时完全让路 —— 区域内的焦点/光标/
+/// 输入由子组件(表格 cell TextField)自己管,编辑器不抢焦点、不设
+/// 选区、不弹 IME(否则双光标)。
+const Object kEditorSelfManagedRegion = _SelfManagedRegionTag();
+
+class _SelfManagedRegionTag {
+  const _SelfManagedRegionTag();
+}
+
 /// 表格编辑网格。所有结构变更(改 cell/增删行列/表头开关)统一走
 /// [onChanged](完整 markdown 表格文本)—— 宿主经 cook 链路替换岛。
 class EditorTableGrid extends StatefulWidget {
@@ -155,7 +165,12 @@ class _EditorTableGridState extends State<EditorTableGrid> {
     final textStyle = Theme.of(context).textTheme.bodyMedium;
     final borderColor = scheme.outlineVariant.withValues(alpha: 0.6);
 
-    return Column(
+    // MetaData 标记自管区:编辑器 tap/pan 命中本子树时让路(焦点/光标
+    // 由 cell TextField 自管,见 kEditorSelfManagedRegion)。
+    return MetaData(
+      metaData: kEditorSelfManagedRegion,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
@@ -185,6 +200,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
           ]),
         ),
       ],
+      ),
     );
   }
 

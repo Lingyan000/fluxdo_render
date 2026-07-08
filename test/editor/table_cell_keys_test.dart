@@ -101,4 +101,53 @@ void main() {
     expect((state.blocks.first as dynamic).content.text, 'x');
     await tester.pump(const Duration(seconds: 1));
   });
+
+
+  testWidgets('双光标回归:cell 编辑时编辑器 caret 消失、点 cell 不动编辑器选区',
+      (tester) async {
+    var n = 0;
+    final state = EditorState(
+        blocks: blockNodesToDoc(
+            ParagraphParser().parse(
+                '<p>正文文字</p>'
+                '<div class="md-table"><table><tbody><tr><td>CELL</td></tr></tbody></table></div>'),
+            () => 'e_${n++}'));
+    addTearDown(state.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: FluxdoEditor(state: state, onTableEdited: (i, m) {}),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // 先聚焦正文(光标在正文块)
+    await tester.tap(find.textContaining('正文文字', findRichText: true));
+    await tester.pump();
+    await tester.pump();
+    final selBefore = state.selection;
+    expect(selBefore, isNotNull);
+    expect(selBefore!.extent.blockId, state.blocks.first.id);
+
+    // 点 cell 进入编辑:编辑器选区**不该被 tap 兜底改走**(自管区让路)
+    await tester.tap(find.text('CELL'));
+    await tester.pump();
+    await tester.pump();
+    expect(state.selection?.extent.blockId, selBefore.extent.blockId,
+        reason: '点 cell 不该触发编辑器 tap 选区兜底');
+
+    // primary focus 应在 cell TextField 内(编辑器 caret 依
+    // hasPrimaryFocus 判定 → 此刻不绘制,无双光标)
+    expect(
+      find.descendant(
+        of: find.byType(TextField),
+        matching: find.byWidgetPredicate(
+            (w) => w is EditableText && w.focusNode.hasPrimaryFocus),
+      ),
+      findsOneWidget,
+      reason: 'cell TextField 应持有 primary focus',
+    );
+    await tester.pump(const Duration(seconds: 1));
+  });
 }
