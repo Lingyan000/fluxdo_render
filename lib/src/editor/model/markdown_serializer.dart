@@ -9,6 +9,7 @@
 /// cook(JS bundle)→ parse → blockNodesToDoc,不在子包内。
 library;
 
+import 'dart:math' as math;
 import 'dart:ui' show Color;
 
 import '../../node/node.dart';
@@ -733,6 +734,44 @@ String _serializeListNode(ListNode list, int depth) {
   return lines.join('\n');
 }
 
+/// 表格 cell → 单行 markdown 文本(公开:表格结构化编辑器的初值也用)。
+/// 多块 cell 拼空格;换行/管道符转义(markdown 表格 cell 单行约束)。
+String tableCellToMarkdown(TableCellData cell) => cell.children
+    .map(serializeIslandNode)
+    .where((s) => s.isNotEmpty)
+    .join(' ')
+    .replaceAll('\n', ' ')
+    .replaceAll('|', r'\|');
+
+/// 纯文本网格 → markdown 表格(表格结构化编辑器确认后重建 raw 用)。
+/// [cells] 行×列;[hasHeader] 首行作表头。cell 内管道转义。
+String tableGridToMarkdown(List<List<String>> cells, {bool hasHeader = true}) {
+  if (cells.isEmpty) return '';
+  final cols = cells.map((r) => r.length).reduce(math.max);
+  String esc(String s) =>
+      s.replaceAll('\n', ' ').replaceAll('|', r'\|').trim();
+  String rowLine(List<String> row) => '| ${[
+        for (var c = 0; c < cols; c++) c < row.length ? esc(row[c]) : '',
+      ].join(' | ')} |';
+
+  final divider = '| ${List.filled(cols, '---').join(' | ')} |';
+  final lines = <String>[];
+  if (hasHeader) {
+    lines.add(rowLine(cells.first));
+    lines.add(divider);
+    for (final row in cells.skip(1)) {
+      lines.add(rowLine(row));
+    }
+  } else {
+    lines.add('| ${List.filled(cols, ' ').join(' | ')} |');
+    lines.add(divider);
+    for (final row in cells) {
+      lines.add(rowLine(row));
+    }
+  }
+  return lines.join('\n');
+}
+
 String _serializeTable(
   List<List<TableCellData>> rows,
   int columnCount,
@@ -740,17 +779,10 @@ String _serializeTable(
 ) {
   if (rows.isEmpty) return '';
 
-  String cellText(TableCellData cell) => cell.children
-      .map(serializeIslandNode)
-      .where((s) => s.isNotEmpty)
-      .join(' ')
-      .replaceAll('\n', ' ')
-      .replaceAll('|', r'\|');
-
   String rowLine(List<TableCellData> row) {
     final cells = [
       for (var c = 0; c < columnCount; c++)
-        c < row.length ? cellText(row[c]) : '',
+        c < row.length ? tableCellToMarkdown(row[c]) : '',
     ];
     return '| ${cells.join(' | ')} |';
   }

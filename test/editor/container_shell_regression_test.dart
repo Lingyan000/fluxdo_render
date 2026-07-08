@@ -9,7 +9,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/editor/model/doc_converter.dart';
-import 'package:fluxdo_render/src/editor/model/editable_text_content.dart';
 import 'package:fluxdo_render/src/editor/model/editor_state.dart';
 import 'package:fluxdo_render/src/editor/widget/fluxdo_editor.dart';
 import 'package:fluxdo_render/src/parser/paragraph_parser.dart';

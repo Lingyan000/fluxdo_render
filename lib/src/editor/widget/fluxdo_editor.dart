@@ -501,8 +501,16 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     }
 
     /// 单块 → widget(文本段落/岛)。
+    ///
+    /// 外层 Padding **必须带 key**:顶层/壳内 Column 的 children 是
+    /// keyed(壳)与块混合列表,unkeyed 块会被 updateChildren 按位置
+    /// 配对 —— 弹层/插块后旧岛 Padding 与新位置段落 Padding 错配,
+    /// child 类型不同导致岛整棵 deactivate 重建(真机 hover/滚动态下
+    /// 深层 InheritedElement dependents 清理时序炸 _dependents 断言,
+    /// 红屏)。全 keyed 后 diff 恒按身份匹配,块只随真实删除而摘除。
     Widget buildBlock(int i) {
       return Padding(
+        key: ValueKey('blk_${state.blocks[i].id}'),
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: switch (state.blocks[i]) {
           // key 绑块 id:分段/合并时 Element 正确复用/重建
@@ -561,13 +569,12 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
             }
           }
           out.add(Padding(
-            // 容器壳自身与外界的间距(块本体的 vertical 4 在壳内)
+            // 容器壳自身与外界的间距(块本体的 vertical 4 在壳内)。
+            // key 在 Padding 上(children 列表的直接成员必须 keyed,
+            // 见 buildBlock 注释)。
+            key: ValueKey('shell_${frame.groupId}_$level'),
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: EditorContainerShell(
-              // key = 容器实例身份:弹块/分裂改变分组首块时壳不整棵重建
-              // (用首块 id 做 key 会在退格弹层时强制旧壳 deactivate,
-              // 触发 InheritedElement _dependents 断言崩溃)
-              key: ValueKey('shell_${frame.groupId}_$level'),
               frame: frame,
               children: buildLevel(runStart, i, level + 1),
             ),
