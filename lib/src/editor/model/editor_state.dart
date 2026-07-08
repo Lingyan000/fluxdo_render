@@ -1049,6 +1049,8 @@ class EditorState extends ChangeNotifier {
         .toList();
     if (all.isEmpty) return;
     final isAll = all.every((b) => b.containers.any((f) => f is QuoteFrame));
+    // 包层:选区覆盖块共享**同一个**新帧(一个引用包全部)
+    final newFrame = QuoteFrame(groupId: nextFrameGroupId());
     _mapSelectedTextBlocks((b) {
       if (isAll) {
         // 弹出最内层的 QuoteFrame(保留其他容器)
@@ -1059,7 +1061,7 @@ class EditorState extends ChangeNotifier {
       }
       // 外面再包一层引用(栈头插入 —— 语义上新引用包住现有容器)
       return b.copyWith(
-        containers: [const QuoteFrame(), ...b.containers],
+        containers: [newFrame, ...b.containers],
       );
     });
   }
@@ -1148,6 +1150,10 @@ class EditorState extends ChangeNotifier {
     sealHistory();
     _clearPending();
 
+    // 片段容器帧 groupId 重发(自我复制粘贴时旧 id 会与原文档同组吸并;
+    // 片段内同组映射同一个新 id —— 粘贴的多块卡保持一张卡)。
+    fragment = _reGroupFragment(fragment);
+
     // 光标在岛上(理论只有整选态,防御):落到岛后插整段
     if (host is! TextBlock) {
       final newBlocks = [..._blocks];
@@ -1170,8 +1176,13 @@ class EditorState extends ChangeNotifier {
     final offset = pos.offset.clamp(0, host.content.length);
     final first = fragment.first;
 
-    // 单文本块片段:纯内联并入(不分裂宿主)
-    if (fragment.length == 1 && first is TextBlock) {
+    // 单**纯段落**片段:纯内联并入(不分裂宿主)。带块属性的单块
+    // (容器壳/列表项/标题)不能内联 —— 内联只拿 content,容器帧/
+    // 列表性会静默蒸发(插入菜单 [quote]/[spoiler] 模板全是这形态)。
+    final firstPlain = first is TextBlock &&
+        first.containers.isEmpty &&
+        first.isParagraph;
+    if (fragment.length == 1 && firstPlain) {
       final newBlocks = [..._blocks];
       newBlocks[i] = host.copyWith(
         content: _spliceContent(host.content, offset, first.content),
@@ -1187,22 +1198,31 @@ class EditorState extends ChangeNotifier {
       return;
     }
 
-    // 多块:宿主在光标处劈开,首块并入前半,尾块并入后半
+    // 多块(或带块属性的单块):宿主在光标处劈开,纯段落首块并入前半,
+    // 纯段落尾块并入后半;带块属性的首/尾块整块插入。
     final (head, tail) = host.content.split(offset);
     final newBlocks = [..._blocks];
     newBlocks.removeAt(i);
 
     final assembled = <EditorBlock>[];
-    final firstText = first is TextBlock ? first : null;
-    assembled.add(host.copyWith(
-      content: firstText != null
-          ? _spliceContent(head, head.length, firstText.content)
-          : head,
-    ));
+    // 首块内联并入条件 = 纯段落(同上);否则整块插入
+    final firstText = firstPlain ? first : null;
+    // 宿主前半:有内容、或首块要并入时保留;空且不并入 → 不留孤儿空段
+    // (空文档插容器模板不该在壳上方多一个空行)
+    if (firstText != null || head.length > 0) {
+      assembled.add(host.copyWith(
+        content: firstText != null
+            ? _spliceContent(head, head.length, firstText.content)
+            : head,
+      ));
+    }
 
     final last = fragment.last;
-    final lastText =
-        (fragment.length > 1 && last is TextBlock) ? last : null;
+    final lastPlain = fragment.length > 1 &&
+        last is TextBlock &&
+        last.containers.isEmpty &&
+        last.isParagraph;
+    final lastText = lastPlain ? last : null;
 
     for (var k = (firstText != null ? 1 : 0);
         k < fragment.length - (lastText != null ? 1 : 0);
@@ -1212,7 +1232,7 @@ class EditorState extends ChangeNotifier {
 
     EditorPosition caret;
     if (lastText != null) {
-      // 尾块继承片段块属性(粘贴的列表项保持列表),tail 接在其后
+      // 纯段落尾块:并入宿主后半(tail 接在其后)
       final tailId = _nextId();
       assembled.add(TextBlock(
         id: tailId,
@@ -1226,7 +1246,9 @@ class EditorState extends ChangeNotifier {
       ));
       caret = EditorPosition(blockId: tailId, offset: lastText.content.length);
     } else {
-      // 尾块是岛:tail 残余单独成段
+      // 尾块整块插入(岛/容器块/列表项):tail 残余单独成段。
+      // tail 为空也保留 —— 容器/岛后的空段是继续打字的落点
+      // (官方 trailing paragraph 惯例)。
       final tailId = _nextId();
       assembled.add(TextBlock(
         id: tailId,
@@ -1281,6 +1303,63 @@ class EditorState extends ChangeNotifier {
           ),
         final IslandBlock ib => IslandBlock(id: _nextId(), node: ib.node),
       };
+
+  /// 片段容器帧 groupId 重发:片段内同组 → 同一个新 id(保持分组),
+  /// 与原文档的旧 id 隔离(自我复制粘贴不吸并进原容器)。
+  static List<EditorBlock> _reGroupFragment(List<EditorBlock> fragment) {
+    final mapping = <String, String>{};
+    ContainerFrame remap(ContainerFrame f) {
+      final newId = mapping.putIfAbsent(f.groupId, nextFrameGroupId);
+      return switch (f) {
+        QuoteFrame() => QuoteFrame(groupId: newId),
+        QuoteCardFrame(
+          :final username,
+          :final displayName,
+          :final postNumber,
+          :final topicId,
+          :final full,
+        ) =>
+          QuoteCardFrame(
+            groupId: newId,
+            username: username,
+            displayName: displayName,
+            postNumber: postNumber,
+            topicId: topicId,
+            full: full,
+          ),
+        SpoilerFrame() => SpoilerFrame(groupId: newId),
+        DetailsFrame(:final summary, :final open) =>
+          DetailsFrame(groupId: newId, summary: summary, open: open),
+        CalloutFrame(
+          :final kind,
+          :final typeRaw,
+          :final title,
+          :final foldable,
+        ) =>
+          CalloutFrame(
+            groupId: newId,
+            kind: kind,
+            typeRaw: typeRaw,
+            title: title,
+            foldable: foldable,
+          ),
+      };
+    }
+
+    var changed = false;
+    final out = <EditorBlock>[];
+    for (final b in fragment) {
+      if (b is TextBlock && b.containers.isNotEmpty) {
+        out.add(b.copyWith(
+          containers: [for (final f in b.containers) remap(f)],
+        ));
+        changed = true;
+      } else {
+        out.add(b);
+      }
+    }
+    return changed ? out : fragment;
+  }
 
   /// 用 [fragment] 整体替换 [islandId] 岛(岛源码编辑确认后调用)。
   ///

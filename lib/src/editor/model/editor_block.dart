@@ -29,26 +29,40 @@ enum TextBlockKind { paragraph, heading, listItem }
 /// [TextBlock.containers] 栈(外→内),相邻块公共前缀 = 同一个容器 ——
 /// 渲染分组画壳,导出时分组重建节点树。
 ///
-/// **相等性 = 分组判据**:两个块的 frame 相等才算同一容器(QuoteCard
-/// 的 username 不同 = 两张引用卡)。
+/// **相等性 = 分组判据 = [groupId] + 属性**。groupId 是容器**实例身份**
+/// (树→扁平丢失的信息):没有它,两个相邻但独立的 `> A` `> B` 引用
+/// (值相等的 QuoteFrame)会被错误合并成一个;有了它,壳 widget 的
+/// key 也有了稳定身份(弹块/分裂时壳不整棵重建)。
+/// 导入(doc_converter)每遇到一个容器节点分配一次;编辑命令
+/// (toggleQuote/wrapInContainer)包新容器时分配;粘贴 re-id 时片段内
+/// 同组映射到同一个新 id(粘贴的卡与原文档的卡不吸并)。
 @immutable
 sealed class ContainerFrame {
-  const ContainerFrame();
+  const ContainerFrame({required this.groupId});
+
+  /// 容器实例身份(同一容器实例的所有子块共享)。
+  final String groupId;
 }
+
+/// groupId 进程内发号器(编辑会话内唯一即可;跨会话经 markdown 往返
+/// 重新分配,无持久化需求)。
+int _frameGroupCounter = 0;
+String nextFrameGroupId() => 'fg_${_frameGroupCounter++}';
 
 /// 纯引用 `> `(BlockquoteNode)。
 @immutable
 class QuoteFrame extends ContainerFrame {
-  const QuoteFrame();
+  const QuoteFrame({required super.groupId});
 
   @override
-  bool operator ==(Object other) => other is QuoteFrame;
+  bool operator ==(Object other) =>
+      other is QuoteFrame && groupId == other.groupId;
 
   @override
-  int get hashCode => (QuoteFrame).hashCode;
+  int get hashCode => Object.hash(QuoteFrame, groupId);
 
   @override
-  String toString() => 'Quote';
+  String toString() => 'Quote#$groupId';
 }
 
 /// 引用卡 `[quote="user, post:N, topic:M"]`(QuoteCardNode 的编辑化)。
@@ -58,6 +72,7 @@ class QuoteFrame extends ContainerFrame {
 @immutable
 class QuoteCardFrame extends ContainerFrame {
   const QuoteCardFrame({
+    required super.groupId,
     this.username = '',
     this.displayName,
     this.postNumber,
@@ -74,6 +89,7 @@ class QuoteCardFrame extends ContainerFrame {
   @override
   bool operator ==(Object other) =>
       other is QuoteCardFrame &&
+      groupId == other.groupId &&
       username == other.username &&
       displayName == other.displayName &&
       postNumber == other.postNumber &&
@@ -82,44 +98,52 @@ class QuoteCardFrame extends ContainerFrame {
 
   @override
   int get hashCode =>
-      Object.hash(username, displayName, postNumber, topicId, full);
+      Object.hash(groupId, username, displayName, postNumber, topicId, full);
 
   @override
-  String toString() => 'QuoteCard(@$username)';
+  String toString() => 'QuoteCard#$groupId(@$username)';
 }
 
 /// 块级剧透 `[spoiler]…[/spoiler]`(SpoilerBlockNode)。
 @immutable
 class SpoilerFrame extends ContainerFrame {
-  const SpoilerFrame();
+  const SpoilerFrame({required super.groupId});
 
   @override
-  bool operator ==(Object other) => other is SpoilerFrame;
+  bool operator ==(Object other) =>
+      other is SpoilerFrame && groupId == other.groupId;
 
   @override
-  int get hashCode => (SpoilerFrame).hashCode;
+  int get hashCode => Object.hash(SpoilerFrame, groupId);
 
   @override
-  String toString() => 'Spoiler';
+  String toString() => 'Spoiler#$groupId';
 }
 
 /// 折叠详情 `[details="summary"]…[/details]`(DetailsNode)。
 @immutable
 class DetailsFrame extends ContainerFrame {
-  const DetailsFrame({this.summary = '', this.open = false});
+  const DetailsFrame({
+    required super.groupId,
+    this.summary = '',
+    this.open = false,
+  });
 
   final String summary;
   final bool open;
 
   @override
   bool operator ==(Object other) =>
-      other is DetailsFrame && summary == other.summary && open == other.open;
+      other is DetailsFrame &&
+      groupId == other.groupId &&
+      summary == other.summary &&
+      open == other.open;
 
   @override
-  int get hashCode => Object.hash(summary, open);
+  int get hashCode => Object.hash(groupId, summary, open);
 
   @override
-  String toString() => 'Details("$summary")';
+  String toString() => 'Details#$groupId("$summary")';
 }
 
 /// Obsidian callout `> [!type] title`(CalloutNode)。
@@ -127,6 +151,7 @@ class DetailsFrame extends ContainerFrame {
 @immutable
 class CalloutFrame extends ContainerFrame {
   const CalloutFrame({
+    required super.groupId,
     required this.kind,
     required this.typeRaw,
     this.title,
@@ -141,16 +166,17 @@ class CalloutFrame extends ContainerFrame {
   @override
   bool operator ==(Object other) =>
       other is CalloutFrame &&
+      groupId == other.groupId &&
       kind == other.kind &&
       typeRaw == other.typeRaw &&
       title == other.title &&
       foldable == other.foldable;
 
   @override
-  int get hashCode => Object.hash(kind, typeRaw, title, foldable);
+  int get hashCode => Object.hash(groupId, kind, typeRaw, title, foldable);
 
   @override
-  String toString() => 'Callout($typeRaw)';
+  String toString() => 'Callout#$groupId($typeRaw)';
 }
 
 /// 编辑文档里的一个块。
@@ -182,7 +208,10 @@ class TextBlock extends EditorBlock {
         assert(quoteDepth == 0 || containers.isEmpty,
             'quoteDepth 便捷参数与 containers 互斥'),
         containers = List.unmodifiable(quoteDepth > 0
-            ? List.generate(quoteDepth, (_) => const QuoteFrame())
+            // 便捷参数(测试用):每层独立发号 —— 注意这样每次构造的
+            // 帧互不相等,跨块共享容器请显式传 containers
+            ? List.generate(
+                quoteDepth, (_) => QuoteFrame(groupId: nextFrameGroupId()))
             : containers);
 
   final EditableTextContent content;

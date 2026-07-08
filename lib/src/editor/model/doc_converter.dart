@@ -167,7 +167,10 @@ List<EditorBlock> blockNodesToDoc(
         }
       case BlockquoteNode(:final children):
         if (blocksEditable(children)) {
-          final frame = [...containers, const QuoteFrame()];
+          final frame = [
+            ...containers,
+            QuoteFrame(groupId: nextFrameGroupId()),
+          ];
           for (final child in children) {
             walk(child, frame);
           }
@@ -179,6 +182,7 @@ List<EditorBlock> blockNodesToDoc(
           final frame = [
             ...containers,
             QuoteCardFrame(
+              groupId: nextFrameGroupId(),
               username: node.username,
               displayName: node.displayName,
               postNumber: node.postNumber,
@@ -198,7 +202,10 @@ List<EditorBlock> blockNodesToDoc(
         }
       case SpoilerBlockNode(:final children):
         if (blocksEditable(children)) {
-          final frame = [...containers, const SpoilerFrame()];
+          final frame = [
+            ...containers,
+            SpoilerFrame(groupId: nextFrameGroupId()),
+          ];
           if (children.isEmpty) {
             addText(EditableTextContent.empty, containers: frame);
           }
@@ -212,7 +219,11 @@ List<EditorBlock> blockNodesToDoc(
         if (blocksEditable(children)) {
           final frame = [
             ...containers,
-            DetailsFrame(summary: summary, open: initiallyOpen),
+            DetailsFrame(
+              groupId: nextFrameGroupId(),
+              summary: summary,
+              open: initiallyOpen,
+            ),
           ];
           if (children.isEmpty) {
             addText(EditableTextContent.empty, containers: frame);
@@ -228,6 +239,7 @@ List<EditorBlock> blockNodesToDoc(
           final frame = [
             ...containers,
             CalloutFrame(
+              groupId: nextFrameGroupId(),
               kind: node.kind,
               typeRaw: node.typeRaw,
               title: node.title,

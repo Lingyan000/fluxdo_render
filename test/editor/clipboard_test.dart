@@ -112,7 +112,7 @@ void main() {
       expect(s.selection!.extent.offset, 3);
     });
 
-    test('多块:宿主劈开,首并前半,尾并后半,尾块属性继承片段', () {
+    test('多块:宿主劈开,纯段落首块并前半;列表尾块整块插入', () {
       final s = buildState([tb('e_0', 'ab')]);
       s.updateSelection(const EditorSelection.collapsed(
           EditorPosition(blockId: 'e_0', offset: 1)));
@@ -120,13 +120,17 @@ void main() {
         tb('p_0', 'X'),
         tb('p_1', 'Y', kind: TextBlockKind.listItem),
       ]);
-      expect(s.blocks, hasLength(2));
+      // 列表项不与宿主后半内联合并(M5:带块属性的块整块插入,
+      // 否则粘贴的列表会吞掉宿主文字);宿主后半独立成段
+      expect(s.blocks, hasLength(3));
       expect((s.blocks[0] as TextBlock).content.text, 'aX');
-      final tail = s.blocks[1] as TextBlock;
-      expect(tail.content.text, 'Yb');
-      expect(tail.isListItem, isTrue);
+      final li = s.blocks[1] as TextBlock;
+      expect(li.content.text, 'Y');
+      expect(li.isListItem, isTrue);
+      final tail = s.blocks[2] as TextBlock;
+      expect(tail.content.text, 'b');
       expect(s.selection!.extent.blockId, tail.id);
-      expect(s.selection!.extent.offset, 1);
+      expect(s.selection!.extent.offset, 0);
     });
 
     test('单岛片段:段落绕岛分裂', () {
@@ -164,6 +168,54 @@ void main() {
       expect((s.blocks.single as TextBlock).content.text, 'hellohello');
       s.undo();
       expect((s.blocks.single as TextBlock).content.text, 'hello');
+    });
+
+    test('回归:单块容器片段(插入菜单 [quote] 模板)保留容器帧', () {
+      final s = buildState([tb('e_0', '')]);
+      s.updateSelection(const EditorSelection.collapsed(
+          EditorPosition(blockId: 'e_0', offset: 0)));
+      s.pasteBlocks([
+        TextBlock(
+          id: 'p_0',
+          content: EditableTextContent(text: '引用内容'),
+          containers: const [QuoteCardFrame(groupId: 'g1', username: 'u')],
+        ),
+      ]);
+      // 壳保留 + 空宿主不留孤儿空段 + 壳后有落点空段
+      final withCard = s.blocks
+          .whereType<TextBlock>()
+          .where((b) => b.containers.any((f) => f is QuoteCardFrame))
+          .toList();
+      expect(withCard, hasLength(1));
+      expect(withCard.single.content.text, '引用内容');
+      expect((s.blocks.first as TextBlock).containers, isNotEmpty,
+          reason: '空宿主前半不该留孤儿空段');
+      expect((s.blocks.last as TextBlock).containers, isEmpty,
+          reason: '壳后应有顶层落点空段');
+    });
+
+    test('回归:自我复制容器块再粘贴,groupId 重发不吸并', () {
+      final s = buildState([
+        TextBlock(
+          id: 'e_0',
+          content: EditableTextContent(text: '甲'),
+          containers: const [QuoteFrame(groupId: 'g1')],
+        ),
+      ]);
+      s.selectAll();
+      final frag = s.copySelectionAsBlocks();
+      // 光标放块尾粘贴
+      s.updateSelection(const EditorSelection.collapsed(
+          EditorPosition(blockId: 'e_0', offset: 1)));
+      s.pasteBlocks(frag);
+      final quoted = s.blocks
+          .whereType<TextBlock>()
+          .where((b) => b.containers.isNotEmpty)
+          .toList();
+      expect(quoted.length, greaterThanOrEqualTo(2));
+      // 粘贴块的 groupId ≠ 原块(两个独立引用,不合并成一个)
+      final ids = quoted.map((b) => b.containers.first.groupId).toSet();
+      expect(ids.length, 2);
     });
   });
 

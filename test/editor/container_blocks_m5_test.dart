@@ -98,7 +98,7 @@ void main() {
 
     test('块首退格:弹出最内层容器', () {
       final s = makeState(
-          [const QuoteCardFrame(username: 'u'), const QuoteFrame()]);
+          [const QuoteCardFrame(groupId: 'g1', username: 'u'), const QuoteFrame(groupId: 'g2')]);
       s.updateSelection(const EditorSelection.collapsed(
           EditorPosition(blockId: 'e_0', offset: 0)));
       s.backspace();
@@ -117,7 +117,7 @@ void main() {
         TextBlock(
           id: 'e_0',
           content: EditableTextContent.empty,
-          containers: const [SpoilerFrame()],
+          containers: const [SpoilerFrame(groupId: 'g1')],
         ),
       ]);
       addTearDown(s.dispose);
@@ -128,7 +128,7 @@ void main() {
     });
 
     test('容器内回车分裂:新块同容器栈', () {
-      final s = makeState([const SpoilerFrame()]);
+      final s = makeState([const SpoilerFrame(groupId: 'g_new')]);
       s.updateSelection(const EditorSelection.collapsed(
           EditorPosition(blockId: 'e_0', offset: 1)));
       s.splitBlock();
@@ -137,7 +137,7 @@ void main() {
     });
 
     test('toggleQuote:包/弹 QuoteFrame(保留其他容器)', () {
-      final s = makeState([const SpoilerFrame()]);
+      final s = makeState([const SpoilerFrame(groupId: 'g_new')]);
       s.updateSelection(const EditorSelection.collapsed(
           EditorPosition(blockId: 'e_0', offset: 1)));
       s.toggleQuote();
@@ -158,9 +158,9 @@ void main() {
       ]);
       addTearDown(s.dispose);
       s.selectAll();
-      s.wrapInContainer(const DetailsFrame(summary: 's'));
+      s.wrapInContainer(const DetailsFrame(groupId: 'gd', summary: 's'));
       for (final b in s.blocks.whereType<TextBlock>()) {
-        expect(b.containers.single, const DetailsFrame(summary: 's'));
+        expect(b.containers.single, const DetailsFrame(groupId: 'gd', summary: 's'));
       }
     });
   });
@@ -171,17 +171,17 @@ void main() {
         TextBlock(
           id: 'e_0',
           content: EditableTextContent(text: '甲'),
-          containers: const [QuoteCardFrame(username: 'u', postNumber: 1, topicId: 2)],
+          containers: const [QuoteCardFrame(groupId: 'gA', username: 'u', postNumber: 1, topicId: 2)],
         ),
         TextBlock(
           id: 'e_1',
           content: EditableTextContent(text: '乙'),
-          containers: const [QuoteCardFrame(username: 'u', postNumber: 1, topicId: 2)],
+          containers: const [QuoteCardFrame(groupId: 'gA', username: 'u', postNumber: 1, topicId: 2)],
         ),
         TextBlock(
           id: 'e_2',
           content: EditableTextContent(text: '丙'),
-          containers: const [QuoteCardFrame(username: 'v', postNumber: 3, topicId: 2)],
+          containers: const [QuoteCardFrame(groupId: 'gB', username: 'v', postNumber: 3, topicId: 2)],
         ),
       ]);
       expect(
@@ -196,7 +196,7 @@ void main() {
         TextBlock(
           id: 'e_0',
           content: EditableTextContent(text: '双层'),
-          containers: const [DetailsFrame(summary: '套娃'), SpoilerFrame()],
+          containers: const [DetailsFrame(groupId: 'gd2', summary: '套娃'), SpoilerFrame(groupId: 'gs2')],
         ),
       ]);
       expect(md, '[details="套娃"]\n[spoiler]\n双层\n[/spoiler]\n[/details]');
@@ -207,12 +207,12 @@ void main() {
         TextBlock(
           id: 'e_0',
           content: EditableTextContent(text: '段一'),
-          containers: const [QuoteFrame()],
+          containers: const [QuoteFrame(groupId: 'gq')],
         ),
         TextBlock(
           id: 'e_1',
           content: EditableTextContent(text: '段二'),
-          containers: const [QuoteFrame()],
+          containers: const [QuoteFrame(groupId: 'gq')],
         ),
       ]);
       expect(md, '> 段一\n>\n> 段二');

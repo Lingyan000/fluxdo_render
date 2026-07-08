@@ -158,17 +158,20 @@ void main() {
       expect((nodes[0] as ListNode).start, 5);
     });
 
-    test('quoteDepth run → 嵌套 BlockquoteNode', () {
+    test('容器栈 run → 嵌套 BlockquoteNode(共享帧分组)', () {
+      // groupId 语义:同帧实例才合并 —— 嵌套结构显式共享外层帧
+      const outer = QuoteFrame(groupId: 'q_outer');
+      const inner = QuoteFrame(groupId: 'q_inner');
       final doc = <EditorBlock>[
         TextBlock(
           id: 'e_0',
           content: EditableTextContent(text: 'outer'),
-          quoteDepth: 1,
+          containers: const [outer],
         ),
         TextBlock(
           id: 'e_1',
           content: EditableTextContent(text: 'inner'),
-          quoteDepth: 2,
+          containers: const [outer, inner],
         ),
         TextBlock(
           id: 'e_2',
@@ -181,6 +184,21 @@ void main() {
       expect(quote.children.length, 2);
       expect(quote.children[1], isA<BlockquoteNode>());
       expect(nodes[1], isA<ParagraphNode>());
+
+      // 独立帧(不同 groupId)不合并:两个相邻引用保持两个
+      final doc2 = <EditorBlock>[
+        TextBlock(
+          id: 'e_0',
+          content: EditableTextContent(text: 'A'),
+          containers: const [QuoteFrame(groupId: 'qa')],
+        ),
+        TextBlock(
+          id: 'e_1',
+          content: EditableTextContent(text: 'B'),
+          containers: const [QuoteFrame(groupId: 'qb')],
+        ),
+      ];
+      expect(docToBlockNodes(doc2).length, 2);
     });
 
     test('ul/ol 相邻同深分家', () {

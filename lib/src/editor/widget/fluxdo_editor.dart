@@ -564,8 +564,10 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
             // 容器壳自身与外界的间距(块本体的 vertical 4 在壳内)
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: EditorContainerShell(
-              // key 绑首块 id + 层级:分组随编辑变动时子树正确重建
-              key: ValueKey('shell_${state.blocks[runStart].id}_$level'),
+              // key = 容器实例身份:弹块/分裂改变分组首块时壳不整棵重建
+              // (用首块 id 做 key 会在退格弹层时强制旧壳 deactivate,
+              // 触发 InheritedElement _dependents 断言崩溃)
+              key: ValueKey('shell_${frame.groupId}_$level'),
               frame: frame,
               children: buildLevel(runStart, i, level + 1),
             ),
