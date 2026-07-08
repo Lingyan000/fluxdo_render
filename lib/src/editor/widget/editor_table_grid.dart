@@ -1,0 +1,405 @@
+/// 表格岛的编辑态渲染(M5):cell 单击原位编辑 + 行列悬浮操作。
+///
+/// 替换通用 EditorIsland 的 AbsorbPointer 只读渲染 —— 表格是"结构化
+/// 数据",cell 级直改比源码/对话框顺手一个量级:
+/// - 自绘轻量表格(边框/表头底色对齐阅读端 table_builder 视觉);
+/// - 单击 cell → cell 原位变 TextField(markdown 源码口径,富格式保留);
+/// - 提交(回车/失焦)→ 回调宿主重建 markdown → replaceIsland;
+/// - 尾部 [+行][+列] 按钮,行/列头 hover 显删除。
+///
+/// cell 内容口径 = tableCellToMarkdown(单行 markdown 文本;`**粗**`
+/// 等富格式以源码显示,cook 后还原 —— 不丢格式)。
+library;
+
+import 'package:flutter/material.dart';
+
+import '../../node/node.dart';
+import '../model/markdown_serializer.dart';
+
+/// 表格编辑网格。所有结构变更(改 cell/增删行列/表头开关)统一走
+/// [onChanged](完整 markdown 表格文本)—— 宿主经 cook 链路替换岛。
+class EditorTableGrid extends StatefulWidget {
+  const EditorTableGrid({
+    super.key,
+    required this.node,
+    required this.onChanged,
+  });
+
+  final TableNode node;
+
+  /// 变更后的 markdown 表格文本(cook → replaceIsland 由宿主做)。
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<EditorTableGrid> createState() => _EditorTableGridState();
+}
+
+class _EditorTableGridState extends State<EditorTableGrid> {
+  /// 当前网格(markdown cell 文本);null = 未在编辑,直接展示 node。
+  late List<List<String>> _cells;
+  late bool _hasHeader;
+
+  /// 正在编辑的 cell(row, col);null = 无。
+  (int, int)? _editing;
+  final TextEditingController _cellController = TextEditingController();
+  final FocusNode _cellFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFromNode();
+    _cellFocus.addListener(() {
+      if (!_cellFocus.hasFocus) _commitCell();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant EditorTableGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node != widget.node) {
+      _editing = null;
+      _syncFromNode();
+    }
+  }
+
+  void _syncFromNode() {
+    final n = widget.node;
+    _hasHeader = n.hasHeader;
+    _cells = [
+      for (final row in n.rows)
+        [
+          for (var c = 0; c < n.columnCount; c++)
+            c < row.length ? tableCellToMarkdown(row[c]) : '',
+        ],
+    ];
+    if (_cells.isEmpty) _cells = [['']];
+  }
+
+  @override
+  void dispose() {
+    _cellController.dispose();
+    _cellFocus.dispose();
+    super.dispose();
+  }
+
+  int get _rows => _cells.length;
+  int get _cols => _cells.isEmpty ? 0 : _cells.first.length;
+
+  void _emit() => widget.onChanged(
+        tableGridToMarkdown(_cells, hasHeader: _hasHeader),
+      );
+
+  void _startEdit(int r, int c) {
+    _commitCell();
+    setState(() {
+      _editing = (r, c);
+      _cellController.text = _cells[r][c];
+      _cellController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _cellController.text.length,
+      );
+    });
+    // 帧后请求焦点(TextField 刚挂载)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _editing != null) _cellFocus.requestFocus();
+    });
+  }
+
+  void _commitCell() {
+    final e = _editing;
+    if (e == null) return;
+    final (r, c) = e;
+    final next = _cellController.text;
+    _editing = null;
+    if (r < _rows && c < _cols && _cells[r][c] != next) {
+      _cells[r][c] = next;
+      _emit();
+    } else if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _addRow() {
+    _commitCell();
+    _cells.add(List.filled(_cols, ''));
+    _emit();
+  }
+
+  void _addCol() {
+    _commitCell();
+    for (final row in _cells) {
+      row.add('');
+    }
+    _emit();
+  }
+
+  void _removeRow(int r) {
+    if (_rows <= 1) return;
+    _commitCell();
+    _cells.removeAt(r);
+    _emit();
+  }
+
+  void _removeCol(int c) {
+    if (_cols <= 1) return;
+    _commitCell();
+    for (final row in _cells) {
+      row.removeAt(c);
+    }
+    _emit();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textStyle = Theme.of(context).textTheme.bodyMedium;
+    final borderColor = scheme.outlineVariant.withValues(alpha: 0.6);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: borderColor),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var r = 0; r < _rows; r++)
+                  _buildRow(r, scheme, textStyle, borderColor),
+              ],
+            ),
+          ),
+        ),
+        // 底部操作条:加行/加列(常显小按钮;删除挂在行列 hover 上)
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Row(children: [
+            _MiniAction(icon: Icons.add, label: '行', onTap: _addRow),
+            const SizedBox(width: 8),
+            _MiniAction(icon: Icons.add, label: '列', onTap: _addCol),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRow(
+    int r,
+    ColorScheme scheme,
+    TextStyle? textStyle,
+    Color borderColor,
+  ) {
+    final isHeader = _hasHeader && r == 0;
+    return _HoverRow(
+      trailing: _rows > 1
+          ? _MiniAction(
+              icon: Icons.remove,
+              tooltip: '删除此行',
+              onTap: () => _removeRow(r),
+            )
+          : null,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isHeader
+              ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
+              : null,
+          border: r > 0
+              ? Border(top: BorderSide(color: borderColor))
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var c = 0; c < _cols; c++)
+              Container(
+                decoration: c > 0
+                    ? BoxDecoration(
+                        border:
+                            Border(left: BorderSide(color: borderColor)),
+                      )
+                    : null,
+                child: _buildCell(r, c, isHeader, textStyle, scheme),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCell(
+    int r,
+    int c,
+    bool isHeader,
+    TextStyle? textStyle,
+    ColorScheme scheme,
+  ) {
+    final style = (textStyle ?? const TextStyle()).copyWith(
+      fontSize: 13,
+      fontWeight: isHeader ? FontWeight.w600 : FontWeight.w400,
+    );
+    const cellWidth = 132.0;
+
+    if (_editing == (r, c)) {
+      return SizedBox(
+        width: cellWidth,
+        child: TextField(
+          controller: _cellController,
+          focusNode: _cellFocus,
+          style: style,
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            border: InputBorder.none,
+            filled: true,
+            fillColor: scheme.primary.withValues(alpha: 0.06),
+          ),
+          onSubmitted: (_) => _commitCell(),
+        ),
+      );
+    }
+
+    final text = _cells[r][c];
+    Widget cell = InkWell(
+      onTap: () => _startEdit(r, c),
+      child: Container(
+        width: cellWidth,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+        child: Text(
+          text.isEmpty ? ' ' : text,
+          style: text.isEmpty
+              ? style.copyWith(
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.4))
+              : style,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+    // 首行 cell hover:右上角显删列按钮
+    if (r == 0 && _cols > 1) {
+      cell = _HoverStackAction(
+        action: _MiniAction(
+          icon: Icons.remove,
+          tooltip: '删除此列',
+          onTap: () => _removeCol(c),
+        ),
+        child: cell,
+      );
+    }
+    return cell;
+  }
+}
+
+/// 行容器:hover 时行尾显操作按钮(删除行)。
+class _HoverRow extends StatefulWidget {
+  const _HoverRow({required this.child, this.trailing});
+
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  State<_HoverRow> createState() => _HoverRowState();
+}
+
+class _HoverRowState extends State<_HoverRow> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          widget.child,
+          if (widget.trailing != null)
+            Opacity(
+              opacity: _hover ? 1 : 0,
+              child: widget.trailing,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// cell hover 时右上角叠一个小操作(删列)。
+class _HoverStackAction extends StatefulWidget {
+  const _HoverStackAction({required this.child, required this.action});
+
+  final Widget child;
+  final Widget action;
+
+  @override
+  State<_HoverStackAction> createState() => _HoverStackActionState();
+}
+
+class _HoverStackActionState extends State<_HoverStackAction> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          widget.child,
+          if (_hover)
+            Positioned(top: -2, right: -2, child: widget.action),
+        ],
+      ),
+    );
+  }
+}
+
+/// 小操作按钮(加行/加列/删除)。
+class _MiniAction extends StatelessWidget {
+  const _MiniAction({
+    required this.icon,
+    this.label,
+    this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String? label;
+  final String? tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    Widget child = InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: scheme.onSurfaceVariant),
+            if (label != null) ...[
+              const SizedBox(width: 2),
+              Text(label!,
+                  style: TextStyle(
+                      fontSize: 11, color: scheme.onSurfaceVariant)),
+            ],
+          ],
+        ),
+      ),
+    );
+    if (tooltip != null) {
+      child = Tooltip(message: tooltip!, child: child);
+    }
+    return Material(type: MaterialType.transparency, child: child);
+  }
+}

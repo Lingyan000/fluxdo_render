@@ -20,10 +20,15 @@ class EditorContainerShell extends StatelessWidget {
     super.key,
     required this.frame,
     required this.children,
+    this.onTitleTap,
   });
 
   final ContainerFrame frame;
   final List<Widget> children;
+
+  /// 点壳标题行(details summary / callout 标题)→ 宿主弹原位编辑。
+  /// null = 标题不可改(quote 的 username 行是引用元数据,不开放)。
+  final VoidCallback? onTitleTap;
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +129,7 @@ class EditorContainerShell extends StatelessWidget {
         );
 
       case DetailsFrame(:final summary):
-        // 编辑态 details:边框 + summary 标题行(恒展开)
+        // 编辑态 details:边框 + summary 标题行(恒展开;点标题改文案)
         return DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(6),
@@ -135,23 +140,31 @@ class EditorContainerShell extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.arrow_drop_down,
-                        size: 18, color: scheme.onSurfaceVariant),
-                    Expanded(
-                      child: Text(
-                        summary.isEmpty ? '详情' : summary,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onSurfaceVariant,
+                _TitleRow(
+                  onTap: onTitleTap,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.arrow_drop_down,
+                          size: 18, color: scheme.onSurfaceVariant),
+                      Expanded(
+                        child: Text(
+                          summary.isEmpty ? '详情' : summary,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ],
+                      if (onTitleTap != null)
+                        Icon(Icons.edit_outlined,
+                            size: 13,
+                            color: scheme.onSurfaceVariant
+                                .withValues(alpha: 0.6)),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 2),
                 column,
@@ -185,23 +198,30 @@ class EditorContainerShell extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(calloutIcon, size: 16, color: calloutColor),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        displayTitle,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: calloutColor,
+                _TitleRow(
+                  onTap: onTitleTap,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(calloutIcon, size: 16, color: calloutColor),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          displayTitle,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: calloutColor,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ],
+                      if (onTitleTap != null)
+                        Icon(Icons.edit_outlined,
+                            size: 13,
+                            color: calloutColor.withValues(alpha: 0.6)),
+                    ],
+                  ),
                 ),
                 column,
               ],
@@ -229,4 +249,28 @@ class EditorContainerShell extends StatelessWidget {
         CalloutKind.quote => (Colors.grey, Icons.format_quote_rounded),
         CalloutKind.unknown => (Colors.grey, Icons.format_quote_rounded),
       };
+}
+
+/// 壳标题行:可点(改标题)时加 InkWell 反馈;不可点原样。
+class _TitleRow extends StatelessWidget {
+  const _TitleRow({required this.onTap, required this.child});
+
+  final VoidCallback? onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (onTap == null) return child;
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: child,
+        ),
+      ),
+    );
+  }
 }

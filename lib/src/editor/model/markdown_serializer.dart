@@ -316,6 +316,7 @@ String _inlineToMarkdown(EditableTextContent content) {
       buf.write(switch (atom) {
         EmojiRun(:final name) => name.isEmpty ? '' : ':$name:',
         MentionRun(:final username) => '@$username',
+        final LocalDateRun d => _serializeLocalDate(d),
         _ => '',
       });
     } else if (ch == '\n') {

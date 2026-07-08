@@ -1074,6 +1074,29 @@ class EditorState extends ChangeNotifier {
     );
   }
 
+  /// 全文档替换 [groupId] 容器帧为 [newFrame](壳标题原位编辑:改
+  /// details summary / callout title)。newFrame 沿用同 groupId ——
+  /// 分组身份不变,壳 Element 复用,只有属性变。undo 一步。
+  void updateContainerFrame(String groupId, ContainerFrame newFrame) {
+    assert(newFrame.groupId == groupId, '保持 groupId 才能不破坏分组');
+    sealHistory();
+    final newBlocks = <EditorBlock>[..._blocks];
+    var changed = false;
+    for (var i = 0; i < newBlocks.length; i++) {
+      final b = newBlocks[i];
+      if (b is! TextBlock) continue;
+      final idx = b.containers.indexWhere((f) => f.groupId == groupId);
+      if (idx < 0) continue;
+      final next = [...b.containers];
+      next[idx] = newFrame;
+      newBlocks[i] = b.copyWith(containers: next);
+      changed = true;
+    }
+    if (!changed) return;
+    _commit(newBlocks, _selection, groupWithPrevious: false);
+    sealHistory();
+  }
+
   // -----------------------------------------------------------------
   // 剪贴板(复制/剪切/粘贴)
   // -----------------------------------------------------------------

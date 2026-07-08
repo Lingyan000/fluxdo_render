@@ -12,7 +12,7 @@
 /// 经 projection 转渲染坐标后,在 RenderParagraph 的 selection boxes 底边画线。
 library;
 
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -21,6 +21,7 @@ import '../../render/block_text_styles.dart';
 import '../../render/list_item_layout.dart';
 import '../../render/selectable_text_box.dart';
 import '../../selection/projection.dart';
+import '../model/editable_text_content.dart' show MarkKind;
 import '../model/editor_state.dart';
 
 class EditableParagraph extends StatefulWidget {
@@ -176,6 +177,26 @@ class _EditableParagraphState extends State<EditableParagraph> {
       );
     }
 
+    // 行内剧透编辑态标识:底纹 + 虚线框(阅读端是粒子遮罩;编辑态要
+    // "看得出是剧透"而非"遮住"——对齐官方 blurred decoration 意图)。
+    final spoilerSpans = [
+      for (final m in block.content.marks)
+        if (m.kind == MarkKind.spoilerInline) TextRange(start: m.start, end: m.end),
+    ];
+    if (spoilerSpans.isNotEmpty) {
+      final scheme = Theme.of(context).colorScheme;
+      text = CustomPaint(
+        painter: _SpoilerDecorPainter(
+          paragraphGetter: _findParagraph,
+          projectionGetter: () => _result?.projection,
+          ranges: spoilerSpans,
+          fillColor: scheme.onSurface.withValues(alpha: 0.08),
+          borderColor: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+        ),
+        child: text,
+      );
+    }
+
     Widget boxed = SelectableTextBox(
       projectionGetter: () => _ensureResult().projection,
       documentOrder: widget.documentOrder,
@@ -276,4 +297,78 @@ class _ComposingUnderlinePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _ComposingUnderlinePainter oldDelegate) =>
       oldDelegate.composing != composing || oldDelegate.color != color;
+}
+
+/// 行内剧透编辑态装饰:每个 spoiler mark 区间画圆角底纹 + 虚线边框
+/// (背景层 painter —— 画在文字下面)。
+class _SpoilerDecorPainter extends CustomPainter {
+  _SpoilerDecorPainter({
+    required this.paragraphGetter,
+    required this.projectionGetter,
+    required this.ranges,
+    required this.fillColor,
+    required this.borderColor,
+  });
+
+  final RenderParagraph? Function() paragraphGetter;
+  final RenderTextProjection? Function() projectionGetter;
+
+  /// 编辑文本坐标区间集。
+  final List<TextRange> ranges;
+
+  final Color fillColor;
+  final Color borderColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = paragraphGetter();
+    final proj = projectionGetter();
+    if (p == null || proj == null || !p.attached || !p.hasSize) return;
+
+    final fill = Paint()..color = fillColor;
+    final border = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+
+    for (final r in ranges) {
+      final rs = proj.renderOffsetForContent(r.start);
+      final re = proj.renderOffsetForContent(r.end);
+      if (rs >= re) continue;
+      final boxes = p.getBoxesForSelection(
+        TextSelection(baseOffset: rs, extentOffset: re),
+      );
+      for (final box in boxes) {
+        final rect = RRect.fromLTRBR(
+          box.left - 1,
+          box.top,
+          box.right + 1,
+          box.bottom,
+          const Radius.circular(3),
+        );
+        canvas.drawRRect(rect, fill);
+        _drawDashedRRect(canvas, rect, border);
+      }
+    }
+  }
+
+  /// 简易虚线圆角框:上下边画 dash(左右短边省略 —— 视觉足够)。
+  void _drawDashedRRect(Canvas canvas, RRect rect, Paint paint) {
+    const dash = 4.0;
+    const gap = 3.0;
+    for (final y in [rect.top + 0.5, rect.bottom - 0.5]) {
+      var x = rect.left + 2;
+      while (x < rect.right - 2) {
+        final end = (x + dash).clamp(0, rect.right - 2).toDouble();
+        canvas.drawLine(Offset(x, y), Offset(end, y), paint);
+        x += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpoilerDecorPainter oldDelegate) =>
+      !listEquals(oldDelegate.ranges, ranges) ||
+      oldDelegate.fillColor != fillColor ||
+      oldDelegate.borderColor != borderColor;
 }

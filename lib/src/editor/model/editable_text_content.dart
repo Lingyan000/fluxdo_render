@@ -216,13 +216,16 @@ class EditableTextContent {
         case MentionRun():
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
+        case LocalDateRun():
+          // 时间 chip:行内原子(M5;序列化写回 [date=…])
+          atoms[buf.length] = node;
+          _appendText(buf, marks, activeKinds, kAtomChar);
         // ---- 白名单外(防御降级,正常链路由 doc_converter 拦截岛化) ----
         case ImageRun(:final alt):
           _appendText(buf, marks, activeKinds, sanitizeText(alt));
         case ColoredRun(:final children):
           _flattenInto(children, buf, marks, atoms, activeKinds);
         case FootnoteRefRun():
-        case LocalDateRun():
         case ClickCountRun():
         case MathInlineRun():
           break;
@@ -374,17 +377,13 @@ class EditableTextContent {
       }
     }
     if (forEditing) {
-      // 编辑态视觉替代:字色/底纹经 ColoredRun(纯 TextSpan,投影
-      // 透明,选区/光标/IME 全不受扰)。
+      // 编辑态视觉替代:link 字色经 ColoredRun(纯 TextSpan,投影透明,
+      // 选区/光标/IME 全不受扰)。spoiler 的底纹+虚线框由
+      // EditableParagraph._SpoilerDecorPainter 按 mark 区间自绘
+      // (这里不加底纹 —— painter 的圆角框视觉更完整)。
       if (kinds.contains(MarkKind.link)) {
         node = ColoredRun(
           color: editingLinkColor ?? const Color(0xFF1F7AED),
-          children: [node],
-        );
-      }
-      if (kinds.contains(MarkKind.spoilerInline)) {
-        node = ColoredRun(
-          background: const Color(0x24888888),
           children: [node],
         );
       }

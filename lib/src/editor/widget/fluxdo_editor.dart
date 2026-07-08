@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../node/node.dart' show TableNode;
 import '../../render/block_text_styles.dart';
 import '../../render/node_factory.dart';
 import '../../selection/hit_tester.dart';
@@ -27,6 +28,7 @@ import 'editable_paragraph.dart';
 import 'editor_caret.dart';
 import 'editor_container_shell.dart';
 import 'editor_island.dart';
+import 'editor_table_grid.dart';
 
 class FluxdoEditor extends StatefulWidget {
   const FluxdoEditor({
@@ -37,6 +39,8 @@ class FluxdoEditor extends StatefulWidget {
     this.nodeFactory,
     this.markdownImporter,
     this.onIslandEditRequest,
+    this.onContainerTitleEdit,
+    this.onTableEdited,
   });
 
   final EditorState state;
@@ -60,6 +64,14 @@ class FluxdoEditor extends StatefulWidget {
   /// 双击岛 → 请求编辑(宿主弹源码对话框,改完调 state.replaceIsland)。
   /// null = 岛只读不可编辑。
   final void Function(IslandBlock island)? onIslandEditRequest;
+
+  /// 点容器壳标题(details summary / callout 标题)→ 请求改标题
+  /// (宿主弹输入框,改完调 state.updateContainerFrame)。null = 不可改。
+  final void Function(ContainerFrame frame)? onContainerTitleEdit;
+
+  /// 表格 cell 编辑确认 → 新 markdown 表格文本(宿主 cook 后
+  /// state.replaceIsland)。null = 表格走通用只读岛。
+  final void Function(IslandBlock island, String markdown)? onTableEdited;
 
   @override
   State<FluxdoEditor> createState() => _FluxdoEditorState();
@@ -509,6 +521,22 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     /// 深层 InheritedElement dependents 清理时序炸 _dependents 断言,
     /// 红屏)。全 keyed 后 diff 恒按身份匹配,块只随真实删除而摘除。
     Widget buildBlock(int i) {
+      final block = state.blocks[i];
+      // 表格岛 + 宿主接了 onTableEdited:cell 级原位编辑网格
+      // (不走 EditorIsland 的 AbsorbPointer 只读壳)
+      if (block is IslandBlock &&
+          block.node is TableNode &&
+          widget.onTableEdited != null) {
+        return Padding(
+          key: ValueKey('blk_${block.id}'),
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: EditorTableGrid(
+            key: ValueKey('table_${block.id}'),
+            node: block.node as TableNode,
+            onChanged: (md) => widget.onTableEdited!(block, md),
+          ),
+        );
+      }
       return Padding(
         key: ValueKey('blk_${state.blocks[i].id}'),
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -576,6 +604,10 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: EditorContainerShell(
               frame: frame,
+              onTitleTap: widget.onContainerTitleEdit != null &&
+                      (frame is DetailsFrame || frame is CalloutFrame)
+                  ? () => widget.onContainerTitleEdit!(frame)
+                  : null,
               children: buildLevel(runStart, i, level + 1),
             ),
           ));

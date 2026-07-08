@@ -72,7 +72,7 @@ void main() {
       expect(editing.whereType<EmojiRun>().length, 1);
     });
 
-    test('编辑态渲染:link=着色下划线纯文本,spoiler=底纹', () {
+    test('编辑态渲染:link=着色纯文本;spoiler 交给 painter(不包壳)', () {
       final c = EditableTextContent.fromInlines(const [
         LinkRun(href: 'https://x.com', children: [TextRun('链')]),
         SpoilerRun(children: [TextRun('密')]),
@@ -80,7 +80,9 @@ void main() {
       final editing = c.toInlines(forEditing: true);
       expect(editing.whereType<LinkRun>(), isEmpty);
       expect(editing.whereType<SpoilerRun>(), isEmpty);
-      expect(editing.whereType<ColoredRun>().length, 2);
+      // link → ColoredRun;spoiler 底纹由 _SpoilerDecorPainter 按 mark
+      // 区间自绘,文本层不再包 ColoredRun
+      expect(editing.whereType<ColoredRun>().length, 1);
     });
   });
 

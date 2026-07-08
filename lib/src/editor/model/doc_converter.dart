@@ -31,6 +31,9 @@ import 'editor_block.dart';
 /// `[text](href)`,mark 化会毁写法,保持岛化。
 bool isEditableInline(InlineNode n) => switch (n) {
       TextRun() || LineBreakRun() || EmojiRun() || MentionRun() => true,
+      // local date chip:行内原子(emoji/mention 同机制),编辑态显示
+      // 服务端预渲染文本,序列化写回 [date=…] BBCode
+      LocalDateRun() => true,
       EmRun(:final children) => children.every(isEditableInline),
       StrongRun(:final children) => children.every(isEditableInline),
       InlineCodeRun() => true,
