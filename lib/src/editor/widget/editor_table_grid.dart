@@ -227,6 +227,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
     Offset globalPos,
     List<(IconData, String, String)> items,
   ) {
+    final scheme = Theme.of(context).colorScheme;
     return showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -235,14 +236,23 @@ class _EditorTableGridState extends State<EditorTableGrid> {
         globalPos.dx + 1,
         globalPos.dy + 1,
       ),
+      // 编辑器浮层统一规格:圆角 12 + 细边框 + 浮层底(composer 的
+      // 斜杠/插入菜单同款)
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      color: scheme.surfaceContainerLow,
       items: [
         for (final (icon, label, value) in items)
           PopupMenuItem<String>(
             value: value,
-            height: 36,
+            height: 38,
             child: Row(children: [
-              Icon(icon, size: 16),
-              const SizedBox(width: 8),
+              Icon(icon, size: 15, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 10),
               Text(label, style: const TextStyle(fontSize: 13)),
             ]),
           ),
