@@ -117,54 +117,57 @@ class _EditorIslandState extends State<EditorIsland> {
       );
     } else {
       // 可缩放图片岛:结构两态恒定
-      //   Align > DecoratedBox > Padding > Stack > [inner, 胶囊?]
-      // - Align 恒挂 loosen 编辑器 stretch 的 tight 全宽 → DecoratedBox/
-      //   Stack 恒 hug 图片。此前只有选中态套 Stack 间接 loosen:选中
-      //   切换 = 结构互换 → 图片子树 Element 重建闪一帧占位;且
-      //   Positioned 相对**全宽** Stack,胶囊飘到屏幕右缘(离图十万
-      //   八千里)。
-      // - 胶囊做 Stack 尾随条件子:选中切换只增删尾项,inner(index 0)
-      //   恒复用不闪;Positioned 相对 hug 的 Stack → 贴图片右上角。
+      //   Align > Stack > [DecoratedBox(inner), 撑宽条?, 胶囊?]
+      // - Align 恒挂 loosen 编辑器 stretch 的 tight 全宽 → Stack hug
+      //   图片。此前只有选中态套 Stack:选中切换 = 结构互换 → 图片子树
+      //   Element 重建闪一帧;且 Positioned 相对全宽层,胶囊飘到屏幕
+      //   右缘。现在描边直接包图(恒挂),胶囊做尾随条件子。
+      // - 小图(sticker 30% 后常见 <230px):胶囊叠图上会整个盖住图,
+      //   改挂图片**右侧外缘**。Stack 的 Clip.none 只管绘制溢出,
+      //   hit test 不认 —— 溢出的胶囊点不到;用透明 SizedBox 把 Stack
+      //   命中区撑宽到含胶囊(窄图不吃列宽,右侧必有富余)。
+      final w = scalable.width;
+      final narrow = w != null && w < 230;
       content = Align(
         alignment: AlignmentDirectional.topStart,
-        child: DecoratedBox(
-          decoration: decoration,
-          child: Padding(
-            padding: const EdgeInsets.all(2),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                inner,
-                if (widget.selected)
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    // MetaData 自管区标记:编辑器根的 onTapDown 是
-                    // **down 即触发**,不标记的话 pointer-down 瞬间
-                    // 编辑器落光标 → 整选态被清 → selected=false →
-                    // 胶囊当帧卸载,up 时 InkWell 已不在树 → onTap
-                    // 永远不触发(表现:一点胶囊就消失)。标记后编辑器
-                    // 让路(表格同机制),选区不动,点击完整走完。
-                    child: MetaData(
-                      metaData: kEditorSelfManagedRegion,
-                      behavior: HitTestBehavior.opaque,
-                      // 同时吞 tap/double-tap:不进外层 onDoubleTap 的
-                      // 竞技场(否则单击等 ~300ms 双击窗口,连点还会
-                      // 赢成「双击」弹源码对话框)。
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {},
-                        onDoubleTap: () {},
-                        child: EditorImageScaleBar(
-                          current: scalable.scale!.round(),
-                          onSelect: (s) => widget.onImageScale!(scalable, s),
-                        ),
-                      ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            DecoratedBox(
+              decoration: decoration,
+              child: Padding(padding: const EdgeInsets.all(2), child: inner),
+            ),
+            // 撑宽命中区(窄图 + 选中才需要;透明零绘制)
+            if (widget.selected && narrow)
+              SizedBox(width: w + 8 + 170, height: 1),
+            if (widget.selected)
+              Positioned(
+                top: 6,
+                left: narrow ? w + 12 : null,
+                right: narrow ? null : 6,
+                // MetaData 自管区标记:编辑器根的 onTapDown 是
+                // **down 即触发**,不标记的话 pointer-down 瞬间编辑器
+                // 落光标 → 整选被清 → selected=false → 胶囊当帧卸载,
+                // up 时 onTap 已丢(表现:一点胶囊就消失)。标记后
+                // 编辑器让路(表格同机制),选区不动。
+                child: MetaData(
+                  metaData: kEditorSelfManagedRegion,
+                  behavior: HitTestBehavior.opaque,
+                  // 同时吞 tap/double-tap:不进外层 onDoubleTap 的
+                  // 竞技场(否则单击等 ~300ms 双击窗口,连点还会赢成
+                  // 「双击」弹源码对话框)。
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {},
+                    onDoubleTap: () {},
+                    child: EditorImageScaleBar(
+                      current: scalable.scale!.round(),
+                      onSelect: (s) => widget.onImageScale!(scalable, s),
                     ),
                   ),
-              ],
-            ),
-          ),
+                ),
+              ),
+          ],
         ),
       );
     }

@@ -140,7 +140,7 @@ void main() {
     return state;
   }
 
-  testWidgets('缩放胶囊贴图片右上角(不飘到编辑器右缘)', (tester) async {
+  testWidgets('缩放胶囊贴图片(窄图挂右侧外缘,不飘编辑器右缘)', (tester) async {
     await pumpImageEditor(tester);
     await tester.tap(find.byType(EditorIsland));
     await tester.pump();
@@ -149,11 +149,13 @@ void main() {
     expect(bar, findsOneWidget);
     final barRect = tester.getRect(bar);
     final islandRect = tester.getRect(find.byType(EditorIsland));
-    // 岛(GestureDetector 层)被编辑器拉满列宽;胶囊必须贴内容
-    // (图 120 宽 + 描边/padding ≈ 128),而不是岛的右缘
-    expect(barRect.right, lessThan(islandRect.left + 200),
-        reason: '胶囊 right=${barRect.right} 应贴 120px 宽的图,'
+    // 窄图(120px):胶囊挂图片右侧外缘 —— 左缘紧贴图右缘(图 120 +
+    // 间距/描边 ≈ 130-150 区间),而不是飘到岛(全列宽)的右缘
+    expect(barRect.left - islandRect.left, inInclusiveRange(110, 180),
+        reason: '胶囊 left=${barRect.left} 应贴 120px 宽的图右缘,'
             '而不是飘向岛右缘 ${islandRect.right}');
+    expect(barRect.right, lessThan(islandRect.right - 100),
+        reason: '不应贴编辑器列右缘');
   });
 
   testWidgets('选中/取消选中:图片子树 Element 不重建(不闪)', (tester) async {
