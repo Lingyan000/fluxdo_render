@@ -84,49 +84,78 @@ class _EditorIslandState extends State<EditorIsland> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    Widget content = SelectionScope(
+    final scalable = widget.onImageScale == null
+        ? null
+        : EditorIsland.scalableImageOf(widget.node);
+
+    final Widget inner = SelectionScope(
       controller: _inertController,
       child: AbsorbPointer(
         child: widget.nodeFactory.build(context, widget.node),
       ),
     );
 
-    content = DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: widget.selected ? scheme.primary : Colors.transparent,
-          width: 2,
-        ),
-        color: widget.selected
-            ? scheme.primary.withValues(alpha: 0.08)
-            : Colors.transparent,
+    final decoration = BoxDecoration(
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(
+        color: widget.selected ? scheme.primary : Colors.transparent,
+        width: 2,
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(2),
-        child: content,
-      ),
+      color: widget.selected
+          ? scheme.primary.withValues(alpha: 0.08)
+          : Colors.transparent,
     );
 
-    final scalable = widget.onImageScale == null
-        ? null
-        : EditorIsland.scalableImageOf(widget.node);
-    if (scalable != null && widget.selected) {
-      // 选中态浮出缩放胶囊(右上角内缘)。控件在 AbsorbPointer 之外,
-      // 可正常点击;GestureDetector 在最外层,胶囊命中先于整选。
-      content = Stack(
-        clipBehavior: Clip.none,
-        children: [
-          content,
-          Positioned(
-            top: 8,
-            right: 8,
-            child: EditorImageScaleBar(
-              current: scalable.scale!.round(),
-              onSelect: (s) => widget.onImageScale!(scalable, s),
+    final Widget content;
+    if (scalable == null) {
+      // 普通岛:原结构(全宽卡片类 onebox/视频等依赖编辑器 stretch 的
+      // tight 宽,不动)。两态结构恒定,无重建。
+      content = DecoratedBox(
+        decoration: decoration,
+        child: Padding(padding: const EdgeInsets.all(2), child: inner),
+      );
+    } else {
+      // 可缩放图片岛:结构两态恒定
+      //   Align > DecoratedBox > Padding > Stack > [inner, 胶囊?]
+      // - Align 恒挂 loosen 编辑器 stretch 的 tight 全宽 → DecoratedBox/
+      //   Stack 恒 hug 图片。此前只有选中态套 Stack 间接 loosen:选中
+      //   切换 = 结构互换 → 图片子树 Element 重建闪一帧占位;且
+      //   Positioned 相对**全宽** Stack,胶囊飘到屏幕右缘(离图十万
+      //   八千里)。
+      // - 胶囊做 Stack 尾随条件子:选中切换只增删尾项,inner(index 0)
+      //   恒复用不闪;Positioned 相对 hug 的 Stack → 贴图片右上角。
+      content = Align(
+        alignment: AlignmentDirectional.topStart,
+        child: DecoratedBox(
+          decoration: decoration,
+          child: Padding(
+            padding: const EdgeInsets.all(2),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                inner,
+                if (widget.selected)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    // 胶囊区自己吞掉 tap/double-tap:不进外层
+                    // GestureDetector 的竞技场 —— 否则外层 onDoubleTap
+                    // 在场,胶囊单击要等 ~300ms 双击窗口才 resolve
+                    // (手感迟滞),快速连点还会赢成「双击」弹源码对话框。
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {},
+                      onDoubleTap: () {},
+                      child: EditorImageScaleBar(
+                        current: scalable.scale!.round(),
+                        onSelect: (s) => widget.onImageScale!(scalable, s),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-        ],
+        ),
       );
     }
 
