@@ -15,5 +15,6 @@ export 'src/editor/model/editor_block.dart';
 export 'src/editor/model/editor_state.dart';
 export 'src/editor/model/markdown_serializer.dart';
 export 'src/editor/widget/editor_island.dart';
+export 'src/editor/widget/editor_code_block.dart';
 export 'src/editor/widget/editor_toolbar.dart';
 export 'src/editor/widget/fluxdo_editor.dart';

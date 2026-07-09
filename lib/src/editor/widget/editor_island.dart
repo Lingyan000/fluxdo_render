@@ -15,7 +15,6 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../../node/inline_node.dart';
 import '../../node/node.dart';
 import '../../render/node_factory.dart';
 import '../../selection/selection_registry.dart';

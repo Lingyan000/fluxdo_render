@@ -16,7 +16,7 @@ import 'package:flutter/rendering.dart' show BoxHitTestResult, RenderMetaData;
 import 'package:flutter/services.dart';
 
 import '../../node/node.dart'
-    show ImageRun, InlineNode, LocalDateRun, TableNode;
+    show CodeBlockNode, ImageRun, InlineNode, LocalDateRun, TableNode;
 import '../../render/block_text_styles.dart';
 import '../../render/node_factory.dart';
 import '../../selection/hit_tester.dart';
@@ -28,6 +28,7 @@ import '../input/editor_key_handler.dart';
 import '../model/editor_state.dart';
 import 'editable_paragraph.dart';
 import 'editor_caret.dart';
+import 'editor_code_block.dart';
 import 'editor_container_shell.dart';
 import 'editor_island.dart';
 import 'editor_table_grid.dart';
@@ -44,6 +45,7 @@ class FluxdoEditor extends StatefulWidget {
     this.onImageScale,
     this.onContainerTitleEdit,
     this.onTableEdited,
+    this.onCodeBlockEdited,
     this.onAtomTap,
     this.onCaretRectChanged,
     this.keyEventInterceptor,
@@ -83,6 +85,12 @@ class FluxdoEditor extends StatefulWidget {
   /// 表格 cell 编辑确认 → 新 markdown 表格文本(宿主 cook 后
   /// state.replaceIsland)。null = 表格走通用只读岛。
   final void Function(IslandBlock island, String markdown)? onTableEdited;
+
+  /// 代码块岛内编辑提交 → 新 code/language(宿主直接
+  /// state.updateIslandNode(CodeBlockNode(...)),结构化形变不经 cook)。
+  /// null = 代码块走通用只读岛(双击源码编辑)。
+  final void Function(IslandBlock island, String code, String? language)?
+      onCodeBlockEdited;
 
   /// 单击可编辑原子(date chip)→ 请求编辑(宿主弹属性对话框,确认后
   /// state.replaceAtomAt)。null = 原子只读。
@@ -642,6 +650,35 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
             selected: _isIslandSelected(block.id),
             // 左上角选择柄:整选表格块(选中后退格/Delete 删整表)。
             // cell 区自管让路后,这是表格作为"块"的唯一选择入口。
+            onSelectRequest: () {
+              _focusNode.requestFocus();
+              widget.state.sealHistory();
+              widget.state.updateSelection(EditorSelection(
+                base: EditorPosition(blockId: block.id, offset: 0),
+                extent: EditorPosition(blockId: block.id, offset: 1),
+              ));
+              _ime.syncFromState(show: false);
+            },
+          ),
+        );
+      }
+      // 代码块岛 + 宿主接了 onCodeBlockEdited:岛内原位编辑
+      // (mermaid 除外 —— 图表块有自己的整块 override 视觉,原位编辑的
+      // 展示态会与图表壳冲突,仍走通用岛 + 双击源码)
+      if (block is IslandBlock &&
+          block.node is CodeBlockNode &&
+          (block.node as CodeBlockNode).language != 'mermaid' &&
+          widget.onCodeBlockEdited != null) {
+        return Padding(
+          key: ValueKey('blk_${block.id}'),
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: EditorCodeBlock(
+            key: ValueKey('code_${block.id}'),
+            node: block.node as CodeBlockNode,
+            onChanged: (code, lang) =>
+                widget.onCodeBlockEdited!(block, code, lang),
+            selected: _isIslandSelected(block.id),
+            highlightBuilder: _islandFactory.codeBlockHighlighter,
             onSelectRequest: () {
               _focusNode.requestFocus();
               widget.state.sealHistory();
