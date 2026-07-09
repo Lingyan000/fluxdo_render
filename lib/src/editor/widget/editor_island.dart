@@ -19,6 +19,7 @@ import '../../node/node.dart';
 import '../../render/node_factory.dart';
 import '../../selection/selection_registry.dart';
 import '../../selection/selection_scope.dart';
+import 'editor_table_grid.dart' show kEditorSelfManagedRegion;
 
 /// 官方 SCALES 同款档位。
 const kEditorImageScales = [100, 75, 50];
@@ -138,17 +139,26 @@ class _EditorIslandState extends State<EditorIsland> {
                   Positioned(
                     top: 6,
                     right: 6,
-                    // 胶囊区自己吞掉 tap/double-tap:不进外层
-                    // GestureDetector 的竞技场 —— 否则外层 onDoubleTap
-                    // 在场,胶囊单击要等 ~300ms 双击窗口才 resolve
-                    // (手感迟滞),快速连点还会赢成「双击」弹源码对话框。
-                    child: GestureDetector(
+                    // MetaData 自管区标记:编辑器根的 onTapDown 是
+                    // **down 即触发**,不标记的话 pointer-down 瞬间
+                    // 编辑器落光标 → 整选态被清 → selected=false →
+                    // 胶囊当帧卸载,up 时 InkWell 已不在树 → onTap
+                    // 永远不触发(表现:一点胶囊就消失)。标记后编辑器
+                    // 让路(表格同机制),选区不动,点击完整走完。
+                    child: MetaData(
+                      metaData: kEditorSelfManagedRegion,
                       behavior: HitTestBehavior.opaque,
-                      onTap: () {},
-                      onDoubleTap: () {},
-                      child: EditorImageScaleBar(
-                        current: scalable.scale!.round(),
-                        onSelect: (s) => widget.onImageScale!(scalable, s),
+                      // 同时吞 tap/double-tap:不进外层 onDoubleTap 的
+                      // 竞技场(否则单击等 ~300ms 双击窗口,连点还会
+                      // 赢成「双击」弹源码对话框)。
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {},
+                        onDoubleTap: () {},
+                        child: EditorImageScaleBar(
+                          current: scalable.scale!.round(),
+                          onSelect: (s) => widget.onImageScale!(scalable, s),
+                        ),
                       ),
                     ),
                   ),
@@ -230,22 +240,29 @@ class _ScalePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: active ? scheme.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            height: 1.2,
-            fontWeight: FontWeight.w500,
-            color: active ? scheme.onPrimary : scheme.onSurfaceVariant,
+    // Listener 原始指针事件,不进手势竞技场:命中路径上编辑器根/岛都有
+    // tap/double-tap recognizer,InkWell.onTap 要等竞技场 resolve(双击
+    // 窗口 ~300ms),期间任何选中态变化把胶囊卸载 = tap 直接丢。
+    // 原始 down 即触发,零等待零依赖。InkWell 仅留视觉水波。
+    return Listener(
+      onPointerDown: onTap == null ? null : (_) => onTap!(),
+      child: InkWell(
+        onTap: onTap == null ? null : () {},
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: active ? scheme.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.2,
+              fontWeight: FontWeight.w500,
+              color: active ? scheme.onPrimary : scheme.onSurfaceVariant,
+            ),
           ),
         ),
       ),

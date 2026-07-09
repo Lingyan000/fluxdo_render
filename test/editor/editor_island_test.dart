@@ -176,4 +176,62 @@ void main() {
     expect(find.byType(EditorImageScaleBar), findsNothing);
     expect(identical(imageElement(), before), isTrue);
   });
+
+  testWidgets('点胶囊:选区不被编辑器清掉(down 不落光标),切档回调触发',
+      (tester) async {
+    // 复刻真实接线:onImageScale 改 scale 后 updateIslandNode
+    final state = makeImageDoc();
+    addTearDown(state.dispose);
+    var scaled = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: FluxdoEditor(
+              state: state,
+              autofocus: true,
+              onImageScale: (island, image, scale) {
+                scaled = scale;
+                final para = island.node as ParagraphNode;
+                state.updateIslandNode(
+                  island.id,
+                  para.copyWith(inlines: [
+                    (para.inlines.single as ImageRun)
+                        .copyWith(scale: scale.toDouble()),
+                  ]),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 整选出胶囊
+    await tester.tap(find.byType(EditorIsland));
+    await tester.pump();
+    expect(find.byType(EditorImageScaleBar), findsOneWidget);
+    final sel = state.selection!;
+    expect(sel.base.blockId, 'e_img');
+
+    // 点 75% 档。核心回归:pointer-down 瞬间编辑器若不让路会先清
+    // 整选 → 胶囊当帧卸载 → up 时 onTap 丢失(点一下就消失,档没切)。
+    await tester.tap(find.text('75%'));
+    await tester.pump();
+
+    expect(scaled, 75, reason: '切档回调必须触发');
+    expect(state.selection!.base.blockId, 'e_img',
+        reason: '整选保持,胶囊不消失');
+    expect(find.byType(EditorImageScaleBar), findsOneWidget);
+    // 新档位生效(75% 变 active,不可再点)
+    expect(
+        ((state.blocks[1] as IslandBlock).node as ParagraphNode)
+            .inlines
+            .single,
+        isA<ImageRun>().having((i) => i.scale, 'scale', 75));
+    // 排空双击窗口 timer(岛 onDoubleTap recognizer)
+    await tester.pump(const Duration(seconds: 1));
+  });
 }
