@@ -53,6 +53,7 @@ class NodeFactory {
     this.mentionTapHandler,
     this.imageContentBuilder,
     this.codeBlockHighlighter,
+    this.codeBlockBuilder,
     this.quoteAvatarBuilder,
     this.oneboxBuilder,
     this.imageGridBuilder,
@@ -127,6 +128,10 @@ class NodeFactory {
   /// 代码块高亮 builder,主项目注入(主项目用 HighlighterService + Mermaid)。
   /// 不传时用 [defaultCodeBlockHighlighter](纯 monospace 无高亮)。
   final CodeBlockHighlighter? codeBlockHighlighter;
+
+  /// 代码块整块 override,主项目注入(mermaid 等语言整块换成图表容器)。
+  /// 返回 null / 不传时走默认代码块外壳 + [codeBlockHighlighter]。
+  final CodeBlockBuilder? codeBlockBuilder;
 
   /// 引用卡头像 builder,主项目注入(主项目用 SmartAvatar 走鉴权 +
   /// CDN 重写)。不传时用 [defaultQuoteAvatarBuilder](首字母 chip)。
@@ -225,6 +230,7 @@ class NodeFactory {
       mentionTapHandler: mentionTapHandler,
       imageContentBuilder: imageContentBuilder,
       codeBlockHighlighter: codeBlockHighlighter,
+      codeBlockBuilder: codeBlockBuilder,
       quoteAvatarBuilder: quoteAvatarBuilder,
       oneboxBuilder: oneboxBuilder,
       imageGridBuilder: imageGridBuilder,
@@ -811,6 +817,10 @@ class NodeFactory {
   /// 高亮 / mermaid 由 [codeBlockHighlighter] callback 接管;不传时纯
   /// monospace 显示。
   Widget buildCodeBlock(BuildContext context, CodeBlockNode node) {
+    // 整块 override:主项目按 node.language 决定是否整块接管(如 mermaid
+    // 换成独立图表容器)。返回 null 走下面的默认代码块外壳。
+    final custom = codeBlockBuilder?.call(context, node);
+    if (custom != null) return custom;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final highlighter = codeBlockHighlighter ?? defaultCodeBlockHighlighter;

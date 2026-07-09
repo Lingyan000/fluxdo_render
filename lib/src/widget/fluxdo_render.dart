@@ -47,6 +47,7 @@ class FluxdoRender extends StatefulWidget {
     this.mentionTapHandler,
     this.imageContentBuilder,
     this.codeBlockHighlighter,
+    this.codeBlockBuilder,
     this.quoteAvatarBuilder,
     this.oneboxBuilder,
     this.imageGridBuilder,
@@ -114,6 +115,10 @@ class FluxdoRender extends StatefulWidget {
   /// 代码块高亮 builder —— 主项目注入,走 HighlighterService(highlight.js)
   /// + Mermaid 等。不传则纯 monospace。
   final CodeBlockHighlighter? codeBlockHighlighter;
+
+  /// 代码块整块 override —— 主项目注入(mermaid 等语言整块换成图表容器)。
+  /// 返回 null / 不传时走默认代码块外壳 + [codeBlockHighlighter]。
+  final CodeBlockBuilder? codeBlockBuilder;
 
   /// 引用卡头像 builder —— 主项目注入,走 SmartAvatar(鉴权 + CDN 重写)。
   /// 不传则首字母 chip。
@@ -332,6 +337,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
       !identical(old.mentionTapHandler, widget.mentionTapHandler) ||
       !identical(old.imageContentBuilder, widget.imageContentBuilder) ||
       !identical(old.codeBlockHighlighter, widget.codeBlockHighlighter) ||
+      !identical(old.codeBlockBuilder, widget.codeBlockBuilder) ||
       !identical(old.quoteAvatarBuilder, widget.quoteAvatarBuilder) ||
       !identical(old.oneboxBuilder, widget.oneboxBuilder) ||
       !identical(old.imageGridBuilder, widget.imageGridBuilder) ||
@@ -442,6 +448,7 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           mentionTapHandler: widget.mentionTapHandler,
           imageContentBuilder: widget.imageContentBuilder,
           codeBlockHighlighter: widget.codeBlockHighlighter,
+          codeBlockBuilder: widget.codeBlockBuilder,
           quoteAvatarBuilder: widget.quoteAvatarBuilder,
           oneboxBuilder: widget.oneboxBuilder,
           imageGridBuilder: widget.imageGridBuilder,
