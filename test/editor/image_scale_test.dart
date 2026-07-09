@@ -92,6 +92,32 @@ void main() {
     expect((img.origWidth! * 75 / 100).floor(), 517);
     expect((img.origHeight! * 75 / 100).floor(), 291);
   });
+
+  test('grid 预览形态:逐图提取 scale/index,序列化写回 [grid] 保缩放', () {
+    // cook `[grid]\n![a|690x388, 50%](upload://aaa)\n![b|100x200](upload://bbb)\n[/grid]`
+    // 的实测输出结构:div.d-image-grid > p > image-wrapper ×2,index 连续编号
+    final cooked = '<div class="d-image-grid" data-columns="2"><p>'
+        '${_previewImg(alt: 'a', w: 345, h: 194, active: '50', index: 0, orig: 'upload://aaa.jpeg')}'
+        '${_previewImg(alt: 'b', w: 100, h: 200, active: '100', index: 1, orig: 'upload://bbb.png')}'
+        '</p></div>';
+    final nodes = ParagraphParser().parse(cooked);
+    final grid = nodes.whereType<ImageGridNode>().single;
+    expect(grid.images, hasLength(2));
+    expect(grid.images[0].scale, 50);
+    expect(grid.images[0].previewImageIndex, 0);
+    expect(grid.images[0].origWidth, 690);
+    expect(grid.images[1].scale, 100);
+    expect(grid.images[1].previewImageIndex, 1);
+
+    // grid 在编辑器里是岛:serializeIslandNode 写回必须保缩放后缀
+    expect(
+      serializeIslandNode(grid),
+      '[grid]\n'
+      '![a|690x388, 50%](upload://aaa.jpeg)\n'
+      '![b|100x200](upload://bbb.png)\n'
+      '[/grid]',
+    );
+  });
 }
 
 String Function() _idGen() {
