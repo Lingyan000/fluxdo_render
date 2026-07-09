@@ -12,10 +12,119 @@
 /// 未加载/加载失败时退化为纯色静态遮罩。
 library;
 
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
+
+/// spoiler 动画 Ticker 的统一门控(块级 [_SpoilerBlockWidget] / 行内
+/// [_SpoilerInlineWidget] 共用,此前两处复制导致同款缺陷):
+///
+/// - ~30fps 节流:尘埃闪烁无需满帧率;
+/// - **屏幕可见性门控**(修复项):sliver 挂载(cacheExtent 预取区)≠ 可见。
+///   Ticker 常驻会让整个 app 永不进入空闲帧 —— Priority.idle 的 chunk
+///   预热被饿死、帧管线全速空转,视口外的遮罩还在每 33ms 烧一次 GPU
+///   (Impeller 无 raster cache,shader 全量重执行)。现在不可见即停表,
+///   降级为 500ms 低频探针待命(普通 Timer,不驱动帧调度),回到屏内
+///   自动复跑;粒子场取全局时钟,复跑不回卷。
+/// - reveal / reduce-motion 语义与原实现一致。
+mixin SpoilerTickerGate<T extends StatefulWidget>
+    on State<T>, SingleTickerProviderStateMixin<T> {
+  static const Duration _tickInterval = Duration(milliseconds: 33);
+  static const Duration _wakeProbeInterval = Duration(milliseconds: 500);
+
+  /// shader 时间源 —— Ticker 只更新 value(painter 以其为 repaint
+  /// Listenable),不 setState 重建 widget 子树。
+  final ValueNotifier<double> spoilerTime =
+      ValueNotifier(SpoilerShader.timeSeconds);
+
+  Ticker? _gateTicker;
+  Timer? _wakeProbe;
+  Duration _lastTick = Duration.zero;
+  Size _screenSize = Size.zero;
+
+  bool spoilerRevealed = false;
+  bool spoilerReduceMotion = false;
+
+  /// initState 里调用。
+  void initSpoilerTicker() {
+    _gateTicker = createTicker(_onSpoilerTick);
+  }
+
+  /// didChangeDependencies 里调用:同步 reduce-motion,并缓存屏幕尺寸
+  /// (tick 回调里不能 depend InheritedWidget)。
+  void syncSpoilerDeps() {
+    final mq = MediaQuery.maybeOf(context);
+    spoilerReduceMotion = mq?.disableAnimations ?? false;
+    _screenSize = mq?.size ?? Size.zero;
+    syncSpoilerTicker();
+  }
+
+  /// 按「未揭示 + 非 reduce-motion」启停(reduce-motion 渲染静态遮罩,
+  /// 不跑动画 → 也让 golden/pumpAndSettle 能 settle)。
+  void syncSpoilerTicker() {
+    final t = _gateTicker;
+    if (t == null) return;
+    final shouldRun = !spoilerRevealed && !spoilerReduceMotion;
+    if (shouldRun && !t.isActive) {
+      _cancelWakeProbe();
+      _lastTick = Duration.zero;
+      t.start();
+    } else if (!shouldRun && t.isActive) {
+      t.stop();
+      _cancelWakeProbe();
+    }
+  }
+
+  void _onSpoilerTick(Duration elapsed) {
+    if (!mounted || spoilerRevealed) return;
+    if (elapsed - _lastTick < _tickInterval) return; // ~30fps 节流
+    if (!_isOnScreen()) {
+      _gateTicker?.stop();
+      _startWakeProbe();
+      return;
+    }
+    _lastTick = elapsed;
+    spoilerTime.value = SpoilerShader.timeSeconds;
+  }
+
+  /// 自身全局矩形是否与屏幕(含 64px 余量)相交。拿不到屏幕尺寸时视为
+  /// 可见 —— 保守不误停。
+  bool _isOnScreen() {
+    if (_screenSize == Size.zero) return true;
+    final ro = context.findRenderObject();
+    if (ro is! RenderBox || !ro.attached || !ro.hasSize) return false;
+    final rect = ro.localToGlobal(Offset.zero) & ro.size;
+    return rect.overlaps((Offset.zero & _screenSize).inflate(64));
+  }
+
+  void _startWakeProbe() {
+    _wakeProbe ??= Timer.periodic(_wakeProbeInterval, (_) {
+      if (!mounted || spoilerRevealed || spoilerReduceMotion) return;
+      if (_isOnScreen()) {
+        _cancelWakeProbe();
+        _lastTick = Duration.zero;
+        final t = _gateTicker;
+        if (t != null && !t.isActive) t.start();
+      }
+    });
+  }
+
+  void _cancelWakeProbe() {
+    _wakeProbe?.cancel();
+    _wakeProbe = null;
+  }
+
+  /// dispose 里调用(宿主自持的 shader 仍由宿主释放)。
+  void disposeSpoilerTicker() {
+    _cancelWakeProbe();
+    _gateTicker?.dispose();
+    _gateTicker = null;
+    spoilerTime.dispose();
+  }
+}
 
 /// spoiler shader 全局加载器(进程内只 fromAsset 一次,所有实例共享)。
 class SpoilerShader {

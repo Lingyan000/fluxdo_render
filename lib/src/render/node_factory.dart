@@ -15,7 +15,7 @@ import 'dart:math' show Random;
 import 'dart:ui' as ui show FragmentShader;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart' show Ticker;
+
 import 'package:flutter/services.dart';
 
 import '../flatten/inline_flattener.dart';
@@ -1966,27 +1966,14 @@ class _SpoilerBlockWidget extends StatefulWidget {
 }
 
 class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
-    with SingleTickerProviderStateMixin {
-  // 尘埃闪烁无需满帧率;降更新率直接省 UI/raster 开销(Skia 后端间隔期
-  // 还能复用 RepaintBoundary 缓存层)。
-  static const Duration _tickInterval = Duration(milliseconds: 33);
-
-  // shader 时间源 —— Ticker 只更新 value(painter 以其为 repaint
-  // Listenable),不 setState 重建 widget 子树。值取全局时钟
-  // [SpoilerShader.timeSeconds]:widget 重建 / Ticker 重启不回卷,
-  // 粒子场不会从头重播。
-  final ValueNotifier<double> _time = ValueNotifier(SpoilerShader.timeSeconds);
+    with SingleTickerProviderStateMixin, SpoilerTickerGate {
   final double _seed = Random().nextDouble() * 100;
   ui.FragmentShader? _shader;
-  Ticker? _ticker;
-  Duration _lastTick = Duration.zero;
-  bool _revealed = false;
-  bool _reduceMotion = false;
 
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker(_onTick);
+    initSpoilerTicker();
     _initShader();
   }
 
@@ -2004,48 +1991,25 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    _syncTicker();
-  }
-
-  /// 按「未揭示 + 非 reduce-motion」启停 Ticker(reduce-motion 渲染静态遮罩,
-  /// 不跑动画 → 也让 golden/pumpAndSettle 能 settle)。
-  void _syncTicker() {
-    final t = _ticker;
-    if (t == null) return;
-    final shouldRun = !_revealed && !_reduceMotion;
-    if (shouldRun && !t.isActive) {
-      _lastTick = Duration.zero;
-      t.start();
-    } else if (!shouldRun && t.isActive) {
-      t.stop();
-    }
-  }
-
-  void _onTick(Duration elapsed) {
-    if (!mounted || _revealed) return;
-    if (elapsed - _lastTick < _tickInterval) return; // ~30fps 节流
-    _lastTick = elapsed;
-    _time.value = SpoilerShader.timeSeconds;
+    syncSpoilerDeps();
   }
 
   void _reveal() {
-    if (_revealed) return;
-    setState(() => _revealed = true);
-    _syncTicker();
+    if (spoilerRevealed) return;
+    setState(() => spoilerRevealed = true);
+    syncSpoilerTicker();
   }
 
   void _hide() {
-    if (!_revealed) return;
-    setState(() => _revealed = false);
-    _syncTicker();
+    if (!spoilerRevealed) return;
+    setState(() => spoilerRevealed = false);
+    syncSpoilerTicker();
   }
 
   @override
   void dispose() {
-    _ticker?.dispose();
+    disposeSpoilerTicker();
     _shader?.dispose();
-    _time.dispose();
     super.dispose();
   }
 
@@ -2053,7 +2017,7 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    if (_revealed) {
+    if (spoilerRevealed) {
       // 揭示态与未揭示态**同几何**(都只内容 + 上下 8 margin,无额外 padding/边框)
       // → 揭示前后不抖动。
       return Container(
@@ -2082,7 +2046,7 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
                 child: widget.child,
               ),
               Positioned.fill(
-                child: _reduceMotion
+                child: spoilerReduceMotion
                     // reduce-motion:静态灰块遮罩(可见、隐内容,无动画)。
                     ? DecoratedBox(
                         decoration: BoxDecoration(
@@ -2093,7 +2057,7 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
                     : RepaintBoundary(
                         child: CustomPaint(
                           painter: SpoilerEffectPainter(
-                            time: _time,
+                            time: spoilerTime,
                             seed: _seed,
                             shader: _shader,
                             isDark: isDark,
