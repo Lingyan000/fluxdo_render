@@ -734,6 +734,11 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
             controller: _controller,
             child: Stack(
               key: _rootKey,
+              // Clip.none:表格块选择柄/列柄等悬挂装饰 top:-6/left:-2 挂在
+              // 块边界外(不同于列表圆点在块内左 padding 区),hardEdge 会
+              // 把它们裁掉(被切)。外层滚动区 12px padding 吸收溢出;宽
+              // 表格由自身横向 scroll 裁剪,不会外溢盖工具栏。
+              clipBehavior: Clip.none,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
