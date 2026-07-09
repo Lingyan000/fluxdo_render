@@ -105,6 +105,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     _controller = SelectionController(SelectionRegistry());
     _hitTester = SelectionHitTester(_controller.registry);
     _ime = EditorImeClient(state: widget.state);
+    // input rule `--- ` → 分隔线岛(经 cook 链路;importer 未注入时用
+    // markdown 纯文本兜底 —— 至少不静默)
+    _ime.onHorizontalRuleRequest = _insertHorizontalRule;
     _islandFactory = widget.nodeFactory ?? NodeFactory();
     widget.state.addListener(_onStateChanged);
     _focusNode.addListener(_onFocusChanged);
@@ -363,6 +366,24 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   /// 粘贴序号:异步 cook 期间用户再按一次 Cmd+V / 继续打字时,旧结果
   /// 作废(防乱序插入)。
   int _pasteTicket = 0;
+
+  /// input rule `--- ` 命中:插分隔线岛。经 markdownImporter(cook)产
+  /// HorizontalRuleNode;importer 缺席时无操作(标记文本已被规则清空,
+  /// 用户可用插入菜单)。
+  Future<void> _insertHorizontalRule(String blockId) async {
+    final importer = widget.markdownImporter;
+    if (importer == null) return;
+    List<EditorBlock>? frag;
+    try {
+      frag = await importer('---');
+    } catch (_) {
+      return;
+    }
+    if (!mounted || frag == null || frag.isEmpty) return;
+    // 光标已在触发块(规则清空后 offset 0),粘贴语义插入
+    widget.state.pasteBlocks(frag);
+    _ime.syncFromState(show: false);
+  }
 
   Future<void> _clipboardPaste() async {
     final ticket = ++_pasteTicket;

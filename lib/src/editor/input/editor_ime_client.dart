@@ -24,6 +24,7 @@ import 'package:flutter/services.dart';
 
 import '../model/editable_text_content.dart';
 import '../model/editor_state.dart';
+import 'input_rules.dart';
 
 /// pad 前缀字符。**必须用普通空格**(对齐 appflowy 生产实现
 /// non_delta_input_service.dart 的 _whitespace):曾用 ZWSP(U+200B),
@@ -46,6 +47,10 @@ class EditorImeClient with TextInputClient {
   }
 
   final EditorState state;
+
+  /// input rule `--- ` 命中时的分隔线插入请求(岛节点由视图层经 cook
+  /// 链路产,状态层不造岛)。参数 = 触发块 id(标记文本已清空)。
+  void Function(String blockId)? onHorizontalRuleRequest;
 
   TextInputConnection? _connection;
 
@@ -361,8 +366,23 @@ class EditorImeClient with TextInputClient {
 
     _lastSent = rawValue;
 
+    // input rules(markdown 快捷语法):文本落地且无 composing 后,按
+    // 末字符尝试(`# `→标题、`**x**`→粗体…)。命中即改文档 —— 走下方
+    // reconcile 统一回喂平台。hr 请求上抛视图层(岛由 cook 链路产)。
+    final composingActive = composing.isValid && !composing.isCollapsed;
+    if (!composingActive && cleanInserted.isNotEmpty) {
+      final outcome = tryApplyInputRules(
+        state,
+        blockId,
+        typedChar: cleanInserted[cleanInserted.length - 1],
+      );
+      if (outcome == InputRuleOutcome.hrRequest) {
+        onHorizontalRuleRequest?.call(blockId);
+      }
+    }
+
     // reconcile:若应用后文档与 IME 认知不一致(编辑器改写了内容,
-    // 比如剥了 '\n'/幻造 FFFC),回喂纠正。
+    // 比如剥了 '\n'/幻造 FFFC/input rule 转换),回喂纠正。
     final now = state.textBlockById(blockId);
     if (now != null && now.content.text != sanitizedText) {
       syncFromState(show: false, force: true);

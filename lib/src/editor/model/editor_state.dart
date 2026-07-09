@@ -1123,6 +1123,73 @@ class EditorState extends ChangeNotifier {
   }
 
   // -----------------------------------------------------------------
+  // input rules(markdown 快捷语法,input_rules.dart 调用)
+  // -----------------------------------------------------------------
+
+  /// 块级规则应用:删块首 [markerLength] 个标记字符 + [transform] 换
+  /// 块属性,光标落到内容起点(=0)。独立 undo 步(undo 回到字面文本)。
+  void applyBlockInputRule(
+    String blockId, {
+    required int markerLength,
+    required TextBlock Function(TextBlock) transform,
+  }) {
+    final i = indexOfBlock(blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    final len = markerLength.clamp(0, block.content.length);
+    final newBlocks = [..._blocks];
+    newBlocks[i] = transform(
+      block.copyWith(content: block.content.delete(0, len)),
+    );
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(EditorPosition(blockId: blockId, offset: 0)),
+      groupWithPrevious: false,
+    );
+    sealHistory();
+  }
+
+  /// 行内规则应用:`[matchStart, matchStart+delim+content+delim)` 区间,
+  /// 删两侧定界符、对内容施加 [kind],光标落内容尾。独立 undo 步。
+  void applyInlineInputRule(
+    String blockId, {
+    required int matchStart,
+    required int delimLength,
+    required int contentLength,
+    required MarkKind kind,
+  }) {
+    final i = indexOfBlock(blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    final contentStart = matchStart + delimLength;
+    final contentEnd = contentStart + contentLength;
+    final matchEnd = contentEnd + delimLength;
+    if (matchEnd > block.content.length) return;
+
+    // 先删尾定界符再删头(避免偏移平移),再对留下的内容区间加 mark
+    var content = block.content
+        .delete(contentEnd, matchEnd)
+        .delete(matchStart, contentStart);
+    content = content.applyMark(
+      matchStart,
+      matchStart + contentLength,
+      kind,
+    );
+    final newBlocks = [..._blocks];
+    newBlocks[i] = block.copyWith(content: content);
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(
+        EditorPosition(blockId: blockId, offset: matchStart + contentLength),
+      ),
+      groupWithPrevious: false,
+    );
+    sealHistory();
+  }
+
+  // -----------------------------------------------------------------
   // 剪贴板(复制/剪切/粘贴)
   // -----------------------------------------------------------------
 
