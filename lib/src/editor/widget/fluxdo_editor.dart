@@ -15,7 +15,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show BoxHitTestResult, RenderMetaData;
 import 'package:flutter/services.dart';
 
-import '../../node/node.dart' show InlineNode, LocalDateRun, TableNode;
+import '../../node/node.dart'
+    show ImageRun, InlineNode, LocalDateRun, TableNode;
 import '../../render/block_text_styles.dart';
 import '../../render/node_factory.dart';
 import '../../selection/hit_tester.dart';
@@ -40,6 +41,7 @@ class FluxdoEditor extends StatefulWidget {
     this.nodeFactory,
     this.markdownImporter,
     this.onIslandEditRequest,
+    this.onImageScale,
     this.onContainerTitleEdit,
     this.onTableEdited,
     this.onAtomTap,
@@ -68,6 +70,11 @@ class FluxdoEditor extends StatefulWidget {
   /// 双击岛 → 请求编辑(宿主弹源码对话框,改完调 state.replaceIsland)。
   /// null = 岛只读不可编辑。
   final void Function(IslandBlock island)? onIslandEditRequest;
+
+  /// 图片岛缩放胶囊点击 → 请求切档(宿主更新 ImageRun 后
+  /// state.updateIslandNode + 重序列化)。null = 不出缩放控件。
+  final void Function(IslandBlock island, ImageRun image, int scale)?
+      onImageScale;
 
   /// 点容器壳标题(details summary / callout 标题)→ 请求改标题
   /// (宿主弹输入框,改完调 state.updateContainerFrame)。null = 不可改。
@@ -680,6 +687,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
               onEditRequest: widget.onIslandEditRequest == null
                   ? null
                   : () => widget.onIslandEditRequest!(ib),
+              onImageScale: widget.onImageScale == null
+                  ? null
+                  : (image, scale) => widget.onImageScale!(ib, image, scale),
             ),
         },
       );

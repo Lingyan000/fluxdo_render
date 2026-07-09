@@ -1476,6 +1476,19 @@ class EditorState extends ChangeNotifier {
     return changed ? out : fragment;
   }
 
+  /// 原位更新 [islandId] 岛的节点(同类型形变,如图片缩放档切换)。
+  /// 与 [replaceIsland] 的区别:不 re-id、不动光标/选区 —— 岛身份保持,
+  /// EditorIsland 的 Element 原位重渲染,不闪跳。
+  void updateIslandNode(String islandId, BlockNode newNode) {
+    final i = indexOfBlock(islandId);
+    if (i < 0 || _blocks[i] is! IslandBlock) return;
+    sealHistory();
+    final newBlocks = [..._blocks];
+    newBlocks[i] = IslandBlock(id: islandId, node: newNode);
+    _commit(newBlocks, _selection, groupWithPrevious: false);
+    sealHistory();
+  }
+
   /// 用 [fragment] 整体替换 [islandId] 岛(岛源码编辑确认后调用)。
   ///
   /// 编辑后的 markdown 可能 cook 出多块(如 details 改成两段),故接受

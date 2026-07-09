@@ -418,6 +418,10 @@ class ImageRun extends InlineNode {
     this.indexInPost = 0,
     this.lightboxUrl,
     this.origSrc,
+    this.scale,
+    this.previewImageIndex,
+    this.origWidth,
+    this.origHeight,
   });
 
   /// 完整图片 URL(parser 不做任何重写;含 upload:// 短链时由主项目解析)。
@@ -460,6 +464,54 @@ class ImageRun extends InlineNode {
   /// 的最佳 URL。主项目点击放大时优先用 lightboxUrl,fallback 到 src。
   final String? lightboxUrl;
 
+  /// 当前缩放档百分比(100/75/50…),仅**客户端 cook 预览形态**且 raw 里
+  /// 写了 `![alt|WxH, 75%](upload://…)` 或注入了 image-controls 控件时有值。
+  ///
+  /// 来源:cook previewing=true 给可缩放 upload 图注入 `button-wrapper`
+  /// 控件,parser 从 `scale-btn active` 的 data-scale 提取。**[width]/
+  /// [height] 是乘过 scale 的显示尺寸**(cook engine 行为);原始声明
+  /// 尺寸见 [origWidth]/[origHeight]。服务端 baked cooked 无控件 → null。
+  final double? scale;
+
+  /// 预览控件的 data-image-index(button-wrapper 携带,= raw 里可缩放
+  /// upload 图的出现序号)。缩放按钮回调用它定位 raw 中第 N 个图片
+  /// markdown(对齐官方 composer `_handleImageScaleButtonClick`)。
+  /// 仅预览形态有值。
+  final int? previewImageIndex;
+
+  /// raw 里声明的原始宽度(`|WxH` 的 W,未乘 scale)。仅当 [scale] 非
+  /// null 且能从显示尺寸反推时有值 —— markdown 序列化写回必须用它
+  /// (写乘过的尺寸会让缩放语义在往返中塌陷)。
+  final double? origWidth;
+
+  /// raw 里声明的原始高度(`|WxH` 的 H,未乘 scale)。同 [origWidth]。
+  final double? origHeight;
+
+  /// 换 lightboxUrl / 尺寸 / 缩放档,其余字段保持。
+  /// 缩放档切换用法:`copyWith(scale: 75, width: origW*0.75, ...)`,
+  /// origWidth/origHeight 首次从 100 档缩小时固化。
+  ImageRun copyWith({
+    String? lightboxUrl,
+    double? width,
+    double? height,
+    double? scale,
+    double? origWidth,
+    double? origHeight,
+  }) =>
+      ImageRun(
+        src: src,
+        alt: alt,
+        width: width ?? this.width,
+        height: height ?? this.height,
+        indexInPost: indexInPost,
+        lightboxUrl: lightboxUrl ?? this.lightboxUrl,
+        origSrc: origSrc,
+        scale: scale ?? this.scale,
+        previewImageIndex: previewImageIndex,
+        origWidth: origWidth ?? this.origWidth,
+        origHeight: origHeight ?? this.origHeight,
+      );
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -471,11 +523,15 @@ class ImageRun extends InlineNode {
           height == other.height &&
           indexInPost == other.indexInPost &&
           lightboxUrl == other.lightboxUrl &&
-          origSrc == other.origSrc;
+          origSrc == other.origSrc &&
+          scale == other.scale &&
+          previewImageIndex == other.previewImageIndex &&
+          origWidth == other.origWidth &&
+          origHeight == other.origHeight;
 
   @override
-  int get hashCode =>
-      Object.hash(src, alt, width, height, indexInPost, lightboxUrl, origSrc);
+  int get hashCode => Object.hash(src, alt, width, height, indexInPost,
+      lightboxUrl, origSrc, scale, previewImageIndex, origWidth, origHeight);
 
   @override
   String toString() =>

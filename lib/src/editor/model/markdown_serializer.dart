@@ -591,14 +591,26 @@ String _serializeDefinitionList(List<DefinitionItem> items) {
 String _fmtNum(double v) =>
     v == v.roundToDouble() ? v.round().toString() : v.toString();
 
-/// 图片 → `![alt|WxH](src)`。upload 图优先写 origSrc 短链(raw 规范形态);
-/// lightbox 缩略图写原图短链/URL 而非 `_2_690x52` 优化版。
+/// 图片 → `![alt|WxH](src)` / 带缩放 `![alt|WxH, 75%](src)`。upload 图优先
+/// 写 origSrc 短链(raw 规范形态);lightbox 缩略图写原图短链/URL 而非
+/// `_2_690x52` 优化版。
+///
+/// 预览形态(scale 非 null)的 width/height 是 cook 乘过缩放的显示尺寸,
+/// 写回必须用 origWidth/origHeight(parser ceil 反推)+ `, N%` 后缀 ——
+/// 写乘过的尺寸会让缩放语义在往返中塌陷(再 cook 二次相乘)。
+/// scale=100(预览态无后缀图的规范档)不写后缀。
 String _serializeImageRun(ImageRun img) {
   final src = img.origSrc ??
       (img.src.startsWith('upload://') ? img.src : (img.lightboxUrl ?? img.src));
-  final size = (img.width != null && img.height != null)
-      ? '|${img.width!.round()}x${img.height!.round()}'
-      : '';
+  // origWidth/origHeight 一旦有值就是 raw 声明尺寸(parser 反推或宿主缩放
+  // 时固化),优先于(可能乘过 scale 的)显示尺寸。
+  final w = img.origWidth ?? img.width;
+  final h = img.origHeight ?? img.height;
+  final scale = img.scale;
+  var size = (w != null && h != null) ? '|${w.round()}x${h.round()}' : '';
+  if (scale != null && scale > 0 && scale != 100 && size.isNotEmpty) {
+    size = '$size, ${scale.round()}%';
+  }
   return '![${img.alt}$size]($src)';
 }
 

@@ -1247,15 +1247,7 @@ class ParagraphParser {
     if (run == null) return null;
     final lightboxUrl = aEl.attributes['href']?.trim();
     if (lightboxUrl == null || lightboxUrl.isEmpty) return run;
-    return ImageRun(
-      src: run.src,
-      alt: run.alt,
-      width: run.width,
-      height: run.height,
-      indexInPost: run.indexInPost,
-      lightboxUrl: lightboxUrl,
-      origSrc: run.origSrc,
-    );
+    return run.copyWith(lightboxUrl: lightboxUrl);
   }
 
   /// 解析 `<figure>` 容器为 BlockNode 序列(对齐 legacy fwfh `figure`+`figcaption`
@@ -1421,6 +1413,11 @@ class ParagraphParser {
   /// `src="/images/transparent.png" data-orig-src="upload://…"`(真实 URL
   /// 只有服务端知道)。此时把 src 还原为短链(渲染层 DiscourseImage 能解析
   /// upload://),origSrc 存原始短链供 markdown 序列化写回。
+  ///
+  /// 预览形态还会给可缩放图注入兄弟 `span.button-wrapper` 控件
+  /// (image-controls feature):从中提取当前缩放档(`scale-btn active`
+  /// 的 data-scale)与 data-image-index,承载「100%/75%/50%」缩放能力
+  /// (legacy 引擎渲染控件 HTML 原文,新引擎结构化后由渲染层出原生控件)。
   ImageRun? _imageRunFromImg(
     dom.Element img,
     int Function() nextImageIndex,
@@ -1434,6 +1431,7 @@ class ParagraphParser {
     final alt = img.attributes['alt']?.trim() ?? '';
     final w = double.tryParse(img.attributes['width'] ?? '');
     final h = double.tryParse(img.attributes['height'] ?? '');
+    final controls = _imageControlsOf(img);
     return ImageRun(
       src: src,
       alt: alt,
@@ -1441,6 +1439,55 @@ class ParagraphParser {
       height: h,
       indexInPost: nextImageIndex(),
       origSrc: (origSrc == null || origSrc.isEmpty) ? null : origSrc,
+      scale: controls?.scale,
+      previewImageIndex: controls?.imageIndex,
+      origWidth: controls?.origWidth,
+      origHeight: controls?.origHeight,
+    );
+  }
+
+  /// 从 img 的 `span.image-wrapper` 祖先里找兄弟 `span.button-wrapper`,
+  /// 提取缩放档与图片序号,并反推 raw 声明尺寸。非预览形态(服务端
+  /// baked)无 wrapper → null。
+  ///
+  /// 反推:cook engine 对 `|WxH, N%` 做 parseInt(W * N/100)(截断)后写
+  /// width 属性 —— 序列化写回必须用未乘的原始 WxH。ceil 整数反推
+  /// W' = ceil(cookW * 100 / N) 满足 floor(W' * N/100) == cookW(N ≤ 100),
+  /// 往返 cook 逐像素一致。
+  ({double? scale, int? imageIndex, double? origWidth, double? origHeight})?
+      _imageControlsOf(dom.Element img) {
+    dom.Element? wrapper = img.parent;
+    // image-wrapper 直接包 img(官方 ruleWithImageControls 结构),留 2 层
+    // 余量容忍未来插层。
+    for (var i = 0; wrapper != null && i < 2; i++) {
+      if (wrapper.classes.contains('image-wrapper')) break;
+      wrapper = wrapper.parent;
+    }
+    if (wrapper == null || !wrapper.classes.contains('image-wrapper')) {
+      return null;
+    }
+    final btnWrapper = wrapper.querySelector('span.button-wrapper');
+    if (btnWrapper == null) return null;
+    final imageIndex = int.tryParse(
+        btnWrapper.attributes['data-image-index']?.trim() ?? '');
+    final active = btnWrapper.querySelector('span.scale-btn.active');
+    final scale = double.tryParse(active?.attributes['data-scale'] ?? '');
+    if (imageIndex == null && scale == null) return null;
+
+    double? origW, origH;
+    if (scale != null && scale > 0 && scale != 100) {
+      final s = scale.round();
+      final w = double.tryParse(img.attributes['width'] ?? '');
+      final h = double.tryParse(img.attributes['height'] ?? '');
+      double rev(double v) => ((v.round() * 100 + s - 1) ~/ s).toDouble();
+      if (w != null) origW = rev(w);
+      if (h != null) origH = rev(h);
+    }
+    return (
+      scale: scale,
+      imageIndex: imageIndex,
+      origWidth: origW,
+      origHeight: origH,
     );
   }
 
@@ -2102,15 +2149,7 @@ class ParagraphParser {
           for (final child in children) {
             if (child is ImageRun) {
               hasImage = true;
-              out.add(ImageRun(
-                src: child.src,
-                alt: child.alt,
-                width: child.width,
-                height: child.height,
-                indexInPost: child.indexInPost,
-                lightboxUrl: href,
-                origSrc: child.origSrc,
-              ));
+              out.add(child.copyWith(lightboxUrl: href));
             } else {
               out.add(child);
             }
@@ -2163,7 +2202,8 @@ class ParagraphParser {
         } else {
           // 普通内容图片走 ImageRun(主项目注入 builder)。
           // 客户端 cook 预览形态(src=transparent.png + data-orig-src=
-          // upload://):src 还原为短链,origSrc 供 markdown 序列化写回。
+          // upload://):src 还原为短链,origSrc 供 markdown 序列化写回;
+          // 兄弟 button-wrapper 控件里提取缩放档(见 _imageControlsOf)。
           var imgSrc = src;
           final origSrc = el.attributes['data-orig-src']?.trim();
           if (origSrc != null && origSrc.startsWith('upload://')) {
@@ -2172,6 +2212,7 @@ class ParagraphParser {
           final alt = el.attributes['alt']?.trim() ?? '';
           final w = double.tryParse(el.attributes['width'] ?? '');
           final h = double.tryParse(el.attributes['height'] ?? '');
+          final controls = _imageControlsOf(el);
           out.add(ImageRun(
             src: imgSrc,
             alt: alt,
@@ -2179,6 +2220,10 @@ class ParagraphParser {
             height: h,
             indexInPost: nextImageIndex(),
             origSrc: (origSrc == null || origSrc.isEmpty) ? null : origSrc,
+            scale: controls?.scale,
+            previewImageIndex: controls?.imageIndex,
+            origWidth: controls?.origWidth,
+            origHeight: controls?.origHeight,
           ));
         }
       case 'picture':
