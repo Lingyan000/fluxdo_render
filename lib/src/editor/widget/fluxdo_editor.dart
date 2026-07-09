@@ -43,6 +43,8 @@ class FluxdoEditor extends StatefulWidget {
     this.onContainerTitleEdit,
     this.onTableEdited,
     this.onAtomTap,
+    this.onCaretRectChanged,
+    this.keyEventInterceptor,
   });
 
   final EditorState state;
@@ -78,6 +80,15 @@ class FluxdoEditor extends StatefulWidget {
   /// 单击可编辑原子(date chip)→ 请求编辑(宿主弹属性对话框,确认后
   /// state.replaceAtomAt)。null = 原子只读。
   final void Function(String blockId, int offset, InlineNode atom)? onAtomTap;
+
+  /// 光标全局矩形变化(帧后回报;null = 光标不可见)。宿主用于锚定
+  /// 斜杠菜单/mention 面板到光标位置。
+  final ValueChanged<Rect?>? onCaretRectChanged;
+
+  /// 按键拦截器:编辑器处理按键**之前**先问它(返回 true = 已消费,
+  /// 编辑器不再处理)。宿主的浮层(斜杠菜单/mention)激活时借此接管
+  /// 上下键/回车/Esc —— 否则方向键被编辑器拿去移光标,菜单无法导航。
+  final bool Function(KeyEvent event)? keyEventInterceptor;
 
   @override
   State<FluxdoEditor> createState() => _FluxdoEditorState();
@@ -205,6 +216,12 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
         transform: rootBox.getTransformTo(null),
         caretRect: newCaret,
       );
+      // 光标全局矩形上抛(斜杠菜单/mention 面板锚定光标,而非编辑器角)
+      widget.onCaretRectChanged?.call(
+        rootBox.localToGlobal(newCaret.topLeft) & newCaret.size,
+      );
+    } else if (newCaret == null) {
+      widget.onCaretRectChanged?.call(null);
     }
   }
 
@@ -723,6 +740,10 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
         // 链冒泡经过本编辑器 —— 拦截会把退格/方向键/回车吞掉,cell
         // 变成"只能覆盖不能编辑"。
         if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
+        // 宿主浮层(斜杠菜单/mention)激活时优先:上下/回车/Esc 归它
+        if (widget.keyEventInterceptor?.call(event) ?? false) {
+          return KeyEventResult.handled;
+        }
         // 非上下键的任何按键动作都终结 goal column 记忆
         if (event is KeyDownEvent &&
             event.logicalKey != LogicalKeyboardKey.arrowUp &&
