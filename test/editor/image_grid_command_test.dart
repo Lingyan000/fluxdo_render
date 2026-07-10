@@ -168,4 +168,44 @@ void gridOpsTests() {
         setImageGridMode(s, s.blocks.first.id, ImageGridMode.carousel),
         isFalse);
   });
+
+  test('removeImageFromGrid:删单图;删到空整岛移除', () {
+    final s = EditorState(blocks: [_grid3('e_g'),
+      TextBlock(id: 'e_t', content: EditableTextContent.empty)]);
+    addTearDown(s.dispose);
+
+    expect(removeImageFromGrid(s, 'e_g', 1), isTrue);
+    var grid = (s.blocks[0] as IslandBlock).node as ImageGridNode;
+    expect(grid.images.map((i) => i.alt), ['a', 'c']);
+
+    removeImageFromGrid(s, 'e_g', 0);
+    removeImageFromGrid(s, 'e_g', 0);
+    expect(s.blocks.whereType<IslandBlock>(), isEmpty, reason: '空 grid 清理');
+    // 越界/非 grid 拒绝
+    expect(removeImageFromGrid(s, 'e_t', 0), isFalse);
+  });
+
+  test('moveImageOutsideGrid:抽出为岛后独立图段并整选;剩一张拆壳', () {
+    final s = EditorState(blocks: [_grid3('e_g'),
+      TextBlock(id: 'e_t', content: EditableTextContent.empty)]);
+    addTearDown(s.dispose);
+
+    expect(moveImageOutsideGrid(s, 'e_g', 1), isTrue);
+    // grid(a,c) + b 图段 + 空段
+    final grid = (s.blocks[0] as IslandBlock).node as ImageGridNode;
+    expect(grid.images.map((i) => i.alt), ['a', 'c']);
+    final imgBlock = s.blocks[1] as TextBlock;
+    expect((imgBlock.content.atoms[0] as ImageRun).alt, 'b');
+    // 移出的图保持原子整选(官方 NodeSelection)
+    expect(s.selection!.base.blockId, imgBlock.id);
+    expect(s.selection!.extent.offset, 1);
+
+    // 连续移出到只剩一张:grid 壳消失
+    moveImageOutsideGrid(s, 'e_g', 0);
+    moveImageOutsideGrid(s, 'e_g', 0);
+    expect(s.blocks.whereType<IslandBlock>(), isEmpty);
+
+    s.undo(); // 一步还原最后一次移出
+    expect(s.blocks.whereType<IslandBlock>(), hasLength(1));
+  });
 }

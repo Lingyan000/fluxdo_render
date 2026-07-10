@@ -34,6 +34,7 @@ import 'editable_paragraph.dart';
 import 'editor_caret.dart';
 import 'editor_code_block.dart';
 import 'editor_container_shell.dart';
+import 'editor_image_grid.dart';
 import 'editor_island.dart';
 import 'editor_table_grid.dart';
 
@@ -91,6 +92,8 @@ class FluxdoEditor extends StatefulWidget {
     this.onAtomTap,
     this.onImageAtomSelectionChanged,
     this.onImageAtomOpenRequest,
+    this.onGridImageSelectionChanged,
+    this.onGridImageOpenRequest,
     this.onCaretRectChanged,
     this.keyEventInterceptor,
   });
@@ -142,6 +145,14 @@ class FluxdoEditor extends StatefulWidget {
   /// 已选中的图片原子再次单击 → 请求打开(宿主开图片查看器,官方
   /// 「选中态再点开灯箱」同语义)。
   final ValueChanged<ImageAtomSelection>? onImageAtomOpenRequest;
+
+  /// grid 岛内图片子选中变化(官方 grid 内图 NodeSelection 的等价物;
+  /// null = 取消)。宿主浮层出官方 isInGrid 工具条([删除|移出网格] +
+  /// alt 条,无缩放按钮)。
+  final ValueChanged<GridImageSelection?>? onGridImageSelectionChanged;
+
+  /// 已子选中的 grid 内图再点 → 请求打开查看器。
+  final ValueChanged<GridImageSelection>? onGridImageOpenRequest;
 
   /// 光标全局矩形变化(帧后回报;null = 光标不可见)。宿主用于锚定
   /// 斜杠菜单/mention 面板到光标位置。
@@ -298,6 +309,27 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     if (imgSel != _lastImageAtomSel) {
       _lastImageAtomSel = imgSel;
       widget.onImageAtomSelectionChanged?.call(imgSel);
+    }
+
+    // grid 子选中失效检查:岛没了/图删了/主选区**后续**移动(基线对比)
+    // → 清。点瓦片在自管区内不动主选区,基线恒等不误清。
+    final gsel = _gridImageSel;
+    if (gsel != null) {
+      final blockIdx = widget.state.indexOfBlock(gsel.$1);
+      final stillIsland = blockIdx >= 0 &&
+          widget.state.blocks[blockIdx] is IslandBlock &&
+          (widget.state.blocks[blockIdx] as IslandBlock).node
+              is ImageGridNode;
+      final imagesLen = stillIsland
+          ? ((widget.state.blocks[blockIdx] as IslandBlock).node
+                  as ImageGridNode)
+              .images
+              .length
+          : 0;
+      final selectionMoved = widget.state.selection != _gridSelBaseline;
+      if (!stillIsland || gsel.$2 >= imagesLen || selectionMoved) {
+        _setGridImageSelection(null);
+      }
     }
   }
 
@@ -673,6 +705,23 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   /// 当前文档选区若恰覆盖单个图片原子,返回其选中态(矩形帧后算)。
   ImageAtomSelection? _lastImageAtomSel;
 
+  /// grid 岛内图片子选中(islandId, imageIndex)。与编辑器主选区独立
+  /// (点瓦片在自管区内不动主选区);主选区**后续变化**即清(基线快照
+  /// 对比 —— 不能用「选区不在岛上」判,点瓦片时主选区本就停在别处)。
+  (String, int)? _gridImageSel;
+  GridImageSelection? _lastGridImageSel;
+  EditorSelection? _gridSelBaseline;
+
+  void _setGridImageSelection(GridImageSelection? sel) {
+    _gridImageSel = sel == null ? null : (sel.islandId, sel.imageIndex);
+    _gridSelBaseline = sel == null ? null : widget.state.selection;
+    if (sel != _lastGridImageSel) {
+      _lastGridImageSel = sel;
+      widget.onGridImageSelectionChanged?.call(sel);
+    }
+    if (sel != null) setState(() {}); // 瓦片描边
+  }
+
   ImageAtomSelection? _computeImageAtomSelection() {
     final norm = widget.state.normalizedSelection();
     if (norm == null) return null;
@@ -895,6 +944,21 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                   : null,
               onGridRemove: ib.node is ImageGridNode
                   ? () => removeImageGrid(widget.state, ib.id)
+                  : null,
+              // grid 岛内容换可交互瓦片视图(瓦片单击子选中 → 官方
+              // isInGrid 工具条;再点开查看器)
+              contentOverride: ib.node is ImageGridNode
+                  ? EditorImageGrid(
+                      node: ib.node as ImageGridNode,
+                      islandId: ib.id,
+                      nodeFactory: _islandFactory,
+                      selectedIndex: (_gridImageSel?.$1 == ib.id)
+                          ? _gridImageSel!.$2
+                          : null,
+                      onImageTap: _setGridImageSelection,
+                      onImageOpen: (sel) =>
+                          widget.onGridImageOpenRequest?.call(sel),
+                    )
                   : null,
             ),
         },

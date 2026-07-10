@@ -171,3 +171,75 @@ bool setImageGridMode(EditorState state, String islandId, ImageGridMode mode) {
   );
   return true;
 }
+
+/// 删除 grid 内第 [imageIndex] 张图。删到空 → 整岛移除(官方
+/// appendTransaction 的空 grid 清理同语义)。返回 false = 不是 grid 岛
+/// 或下标越界。
+bool removeImageFromGrid(EditorState state, String islandId, int imageIndex) {
+  final i = state.indexOfBlock(islandId);
+  if (i < 0) return false;
+  final block = state.blocks[i];
+  if (block is! IslandBlock || block.node is! ImageGridNode) return false;
+  final grid = block.node as ImageGridNode;
+  if (imageIndex < 0 || imageIndex >= grid.images.length) return false;
+
+  final images = [...grid.images]..removeAt(imageIndex);
+  if (images.isEmpty) {
+    state.replaceBlockRange(i, i, const []);
+    return true;
+  }
+  state.updateIslandNode(
+    islandId,
+    ImageGridNode(
+      id: grid.id,
+      images: images,
+      columns: grid.columns,
+      mode: grid.mode,
+    ),
+  );
+  return true;
+}
+
+/// 把 grid 内第 [imageIndex] 张图移出网格(官方 moveOutsideGrid):
+/// 图从 images 抽出,变 grid 岛**后方**的独立图原子段(官方 insert at
+/// gridEndPos 同方向);grid 只剩它一张时整岛替换为图段(官方
+/// willGridBeEmpty 分支)。单事务 undo 一步。
+bool moveImageOutsideGrid(EditorState state, String islandId, int imageIndex) {
+  final i = state.indexOfBlock(islandId);
+  if (i < 0) return false;
+  final block = state.blocks[i];
+  if (block is! IslandBlock || block.node is! ImageGridNode) return false;
+  final grid = block.node as ImageGridNode;
+  if (imageIndex < 0 || imageIndex >= grid.images.length) return false;
+
+  final img = grid.images[imageIndex];
+  final rest = [...grid.images]..removeAt(imageIndex);
+  final imgBlock = TextBlock(
+    id: state.nextBlockId(),
+    content: EditableTextContent.fromInlines([img]),
+  );
+
+  state.replaceBlockRange(
+    i,
+    i,
+    [
+      if (rest.isNotEmpty)
+        IslandBlock(
+          id: block.id,
+          node: ImageGridNode(
+            id: grid.id,
+            images: rest,
+            columns: grid.columns,
+            mode: grid.mode,
+          ),
+        ),
+      imgBlock,
+    ],
+    // 移出的图保持被选中(原子整选)—— 官方 setSelection(NodeSelection)
+    selection: EditorSelection(
+      base: EditorPosition(blockId: imgBlock.id, offset: 0),
+      extent: EditorPosition(blockId: imgBlock.id, offset: 1),
+    ),
+  );
+  return true;
+}

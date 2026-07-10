@@ -39,6 +39,7 @@ class EditorIsland extends StatefulWidget {
     this.onEditRequest,
     this.onGridModeChange,
     this.onGridRemove,
+    this.contentOverride,
   });
 
   final BlockNode node;
@@ -59,6 +60,11 @@ class EditorIsland extends StatefulWidget {
   /// 网格岛工具条:移除网格(拆壳保图)。null = 不出移除按钮。
   final VoidCallback? onGridRemove;
 
+  /// 岛内容替换(grid 岛的可交互瓦片视图 EditorImageGrid 由编辑器注入;
+  /// null 用默认 NodeFactory.build + AbsorbPointer 只读渲染)。
+  /// 注入内容自带自管区标记/手势,不再包 AbsorbPointer。
+  final Widget? contentOverride;
+
   @override
   State<EditorIsland> createState() => _EditorIslandState();
 }
@@ -78,12 +84,13 @@ class _EditorIslandState extends State<EditorIsland> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    Widget content = SelectionScope(
-      controller: _inertController,
-      child: AbsorbPointer(
-        child: widget.nodeFactory.build(context, widget.node),
-      ),
-    );
+    Widget content = widget.contentOverride ??
+        SelectionScope(
+          controller: _inertController,
+          child: AbsorbPointer(
+            child: widget.nodeFactory.build(context, widget.node),
+          ),
+        );
 
     content = DecoratedBox(
       decoration: BoxDecoration(

@@ -27,6 +27,7 @@ import 'emoji_handler.dart';
 import 'footnote_handler.dart';
 import 'audio_handler.dart';
 import 'iframe_handler.dart';
+import 'image_grid_layout.dart';
 import 'image_handler.dart';
 import 'video_handler.dart';
 import 'inline_span_text.dart';
@@ -1236,31 +1237,10 @@ class NodeFactory {
       child: LayoutBuilder(
         builder: (context, constraints) {
           const spacing = 6.0;
-          final n = node.images.length;
-          // parser 默认 2(cooked 无 data-columns 的常态);此时用官方
-          // count() 派生;显式 ≥3 列(web 已分列)尊重
-          final cols = node.columns >= 3
-              ? node.columns.clamp(3, 6)
-              : ((n == 2 || n == 4) ? 2 : 3);
+          final cols = gridColumnCount(node.images.length, node.columns);
           final colWidth =
               (constraints.maxWidth - (cols - 1) * spacing) / cols;
-
-          // 最短列贪心分配(官方 _distributeEvenly)
-          final columns = List.generate(cols, (_) => <ImageRun>[]);
-          final heights = List.filled(cols, 0.0);
-          for (final img in node.images) {
-            var shortest = 0;
-            for (var j = 1; j < cols; j++) {
-              if (heights[j] < heights[shortest]) shortest = j;
-            }
-            final ratio = (img.width != null &&
-                    img.height != null &&
-                    img.width! > 0)
-                ? img.height! / img.width!
-                : 1.0;
-            heights[shortest] += ratio;
-            columns[shortest].add(img);
-          }
+          final columns = distributeGridImages(node.images, cols);
 
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1271,7 +1251,7 @@ class NodeFactory {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final img in columns[c])
+                      for (final (_, img) in columns[c])
                         Padding(
                           padding: const EdgeInsets.only(bottom: spacing),
                           child: _GridTile(
@@ -1636,18 +1616,8 @@ class _GridTile extends StatelessWidget {
   Widget build(BuildContext context) {
     // 瀑布流瓦片:填满列宽,高按自身宽高比(错落感来源;官方 CSS
     // `img { height: 100%; object-fit: cover }` + 列内 flex 纵排)。
-    // 超高图 cap 到列宽 2.5 倍(官方 max-height:1200px 的等价意图:
-    // 防长截图对网格产生离谱影响),cap 时 cover 裁切。
-    double tileHeight;
-    final w = image.width;
-    final h = image.height;
-    if (w != null && h != null && w > 0) {
-      tileHeight = (columnWidth * (h / w)).clamp(60.0, columnWidth * 2.5);
-    } else {
-      tileHeight = columnWidth; // 无尺寸按 1:1(官方同款假设)
-    }
     return SizedBox(
-      height: tileHeight,
+      height: gridTileHeight(image, columnWidth),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(4),
         // FittedBox + cover:让 imageContentBuilder 产生的 widget(主项目
