@@ -467,6 +467,9 @@ class ImageRun extends InlineNode {
   /// 当前缩放档百分比(100/75/50…),仅**客户端 cook 预览形态**且 raw 里
   /// 写了 `![alt|WxH, 75%](upload://…)` 或注入了 image-controls 控件时有值。
   ///
+  /// **编辑器语义:null 与 100 等价**(有效档 = `scale ?? 100`;序列化对
+  /// 两者都不写后缀)。官方三档 50/75/100,step 25(MIN_SCALE=50)。
+  ///
   /// 来源:cook previewing=true 给可缩放 upload 图注入 `button-wrapper`
   /// 控件,parser 从 `scale-btn active` 的 data-scale 提取。**[width]/
   /// [height] 是乘过 scale 的显示尺寸**(cook engine 行为);原始声明
@@ -487,10 +490,12 @@ class ImageRun extends InlineNode {
   /// raw 里声明的原始高度(`|WxH` 的 H,未乘 scale)。同 [origWidth]。
   final double? origHeight;
 
-  /// 换 lightboxUrl / 尺寸 / 缩放档,其余字段保持。
+  /// 换 alt / lightboxUrl / 尺寸 / 缩放档,其余字段保持。
+  /// alt 非空 String(默认 ''):传 '' = 清空,null = 不改,无 sentinel 歧义。
   /// 缩放档切换用法:`copyWith(scale: 75, width: origW*0.75, ...)`,
   /// origWidth/origHeight 首次从 100 档缩小时固化。
   ImageRun copyWith({
+    String? alt,
     String? lightboxUrl,
     double? width,
     double? height,
@@ -500,7 +505,7 @@ class ImageRun extends InlineNode {
   }) =>
       ImageRun(
         src: src,
-        alt: alt,
+        alt: alt ?? this.alt,
         width: width ?? this.width,
         height: height ?? this.height,
         indexInPost: indexInPost,

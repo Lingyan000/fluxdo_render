@@ -25,19 +25,27 @@ String Function() _idGen() {
 }
 
 void main() {
-  test('白名单分流:裸图可编辑;可缩放/lightbox 图岛化', () {
+  test('白名单:全部图片可编辑(官方 inline:true,无图片岛)', () {
     expect(isEditableInline(_bare), isTrue);
-    expect(isEditableInline(_scaled), isFalse);
-    expect(isEditableInline(_lightbox), isFalse);
+    expect(isEditableInline(_scaled), isTrue);
+    expect(isEditableInline(_lightbox), isTrue);
 
     final doc = blockNodesToDoc([
       const ParagraphNode(id: 'b_0', inlines: [
         TextRun('看这个 '), _bare, TextRun(' 表情'),
       ]),
       const ParagraphNode(id: 'b_1', inlines: [_scaled]),
+      const ParagraphNode(id: 'b_2', inlines: [_lightbox]),
     ], _idGen());
-    expect(doc[0], isA<TextBlock>(), reason: '裸图段可编辑');
-    expect(doc[1], isA<IslandBlock>(), reason: '可缩放图段岛化');
+    expect(doc, everyElement(isA<TextBlock>()), reason: '全图原子化');
+    // scaled/lightbox 图入原子表,身份保持
+    expect((doc[1] as TextBlock).content.atoms[0], _scaled);
+    expect((doc[2] as TextBlock).content.atoms[0], _lightbox);
+    // 序列化产物与旧岛路径逐字节一致(两路径同源 _serializeImageRun)
+    expect(docToMarkdown([doc[1]]),
+        '![|690x388, 50%](upload://a.jpeg)');
+    expect(docToMarkdown([doc[2]]),
+        '![|690x388](upload://b.jpeg)');
   });
 
   test('flatten:裸图 FFFC 原子入表,toInlines 原样吐回', () {

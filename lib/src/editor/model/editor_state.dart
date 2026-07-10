@@ -424,9 +424,19 @@ class EditorState extends ChangeNotifier {
     sealHistory();
   }
 
-  /// 替换 [blockId] 块 [offset] 处的原子(date chip 编辑确认)。
-  /// 该位置不是原子时无操作。undo 一步。
-  void replaceAtomAt(String blockId, int offset, InlineNode newAtom) {
+  /// 替换 [blockId] 块 [offset] 处的原子(date chip 编辑确认 / 图片
+  /// 缩放/改 alt)。该位置不是原子时无操作。undo 一步。
+  ///
+  /// [reselect]:true 时 commit 后保持原子整选 [offset, offset+1] ——
+  /// 图片工具条动作后浮层不消失、disabled 态原位刷新(官方 scale 后
+  /// setSelection(NodeSelection) 同语义);false(默认)光标折叠到
+  /// 原子后(date chip 现行为)。
+  void replaceAtomAt(
+    String blockId,
+    int offset,
+    InlineNode newAtom, {
+    bool reselect = false,
+  }) {
     final i = indexOfBlock(blockId);
     if (i < 0) return;
     final block = _blocks[i];
@@ -441,13 +451,42 @@ class EditorState extends ChangeNotifier {
     );
     _commit(
       newBlocks,
-      EditorSelection.collapsed(
-        EditorPosition(blockId: blockId, offset: offset + 1),
-      ),
+      reselect
+          ? EditorSelection(
+              base: EditorPosition(blockId: blockId, offset: offset),
+              extent: EditorPosition(blockId: blockId, offset: offset + 1),
+            )
+          : EditorSelection.collapsed(
+              EditorPosition(blockId: blockId, offset: offset + 1),
+            ),
       groupWithPrevious: false,
     );
     sealHistory();
   }
+
+  /// 用 [replacement] 替换 blocks[start..end](**含端点**),单 _commit =
+  /// 单 undo 步。图片「加入网格」等跨块结构命令的事务底座 —— 两个块的
+  /// 改写若分两次 commit 会产生两个 undo 步且中间态是「图凭空消失」。
+  void replaceBlockRange(
+    int start,
+    int end,
+    List<EditorBlock> replacement, {
+    EditorSelection? selection,
+  }) {
+    assert(start >= 0 && end < _blocks.length && start <= end);
+    sealHistory();
+    _clearPending();
+    final newBlocks = [
+      ..._blocks.sublist(0, start),
+      ...replacement,
+      ..._blocks.sublist(end + 1),
+    ];
+    _commit(newBlocks, selection ?? _selection, groupWithPrevious: false);
+    sealHistory();
+  }
+
+  /// 块 id 发号(结构命令新建块用,与内部序列一致不撞号)。
+  String nextBlockId() => _nextId();
 
   /// 在 [blockId] 之后插入孤岛块。
   void insertIslandAfter(String blockId, BlockNode node) {

@@ -10,6 +10,8 @@
 /// - 光标 overlay(EditorCaret)。
 library;
 
+import 'dart:ui' as ui show BoxHeightStyle;
+
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show BoxHitTestResult, RenderMetaData;
@@ -33,6 +35,45 @@ import 'editor_container_shell.dart';
 import 'editor_island.dart';
 import 'editor_table_grid.dart';
 
+/// 图片原子选中态(官方 ProseMirror NodeSelection 对应物)。
+///
+/// [globalRect] 帧后计算(_afterFrame),跟随滚动/重排更新 —— 宿主浮层
+/// (工具条/alt 输入条)锚定用。==/hashCode 四字段全参与:rect 变化也
+/// 要通知(浮层跟随),宿主按值比较跳过冗余重建。
+@immutable
+class ImageAtomSelection {
+  const ImageAtomSelection({
+    required this.blockId,
+    required this.offset,
+    required this.image,
+    required this.globalRect,
+  });
+
+  /// 所在文本块 id(动作回调 replaceAtomAt/addImageAtomToGrid 直接用)。
+  final String blockId;
+
+  /// 原子在块内的内容偏移。
+  final int offset;
+
+  /// 图片原子(宿主算 disabled 态与 copyWith 基底)。
+  final ImageRun image;
+
+  /// 图片渲染矩形(全局坐标)。
+  final Rect globalRect;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImageAtomSelection &&
+          blockId == other.blockId &&
+          offset == other.offset &&
+          image == other.image &&
+          globalRect == other.globalRect;
+
+  @override
+  int get hashCode => Object.hash(blockId, offset, image, globalRect);
+}
+
 class FluxdoEditor extends StatefulWidget {
   const FluxdoEditor({
     super.key,
@@ -42,11 +83,12 @@ class FluxdoEditor extends StatefulWidget {
     this.nodeFactory,
     this.markdownImporter,
     this.onIslandEditRequest,
-    this.onImageScale,
     this.onContainerTitleEdit,
     this.onTableEdited,
     this.onCodeBlockEdited,
     this.onAtomTap,
+    this.onImageAtomSelectionChanged,
+    this.onImageAtomOpenRequest,
     this.onCaretRectChanged,
     this.keyEventInterceptor,
   });
@@ -73,11 +115,6 @@ class FluxdoEditor extends StatefulWidget {
   /// null = 岛只读不可编辑。
   final void Function(IslandBlock island)? onIslandEditRequest;
 
-  /// 图片岛缩放胶囊点击 → 请求切档(宿主更新 ImageRun 后
-  /// state.updateIslandNode + 重序列化)。null = 不出缩放控件。
-  final void Function(IslandBlock island, ImageRun image, int scale)?
-      onImageScale;
-
   /// 点容器壳标题(details summary / callout 标题)→ 请求改标题
   /// (宿主弹输入框,改完调 state.updateContainerFrame)。null = 不可改。
   final void Function(ContainerFrame frame)? onContainerTitleEdit;
@@ -95,6 +132,14 @@ class FluxdoEditor extends StatefulWidget {
   /// 单击可编辑原子(date chip)→ 请求编辑(宿主弹属性对话框,确认后
   /// state.replaceAtomAt)。null = 原子只读。
   final void Function(String blockId, int offset, InlineNode atom)? onAtomTap;
+
+  /// 图片原子选中态变化(帧后回报,含全局矩形,跟随滚动/重排;null =
+  /// 取消选中)。宿主浮层(缩放/删除/加网格工具条 + alt 输入条)锚定用。
+  final ValueChanged<ImageAtomSelection?>? onImageAtomSelectionChanged;
+
+  /// 已选中的图片原子再次单击 → 请求打开(宿主开图片查看器,官方
+  /// 「选中态再点开灯箱」同语义)。
+  final ValueChanged<ImageAtomSelection>? onImageAtomOpenRequest;
 
   /// 光标全局矩形变化(帧后回报;null = 光标不可见)。宿主用于锚定
   /// 斜杠菜单/mention 面板到光标位置。
@@ -141,7 +186,14 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _bindScrollPosition();
+  }
+
+  @override
   void dispose() {
+    _scrollPosition?.removeListener(_onScrolled);
     _caretInfo.dispose();
     widget.state.removeListener(_onStateChanged);
     _ime.detach();
@@ -238,6 +290,33 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     } else if (newCaret == null) {
       widget.onCaretRectChanged?.call(null);
     }
+
+    // 图片原子选中态上抛(变化才通知;rect 变化也算 —— 浮层跟随)
+    final imgSel = _computeImageAtomSelection();
+    if (imgSel != _lastImageAtomSel) {
+      _lastImageAtomSel = imgSel;
+      widget.onImageAtomSelectionChanged?.call(imgSel);
+    }
+  }
+
+  /// 滚动跟随:编辑器在宿主滚动容器内,纯滚动不触发 _onStateChanged →
+  /// 帧后矩形(caret/图片选中)不重算 → 浮层脱锚。挂最近 Scrollable 的
+  /// position listener,滚动时帧后重报(仅有上报对象时,listener 早退)。
+  ScrollPosition? _scrollPosition;
+
+  void _onScrolled() {
+    if (_lastImageAtomSel == null && _caretInfo.value.$1 == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _afterFrame();
+    });
+  }
+
+  void _bindScrollPosition() {
+    final next = Scrollable.maybeOf(context)?.position;
+    if (identical(next, _scrollPosition)) return;
+    _scrollPosition?.removeListener(_onScrolled);
+    _scrollPosition = next;
+    _scrollPosition?.addListener(_onScrolled);
   }
 
   /// 岛是否处于「整选」态(选区恰覆盖该岛 0..1)。
@@ -529,6 +608,32 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     final hit = _hitAtGlobal(details.globalPosition);
     _focusNode.requestFocus();
     if (hit == null) return;
+
+    // 图片原子探测(**先于落光标**,官方 NodeSelection 语义:点图 =
+    // 整选原子,不落 caret 不弹 IME;已选中再点 = 请求打开查看器)。
+    // 命中左右各探一格(date chip 同机制:tap 落点在原子两侧边界都算)。
+    final tapBlock = widget.state.textBlockById(hit.$1.blockId);
+    if (tapBlock != null) {
+      for (final off in [hit.$1.offset, hit.$1.offset - 1]) {
+        if (off < 0) continue;
+        final atom = tapBlock.content.atoms[off];
+        if (atom is! ImageRun) continue;
+        final already = _imageAtomSelectionAt(tapBlock.id, off) != null;
+        if (already) {
+          final sel = _lastImageAtomSel;
+          if (sel != null) widget.onImageAtomOpenRequest?.call(sel);
+        } else {
+          widget.state.sealHistory();
+          widget.state.updateSelection(EditorSelection(
+            base: EditorPosition(blockId: tapBlock.id, offset: off),
+            extent: EditorPosition(blockId: tapBlock.id, offset: off + 1),
+          ));
+          _ime.syncFromState(show: false); // 选中图不弹软键盘
+        }
+        return; // 不走落光标分支
+      }
+    }
+
     _verticalGoalX = null;
     _caretAffinity = hit.$2;
     widget.state.sealHistory();
@@ -550,6 +655,61 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
         return;
       }
     }
+  }
+
+  /// 当前选区是否恰好整选 [blockId] 块 [offset] 处的图片原子。
+  /// 是则返回 (blockId, offset),否则 null。
+  (String, int)? _imageAtomSelectionAt(String blockId, int offset) {
+    final norm = widget.state.normalizedSelection();
+    if (norm == null) return null;
+    final (from, to) = norm;
+    if (from.blockId != blockId || to.blockId != blockId) return null;
+    if (from.offset != offset || to.offset != offset + 1) return null;
+    return (blockId, offset);
+  }
+
+  /// 当前文档选区若恰覆盖单个图片原子,返回其选中态(矩形帧后算)。
+  ImageAtomSelection? _lastImageAtomSel;
+
+  ImageAtomSelection? _computeImageAtomSelection() {
+    final norm = widget.state.normalizedSelection();
+    if (norm == null) return null;
+    final (from, to) = norm;
+    if (from.blockId != to.blockId) return null;
+    if (to.offset != from.offset + 1) return null;
+    final block = widget.state.textBlockById(from.blockId);
+    if (block == null) return null;
+    final atom = block.content.atoms[from.offset];
+    if (atom is! ImageRun) return null;
+
+    final index = widget.state.indexOfBlock(from.blockId);
+    if (index < 0) return null;
+    final id = _renderIdOf(index);
+    final proj = _controller.registry.logicalById(id)?.projection;
+    final p = _controller.registry.byId(id)?.paragraph;
+    if (proj == null || p == null || !p.attached) return null;
+
+    final rs = proj.renderOffsetForContent(from.offset);
+    final re = proj.renderOffsetForContent(to.offset);
+    final boxes = p.getBoxesForSelection(
+      TextSelection(baseOffset: rs, extentOffset: re),
+      boxHeightStyle: ui.BoxHeightStyle.tight,
+    );
+    Rect? rect;
+    for (final b in boxes) {
+      final tl = p.localToGlobal(Offset(b.left, b.top));
+      final br = p.localToGlobal(Offset(b.right, b.bottom));
+      if (!tl.dx.isFinite || !br.dx.isFinite) continue;
+      final r = Rect.fromPoints(tl, br);
+      rect = rect == null ? r : rect.expandToInclude(r);
+    }
+    if (rect == null) return null;
+    return ImageAtomSelection(
+      blockId: from.blockId,
+      offset: from.offset,
+      image: atom,
+      globalRect: rect,
+    );
   }
 
   /// [global] 是否落在自管交互区(表格网格)内 —— 命中路径上找
@@ -726,9 +886,6 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
               onEditRequest: widget.onIslandEditRequest == null
                   ? null
                   : () => widget.onIslandEditRequest!(ib),
-              onImageScale: widget.onImageScale == null
-                  ? null
-                  : (image, scale) => widget.onImageScale!(ib, image, scale),
             ),
         },
       );
