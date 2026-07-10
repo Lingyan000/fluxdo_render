@@ -140,9 +140,9 @@ void main() {
   });
 
 
-  // ---- 网格岛工具条(官方 GridNodeView) ----
+  // ---- 网格容器交互(官方 composer 内聚布局) ----
 
-  testWidgets('grid 岛选中出工具条,切轮播/移除网格生效且不清选区',
+  testWidgets('grid 容器常驻控件:切轮播/移除网格生效',
       (tester) async {
     final state = EditorState(blocks: [
       TextBlock(id: 'e_0', content: EditableTextContent(text: 'x')),
@@ -164,24 +164,16 @@ void main() {
     ));
     await tester.pump();
 
-    // 未选中:无工具条
-    expect(find.text('移除网格'), findsNothing);
-
-    // 点岛**边缘空白**(瓦片区是自管区走子选中;边缘 padding 才是岛
-    // 整选入口)→ 工具条出现
-    final islandRect = tester.getRect(find.byType(EditorIsland));
-    await tester.tapAt(islandRect.topLeft + const Offset(4, 4));
-    await tester.pump();
+    // 官方内聚布局:模式切换/移除网格**常驻**容器内(不依赖选中态)
     expect(find.text('移除网格'), findsOneWidget);
     expect(find.text('轮播'), findsOneWidget);
 
-    // 切轮播:mode 变、选区保持整选(MetaData 让路)
+    // 切轮播:mode 变(容器控件在自管区,选区无关)
     await tester.tap(find.text('轮播'), warnIfMissed: false);
     await tester.pump();
     expect(
         ((state.blocks[1] as IslandBlock).node as ImageGridNode).mode,
         ImageGridMode.carousel);
-    expect(state.selection!.base.blockId, 'e_g', reason: '整选不被清');
 
     // 移除网格:拆成两个图原子段
     await tester.tap(find.text('移除网格'), warnIfMissed: false);

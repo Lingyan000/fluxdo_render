@@ -750,6 +750,28 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     if (sel != null) setState(() {}); // 瓦片描边
   }
 
+  /// grid 内瓦片 alt 原位编辑保存:images[index] copyWith(alt) 后
+  /// updateIslandNode 原位换。
+  void _setGridImageAlt(String islandId, int index, String alt) {
+    final i = widget.state.indexOfBlock(islandId);
+    if (i < 0) return;
+    final block = widget.state.blocks[i];
+    if (block is! IslandBlock || block.node is! ImageGridNode) return;
+    final grid = block.node as ImageGridNode;
+    if (index < 0 || index >= grid.images.length) return;
+    final images = [...grid.images];
+    images[index] = images[index].copyWith(alt: alt);
+    widget.state.updateIslandNode(
+      islandId,
+      ImageGridNode(
+        id: grid.id,
+        images: images,
+        columns: grid.columns,
+        mode: grid.mode,
+      ),
+    );
+  }
+
   ImageAtomSelection? _computeImageAtomSelection() {
     final norm = widget.state.normalizedSelection();
     if (norm == null) return null;
@@ -944,8 +966,22 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                   ? state.composing
                   : TextRange.empty,
               listMarkerOrdinal: ordinals[i],
-              // 行内图片原子走岛同一图片管线(upload 解析/解码上限)
-              imageContentBuilder: _islandFactory.imageContentBuilder,
+              // 行内图片原子走岛同一图片管线(upload 解析/解码上限);
+              // 鼠标样式官方对齐:未选中 hover=click,已选中=zoomIn
+              // (再点开查看器)。MouseRegion 盖过编辑器根的 text 光标。
+              imageContentBuilder: _islandFactory.imageContentBuilder == null
+                  ? null
+                  : (ctx, img, total) {
+                      final selected = _lastImageAtomSel != null &&
+                          _lastImageAtomSel!.image == img;
+                      return MouseRegion(
+                        cursor: selected
+                            ? SystemMouseCursors.zoomIn
+                            : SystemMouseCursors.click,
+                        child: _islandFactory.imageContentBuilder!(
+                            ctx, img, total),
+                      );
+                    },
             ),
           // 孤岛:NodeFactory 渲染,tap 整选,双击请求编辑,选中态描边
           final IslandBlock ib => EditorIsland(
@@ -965,16 +1001,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
               onEditRequest: widget.onIslandEditRequest == null
                   ? null
                   : () => widget.onIslandEditRequest!(ib),
-              // 网格岛工具条(纯结构命令,不需要宿主参与):
-              // 模式切换 grid ⇄ carousel、移除网格(拆壳保图为原子段)
-              onGridModeChange: ib.node is ImageGridNode
-                  ? (mode) => setImageGridMode(widget.state, ib.id, mode)
-                  : null,
-              onGridRemove: ib.node is ImageGridNode
-                  ? () => removeImageGrid(widget.state, ib.id)
-                  : null,
-              // grid 岛内容换可交互瓦片视图(瓦片单击子选中 → 官方
-              // isInGrid 工具条;再点开查看器)
+              // grid 岛内容换官方 composer 内聚交互视图:模式切换/移除
+              // 网格/瓦片删除/移出/alt 全内聚(纯结构命令,宿主只管
+              // 查看器);瓦片单击子选中
               contentOverride: ib.node is ImageGridNode
                   ? EditorImageGrid(
                       node: ib.node as ImageGridNode,
@@ -986,6 +1015,16 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                       onImageTap: _setGridImageSelection,
                       onImageOpen: (sel) =>
                           widget.onGridImageOpenRequest?.call(sel),
+                      onModeChange: (mode) =>
+                          setImageGridMode(widget.state, ib.id, mode),
+                      onRemoveGrid: () =>
+                          removeImageGrid(widget.state, ib.id),
+                      onRemoveImage: (index) =>
+                          removeImageFromGrid(widget.state, ib.id, index),
+                      onMoveImageOut: (index) =>
+                          moveImageOutsideGrid(widget.state, ib.id, index),
+                      onAltChanged: (index, alt) =>
+                          _setGridImageAlt(ib.id, index, alt),
                     )
                   : null,
             ),
