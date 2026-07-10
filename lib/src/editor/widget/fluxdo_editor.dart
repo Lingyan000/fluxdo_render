@@ -216,6 +216,16 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _bindScrollPosition();
+    // 键盘 inset 变化(弹出/收起动画每帧):清 ensure key + 帧后重算,
+    // 光标跟着键盘上沿浮起(MediaQuery 依赖由这次读取建立)。
+    final inset = MediaQuery.maybeOf(context)?.viewInsets.bottom ?? 0;
+    if (inset != _lastViewInsetBottom) {
+      _lastViewInsetBottom = inset;
+      _lastEnsuredKey = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _afterFrame();
+      });
+    }
   }
 
   @override
@@ -317,9 +327,10 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
         caretRect: newCaret,
       );
       // 光标全局矩形上抛(斜杠菜单/mention 面板锚定光标,而非编辑器角)
-      widget.onCaretRectChanged?.call(
-        rootBox.localToGlobal(newCaret.topLeft) & newCaret.size,
-      );
+      final caretGlobal =
+          rootBox.localToGlobal(newCaret.topLeft) & newCaret.size;
+      widget.onCaretRectChanged?.call(caretGlobal);
+      _ensureCaretVisible(caretGlobal);
     } else if (newCaret == null) {
       widget.onCaretRectChanged?.call(null);
     }
@@ -497,6 +508,63 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     _scrollPosition = next;
     _lastScrollPixels = next?.pixels ?? 0;
     _scrollPosition?.addListener(_onScrolled);
+  }
+
+  // -----------------------------------------------------------------
+  // 软键盘 ensureVisible(S5)
+  // -----------------------------------------------------------------
+
+  /// 上次 ensure 的 (docRevision, selection) —— 同 key 不重滚(纯滚动帧
+  /// 不产生新 key,无"用户滚走又被拉回"的反馈环)。
+  (int, EditorSelection?)? _lastEnsuredKey;
+
+  /// 记录的键盘 inset —— 键盘弹出动画期间变化,清 key 让光标跟着键盘
+  /// 上沿浮起。
+  double _lastViewInsetBottom = 0;
+
+  /// 光标越出可见区(视口 ∩ 键盘上方)时滚动到可见。仅折叠光标态
+  /// (打字/点击);非折叠选区(手柄态)不自动滚 —— 用户在看选区。
+  ///
+  /// 不用 Scrollable.ensureVisible:它按**整个 RenderObject**(编辑器是
+  /// 一整块巨型 child)对齐,会瞬移到块顶。position.animateTo 按光标
+  /// 矩形精确滚(宿主 markdown_editor 同构做法)。
+  void _ensureCaretVisible(Rect caretGlobal) {
+    final pos = _scrollPosition;
+    if (pos == null || !pos.hasContentDimensions) return;
+    final sel = widget.state.selection;
+    if (sel == null || !sel.isCollapsed) return;
+    final key = (widget.state.docRevision, sel);
+    if (key == _lastEnsuredKey) return;
+    _lastEnsuredKey = key;
+
+    final scrollableCtx = Scrollable.maybeOf(context)?.context;
+    final vpBox = scrollableCtx?.findRenderObject();
+    if (vpBox is! RenderBox || !vpBox.hasSize) return;
+    final vpRect = vpBox.localToGlobal(Offset.zero) & vpBox.size;
+
+    final mq = MediaQuery.maybeOf(context);
+    final screenH = mq?.size.height ?? vpRect.bottom;
+    final kbTop = screenH - (mq?.viewInsets.bottom ?? 0);
+    const pad = 24.0;
+    final visBottom = (vpRect.bottom < kbTop ? vpRect.bottom : kbTop) - pad;
+    final visTop = vpRect.top + pad;
+    if (visBottom <= visTop) return;
+
+    double? delta;
+    if (caretGlobal.bottom > visBottom) {
+      delta = caretGlobal.bottom - visBottom;
+    } else if (caretGlobal.top < visTop) {
+      delta = caretGlobal.top - visTop;
+    }
+    if (delta == null) return;
+    final target =
+        (pos.pixels + delta).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    if ((target - pos.pixels).abs() < 1) return;
+    pos.animateTo(
+      target,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+    );
   }
 
   /// 岛是否处于「整选」态(选区恰覆盖该岛 0..1)。
