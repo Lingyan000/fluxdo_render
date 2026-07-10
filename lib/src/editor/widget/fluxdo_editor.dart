@@ -95,6 +95,7 @@ class FluxdoEditor extends StatefulWidget {
     required this.state,
     this.baseTextStyle,
     this.autofocus = false,
+    this.focusNode,
     this.nodeFactory,
     this.markdownImporter,
     this.onIslandEditRequest,
@@ -115,6 +116,9 @@ class FluxdoEditor extends StatefulWidget {
   final TextStyle? baseTextStyle;
 
   final bool autofocus;
+
+  /// 外部焦点节点(宿主监听焦点态做键盘/面板联动;null 内部自建)。
+  final FocusNode? focusNode;
 
   /// 孤岛块的渲染工厂(主项目注入带 emoji/image builder 的实例;
   /// null 用子包默认 fallback —— demo/测试可用)。
@@ -184,7 +188,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   late final SelectionHitTester _hitTester;
   late final EditorImeClient _ime;
   late final NodeFactory _islandFactory;
-  final FocusNode _focusNode = FocusNode(debugLabel: 'FluxdoEditor');
+  late final FocusNode _focusNode =
+      widget.focusNode ?? FocusNode(debugLabel: 'FluxdoEditor');
+  bool get _ownsFocusNode => widget.focusNode == null;
   final GlobalKey _rootKey = GlobalKey();
 
   /// 编辑器局部坐标系的光标矩形 + 配对修订号(帧后由 hit_tester 计算)。
@@ -238,7 +244,8 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     widget.state.removeListener(_onStateChanged);
     _controller.removeListener(_onSelectionControllerChanged);
     _ime.detach();
-    _focusNode.dispose();
+    _focusNode.removeListener(_onFocusChanged);
+    if (_ownsFocusNode) _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
