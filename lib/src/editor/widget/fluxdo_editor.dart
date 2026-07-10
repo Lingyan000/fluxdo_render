@@ -338,9 +338,17 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   /// position listener,滚动时帧后重报(仅有上报对象时,listener 早退)。
   ScrollPosition? _scrollPosition;
 
+  bool _scrollRecomputeQueued = false;
+
   void _onScrolled() {
     if (_lastImageAtomSel == null && _caretInfo.value.$1 == null) return;
+    // coalesce:滚动一帧内 position listener 可触发多次,每次都排
+    // postFrame 会让 _afterFrame(getBoxesForSelection + 事件比对)一帧
+    // 跑 N 遍 —— 拖选/惯性滚动时白耗 CPU。
+    if (_scrollRecomputeQueued) return;
+    _scrollRecomputeQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollRecomputeQueued = false;
       if (mounted) _afterFrame();
     });
   }
@@ -967,21 +975,16 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                   : TextRange.empty,
               listMarkerOrdinal: ordinals[i],
               // 行内图片原子走岛同一图片管线(upload 解析/解码上限);
-              // 鼠标样式官方对齐:未选中 hover=click,已选中=zoomIn
-              // (再点开查看器)。MouseRegion 盖过编辑器根的 text 光标。
+              // hover=click(可点选)。注意:builder 产物进 flatten 缓存
+              // (content 不变不重跑),不能在闭包里读选中态等易变状态
+              // ——不会刷新,还误导性能分析。
               imageContentBuilder: _islandFactory.imageContentBuilder == null
                   ? null
-                  : (ctx, img, total) {
-                      final selected = _lastImageAtomSel != null &&
-                          _lastImageAtomSel!.image == img;
-                      return MouseRegion(
-                        cursor: selected
-                            ? SystemMouseCursors.zoomIn
-                            : SystemMouseCursors.click,
+                  : (ctx, img, total) => MouseRegion(
+                        cursor: SystemMouseCursors.click,
                         child: _islandFactory.imageContentBuilder!(
                             ctx, img, total),
-                      );
-                    },
+                      ),
             ),
           // 孤岛:NodeFactory 渲染,tap 整选,双击请求编辑,选中态描边
           final IslandBlock ib => EditorIsland(
