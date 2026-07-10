@@ -155,11 +155,13 @@ class RenderTextProjection {
 
   /// 单个 entry 的内容空间宽度。
   static int _contentLenOfEntry(ProjectionEntry e) => switch (e.kind) {
-        // localDate 同 emoji/mention:编辑模型是一个 FFFC 哨兵原子(M5);
-        // 投影文本(服务端预渲染串)只用于复制/引用,不参与编辑坐标。
+        // localDate/image 同 emoji/mention:编辑模型是一个 FFFC 哨兵原子
+        // (M5/行内图);投影文本(预渲染串/alt)只用于复制/引用,
+        // 不参与编辑坐标。
         ProjectionKind.emoji ||
         ProjectionKind.mention ||
-        ProjectionKind.localDate =>
+        ProjectionKind.localDate ||
+        ProjectionKind.image =>
           1,
         _ when e.isAtomic => e.logicalText.length,
         _ => _contentLenOf(e.logicalText),

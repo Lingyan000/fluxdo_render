@@ -220,6 +220,12 @@ class EditableTextContent {
           // 时间 chip:行内原子(M5;序列化写回 [date=…])
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
+        case ImageRun(:final scale, :final lightboxUrl)
+            when scale == null && lightboxUrl == null:
+          // 裸图(小外链图/表情包):行内原子(isEditableInline 同判据;
+          // 可缩放/lightbox 图在 doc_converter 已拦截岛化,不到这)
+          atoms[buf.length] = node;
+          _appendText(buf, marks, activeKinds, kAtomChar);
         // ---- 白名单外(防御降级,正常链路由 doc_converter 拦截岛化) ----
         case ImageRun(:final alt):
           _appendText(buf, marks, activeKinds, sanitizeText(alt));

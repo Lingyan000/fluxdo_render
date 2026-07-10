@@ -705,6 +705,8 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                   ? state.composing
                   : TextRange.empty,
               listMarkerOrdinal: ordinals[i],
+              // 行内图片原子走岛同一图片管线(upload 解析/解码上限)
+              imageContentBuilder: _islandFactory.imageContentBuilder,
             ),
           // 孤岛:NodeFactory 渲染,tap 整选,双击请求编辑,选中态描边
           final IslandBlock ib => EditorIsland(

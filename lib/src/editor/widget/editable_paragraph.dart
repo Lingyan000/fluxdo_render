@@ -18,6 +18,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../flatten/inline_flattener.dart';
 import '../../render/block_text_styles.dart';
+import '../../render/image_handler.dart' show ImageContentBuilder;
 import '../../render/list_item_layout.dart';
 import '../../render/selectable_text_box.dart';
 import '../../selection/projection.dart';
@@ -32,6 +33,7 @@ class EditableParagraph extends StatefulWidget {
     required this.baseStyle,
     this.composing = TextRange.empty,
     this.listMarkerOrdinal = 1,
+    this.imageContentBuilder,
   });
 
   final TextBlock block;
@@ -40,6 +42,10 @@ class EditableParagraph extends StatefulWidget {
   final int documentOrder;
 
   final TextStyle baseStyle;
+
+  /// 行内图片原子(裸图)渲染 builder(FluxdoEditor 透传 NodeFactory 的
+  /// imageContentBuilder,与岛内图同一管线);null 用子包默认。
+  final ImageContentBuilder? imageContentBuilder;
 
   /// 本段的 IME composing 区间(编辑文本坐标);非本段/无 composing 传 empty。
   final TextRange composing;
@@ -72,6 +78,14 @@ class _EditableParagraphState extends State<EditableParagraph> {
         editingLinkColor: _linkColor,
       ),
       _effectiveStyle,
+      // 行内图片原子(裸图):走宿主图片管线(upload 解析/解码上限),
+      // 但包 AbsorbPointer 冻结图自身交互(查看器 tap/Hero/右键菜单都
+      // 会抢编辑手势 —— 岛同原则)。点图 = 编辑器落光标。
+      imageContentBuilder: widget.imageContentBuilder == null
+          ? null
+          : (ctx, img, total) => AbsorbPointer(
+                child: widget.imageContentBuilder!(ctx, img, total),
+              ),
     );
     if (sw != null && sw.elapsedMilliseconds > 4) {
       debugPrint('[EditorPerf] flatten ${sw.elapsedMilliseconds}ms '

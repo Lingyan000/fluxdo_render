@@ -34,6 +34,13 @@ bool isEditableInline(InlineNode n) => switch (n) {
       // local date chip:行内原子(emoji/mention 同机制),编辑态显示
       // 服务端预渲染文本,序列化写回 [date=…] BBCode
       LocalDateRun() => true,
+      // 裸图 = 行内原子(官方 ProseMirror image 就是 inline:true)。
+      // 判据数据驱动:scale 非 null = upload 可缩放图(image-controls
+      // 控件待遇,岛);lightboxUrl 非 null = 超尺寸大图(查看器待遇,
+      // 岛)。两者皆无 = cook 眼里的普通行内图(小外链图/表情包),
+      // 原子化 —— 图后可直接打字。
+      ImageRun(:final scale, :final lightboxUrl) =>
+        scale == null && lightboxUrl == null,
       EmRun(:final children) => children.every(isEditableInline),
       StrongRun(:final children) => children.every(isEditableInline),
       InlineCodeRun() => true,

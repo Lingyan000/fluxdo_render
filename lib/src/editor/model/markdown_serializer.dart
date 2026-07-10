@@ -317,6 +317,8 @@ String _inlineToMarkdown(EditableTextContent content) {
         EmojiRun(:final name) => name.isEmpty ? '' : ':$name:',
         MentionRun(:final username) => '@$username',
         final LocalDateRun d => _serializeLocalDate(d),
+        // 行内图片原子(裸图):标准图片语法
+        final ImageRun img => _serializeImageRun(img),
         _ => '',
       });
     } else if (ch == '\n') {
