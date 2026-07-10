@@ -13,6 +13,14 @@ library;
 import 'dart:ui' as ui show BoxHeightStyle;
 
 import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/gestures.dart'
+    show
+        LongPressGestureRecognizer,
+        PanGestureRecognizer,
+        PointerDeviceKind,
+        TapGestureRecognizer,
+        kDoubleTapTimeout,
+        kDoubleTapSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show BoxHitTestResult, RenderMetaData;
 import 'package:flutter/services.dart';
@@ -23,7 +31,10 @@ import '../../node/node.dart'
 import '../../render/block_text_styles.dart';
 import '../../render/node_factory.dart';
 import '../../selection/hit_tester.dart';
+import '../../selection/selection_exporter.dart';
 import '../../selection/selection_geometry.dart';
+import '../../selection/selection_handles.dart';
+import '../../selection/selection_magnifier.dart';
 import '../../selection/selection_registry.dart';
 import '../../selection/selection_scope.dart';
 import '../input/editor_ime_client.dart';
@@ -34,6 +45,7 @@ import 'editable_paragraph.dart';
 import 'editor_caret.dart';
 import 'editor_code_block.dart';
 import 'editor_container_shell.dart';
+import 'editor_context_bar.dart';
 import 'editor_image_grid.dart';
 import 'editor_island.dart';
 import 'editor_table_grid.dart';
@@ -195,6 +207,8 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     _islandFactory = widget.nodeFactory ?? NodeFactory();
     widget.state.addListener(_onStateChanged);
     _focusNode.addListener(_onFocusChanged);
+    // 手柄拖动的反向回写(controller → state;仅 _handleDragging 期间)
+    _controller.addListener(_onSelectionControllerChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _afterFrame());
   }
 
@@ -206,9 +220,13 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
 
   @override
   void dispose() {
+    _handles?.hide();
+    _contextBar?.hide();
+    _magnifier?.hide();
     _scrollPosition?.removeListener(_onScrolled);
     _caretInfo.dispose();
     widget.state.removeListener(_onStateChanged);
+    _controller.removeListener(_onSelectionControllerChanged);
     _ime.detach();
     _focusNode.dispose();
     _controller.dispose();
@@ -226,12 +244,14 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     if (!mounted) return;
     if (kDebugMode) _editFrameWatch = Stopwatch()..start();
     // 外部变更(undo/redo 按钮、程序化改文档)→ IME 的 diff 基准已过期,
-    // 必须重喂;IME 自身回调引发的通知、以及拖选进行中(高频选区变化,
-    // 结束时 _onPanEnd 统一喂)除外。
+    // 必须重喂;IME 自身回调引发的通知、以及拖选/长按扩选/手柄拖动进行
+    // 中(高频选区变化,end 时统一喂)除外。
     // hasPrimaryFocus(非 hasFocus):焦点在子输入框(表格 cell)时
     // 编辑器 IME 必须闭嘴 —— 重喂会跟 TextField 抢输入连接。
     if (!_ime.isApplyingPlatformUpdate &&
         _dragBase == null &&
+        !_longPressing &&
+        !_handleDragging &&
         _focusNode.hasPrimaryFocus) {
       _ime.syncFromState(show: false);
     }
@@ -331,6 +351,114 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
         _setGridImageSelection(null);
       }
     }
+
+    _syncHandlesAndContextBar();
+  }
+
+  // -----------------------------------------------------------------
+  // 移动端选区手柄 + 上下文动作条(S3/S4 桥接)
+  // -----------------------------------------------------------------
+
+  SelectionHandlesController? _handles;
+  EditorContextBar? _contextBar;
+
+  /// 手柄拖动进行中(高频选区变化不逐帧重喂 IME;controller → state 的
+  /// 反向回写只在此期间开启)。
+  bool _handleDragging = false;
+
+  /// 手柄拖动:_controller(DocumentSelection)→ EditorState 回写。
+  /// 平时是 state → controller 单向镜像(_afterFrame),环由 == 短路。
+  void _onSelectionControllerChanged() {
+    if (!_handleDragging) return;
+    final sel = _controller.selection;
+    if (sel == null) return;
+    final base = _toEditorPosition(sel.base);
+    final extent = _toEditorPosition(sel.extent);
+    if (base == null || extent == null) return;
+    widget.state.updateSelection(EditorSelection(base: base, extent: extent));
+  }
+
+  /// 帧后统一收敛手柄/动作条显隐(唯一真源:state.selection + 触摸来源)。
+  void _syncHandlesAndContextBar() {
+    final sel = widget.state.selection;
+    final show = _touchSelection &&
+        _focusNode.hasPrimaryFocus &&
+        sel != null &&
+        !sel.isCollapsed &&
+        _lastImageAtomSel == null && // 图原子选中走宿主工具条
+        _controller.selection != null; // 文档几何可得(失焦已清)
+    if (show) {
+      (_handles ??= SelectionHandlesController(
+        context: context,
+        controller: _controller,
+        onDragStart: () {
+          _handleDragging = true;
+          _contextBar?.hide();
+        },
+        onDragEnd: () {
+          _handleDragging = false;
+          _ime.syncFromState(show: false);
+          _showContextBarForSelection();
+        },
+      )).show();
+      if (!_handleDragging && !_longPressing) {
+        _showContextBarForSelection();
+      }
+    } else {
+      _handles?.hide();
+      _contextBar?.hide();
+    }
+  }
+
+  /// 按当前选区几何弹动作条(复制/剪切/粘贴/全选)。
+  void _showContextBarForSelection() {
+    final docSel = _controller.selection;
+    if (docSel == null) return;
+    final data = SelectionExporter(_controller.registry).export(docSel);
+    if (data == null || data.globalRects.isEmpty) return;
+    (_contextBar ??= EditorContextBar(
+      context: context,
+      tapRegionGroupId: _controller,
+    )).show(
+      selectionBounds: data.globalBounds,
+      items: [
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.copy,
+          onPressed: () {
+            _clipboardCopy();
+            _dismissTouchSelection();
+          },
+        ),
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.cut,
+          onPressed: () {
+            _clipboardCut();
+            _dismissTouchSelection();
+          },
+        ),
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: () {
+            _clipboardPaste();
+            _dismissTouchSelection();
+          },
+        ),
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.selectAll,
+          onPressed: () {
+            widget.state.selectAll();
+            // 全选后保持触摸态,手柄/动作条按新选区重弹
+          },
+        ),
+      ],
+    );
+  }
+
+  /// 动作执行后收触摸选区 UI(复制后折叠选区 = 移动惯例)。
+  void _dismissTouchSelection() {
+    _touchSelection = false;
+    _contextBar?.hide();
+    _handles?.hide();
   }
 
   /// 滚动跟随:编辑器在宿主滚动容器内,纯滚动不触发 _onStateChanged →
@@ -339,8 +467,17 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   ScrollPosition? _scrollPosition;
 
   bool _scrollRecomputeQueued = false;
+  double _lastScrollPixels = 0;
 
   void _onScrolled() {
+    // 手柄/动作条滚动跟随:算本帧 delta 做滞后补偿(阅读端同款消抖)
+    final pixels = _scrollPosition?.pixels ?? 0;
+    final delta = pixels - _lastScrollPixels;
+    _lastScrollPixels = pixels;
+    if (_handles?.isShowing ?? false) {
+      _handles!.update(yCompensation: delta);
+      _contextBar?.reposition(yCompensation: delta);
+    }
     if (_lastImageAtomSel == null && _caretInfo.value.$1 == null) return;
     // coalesce:滚动一帧内 position listener 可触发多次,每次都排
     // postFrame 会让 _afterFrame(getBoxesForSelection + 事件比对)一帧
@@ -358,6 +495,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     if (identical(next, _scrollPosition)) return;
     _scrollPosition?.removeListener(_onScrolled);
     _scrollPosition = next;
+    _lastScrollPixels = next?.pixels ?? 0;
     _scrollPosition?.addListener(_onScrolled);
   }
 
@@ -642,45 +780,45 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
 
   EditorPosition? _positionAtGlobal(Offset global) => _hitAtGlobal(global)?.$1;
 
+  /// 双击选词的连击检测(D3:不用 DoubleTapGestureRecognizer —— 它会让
+  /// 单击等 ~300ms 竞技场,落光标手感变肉;手动记时间/位置判连击)。
+  DateTime? _lastTapTime;
+  Offset? _lastTapGlobal;
+
   void _onTapDown(TapDownDetails details) {
     // 点在表格网格等自管交互区:编辑器手势完全让路 —— 抢焦点/设选区/
     // 弹 IME 都不做(否则:选区兜底跳到邻块 + 编辑器光标与 cell
     // TextField 光标并存 = 双光标,焦点还来回闪)。
     if (_hitsSelfManagedRegion(details.globalPosition)) return;
+    // 岛区域同样让路(整选由岛自己的 GestureDetector.onTap 负责):
+    // onTapDown 在 down+deadline 就 fire、不等竞技场 —— 不让路的话
+    // 长按岛时编辑器先把光标落到**邻段**(岛无 RenderParagraph,命中
+    // 兜底到最近文本块),岛的 onTap 又不会跟着 fire(长按不是 tap),
+    // 光标就错停邻段。单击岛此前没暴露只是因为岛 onTap 随后覆盖了中间态。
+    if (_hitsIslandRegion(details.globalPosition)) return;
     final hit = _hitAtGlobal(details.globalPosition);
     _focusNode.requestFocus();
     if (hit == null) return;
 
-    // 图片原子探测(**先于落光标**,官方 NodeSelection 语义:点图 =
-    // 整选原子,不落 caret 不弹 IME;已选中再点 = 请求打开查看器)。
-    // 命中判定 = tap 点**落在图的渲染盒内**(getBoxesForSelection):
-    // 只按"最近文本位置左右一格"判会把图片行右侧整片空白都当图 ——
-    // 点空白误选图/误开查看器。
-    final tapBlock = widget.state.textBlockById(hit.$1.blockId);
-    if (tapBlock != null) {
-      for (final off in [hit.$1.offset, hit.$1.offset - 1]) {
-        if (off < 0) continue;
-        final atom = tapBlock.content.atoms[off];
-        if (atom is! ImageRun) continue;
-        if (!_tapInsideAtomBox(tapBlock.id, off, details.globalPosition)) {
-          continue;
-        }
-        final already = _imageAtomSelectionAt(tapBlock.id, off) != null;
-        if (already) {
-          final sel = _lastImageAtomSel;
-          if (sel != null) widget.onImageAtomOpenRequest?.call(sel);
-        } else {
-          widget.state.sealHistory();
-          widget.state.updateSelection(EditorSelection(
-            base: EditorPosition(blockId: tapBlock.id, offset: off),
-            extent: EditorPosition(blockId: tapBlock.id, offset: off + 1),
-          ));
-          _ime.syncFromState(show: false); // 选中图不弹软键盘
-        }
-        return; // 不走落光标分支
-      }
+    // 图片原子探测(**先于落光标**,官方 NodeSelection 语义)
+    if (_trySelectImageAtomAt(hit.$1, details.globalPosition)) return;
+
+    // 双击选词(触摸类连击;鼠标双击桌面惯例同样适用)
+    final now = DateTime.now();
+    final isDoubleTap = _lastTapTime != null &&
+        _lastTapGlobal != null &&
+        now.difference(_lastTapTime!) < kDoubleTapTimeout &&
+        (details.globalPosition - _lastTapGlobal!).distance < kDoubleTapSlop;
+    _lastTapTime = now;
+    _lastTapGlobal = details.globalPosition;
+    if (isDoubleTap && _selectWordAtGlobal(details.globalPosition)) {
+      _touchSelection = details.kind == PointerDeviceKind.touch ||
+          details.kind == PointerDeviceKind.stylus;
+      _ime.syncFromState(show: false);
+      return;
     }
 
+    _touchSelection = false;
     _verticalGoalX = null;
     _caretAffinity = hit.$2;
     widget.state.sealHistory();
@@ -702,6 +840,164 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
         return;
       }
     }
+  }
+
+  /// [pos] 附近若命中图片原子(渲染盒内)→ 整选/打开,返回 true。
+  /// tap 与长按共用(长按图片 = tap 同款 NodeSelection 语义)。
+  ///
+  /// 命中判定 = tap 点**落在图的渲染盒内**(getBoxesForSelection):
+  /// 只按"最近文本位置左右一格"判会把图片行右侧整片空白都当图 ——
+  /// 点空白误选图/误开查看器。
+  bool _trySelectImageAtomAt(EditorPosition pos, Offset global) {
+    final tapBlock = widget.state.textBlockById(pos.blockId);
+    if (tapBlock == null) return false;
+    for (final off in [pos.offset, pos.offset - 1]) {
+      if (off < 0) continue;
+      final atom = tapBlock.content.atoms[off];
+      if (atom is! ImageRun) continue;
+      if (!_tapInsideAtomBox(tapBlock.id, off, global)) continue;
+      final already = _imageAtomSelectionAt(tapBlock.id, off) != null;
+      if (already) {
+        final sel = _lastImageAtomSel;
+        if (sel != null) widget.onImageAtomOpenRequest?.call(sel);
+      } else {
+        widget.state.sealHistory();
+        widget.state.updateSelection(EditorSelection(
+          base: EditorPosition(blockId: tapBlock.id, offset: off),
+          extent: EditorPosition(blockId: tapBlock.id, offset: off + 1),
+        ));
+        _ime.syncFromState(show: false); // 选中图不弹软键盘
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// [global] 处按词边界选词。命中失败/空词返回 false。
+  bool _selectWordAtGlobal(Offset global) {
+    final docPos = _hitTester.positionAt(
+      global,
+      hitTestRoot: _rootKey.currentContext?.findRenderObject(),
+    );
+    if (docPos == null) return false;
+    final wb = _hitTester.wordBoundaryAt(docPos);
+    if (wb == null || wb.start >= wb.end) return false;
+    final base = _toEditorPosition(DocumentPosition(
+      blockId: docPos.blockId,
+      renderOffset: wb.start,
+    ));
+    final extent = _toEditorPosition(DocumentPosition(
+      blockId: docPos.blockId,
+      renderOffset: wb.end,
+    ));
+    if (base == null || extent == null) return false;
+    widget.state.sealHistory();
+    widget.state.updateSelection(EditorSelection(base: base, extent: extent));
+    return true;
+  }
+
+  // -----------------------------------------------------------------
+  // 长按选词(触摸/触控笔;S2)
+  // -----------------------------------------------------------------
+
+  /// 长按进行中(选区高频变化不逐帧重喂 IME,end 统一 sync)。
+  bool _longPressing = false;
+
+  /// 最近一次选区变化来自触摸(长按/双击/拖手柄)→ 手柄显示依据。
+  bool _touchSelection = false;
+
+  SelectionMagnifier? _magnifier;
+
+  void _onLongPressStart(LongPressStartDetails details) {
+    // 长按序列不参与连击:TapGestureRecognizer 的 onTapDown 在 deadline
+    // 后即使输了竞技场也会 fire,已把本次 down 记进 _lastTapTime ——
+    // 不清的话长按松手后短时间内 tap 附近会被误判双击选词。
+    _lastTapTime = null;
+    _lastTapGlobal = null;
+    final global = details.globalPosition;
+    if (_hitsSelfManagedRegion(global) || _hitsIslandRegion(global)) return;
+    final docPos = _hitTester.positionAt(
+      global,
+      hitTestRoot: _rootKey.currentContext?.findRenderObject(),
+    );
+    if (docPos == null) return;
+    _focusNode.requestFocus();
+
+    // 图片原子:长按 = tap 同款整选(不选词)
+    final editorPos = _toEditorPosition(docPos);
+    if (editorPos != null && _trySelectImageAtomAt(editorPos, global)) {
+      _touchSelection = true;
+      return;
+    }
+
+    widget.state.sealHistory();
+    if (_selectWordAtGlobal(global)) {
+      HapticFeedback.selectionClick();
+    } else if (editorPos != null) {
+      // 空白/空段:落光标(系统长按空白同款)
+      widget.state.updateSelection(EditorSelection.collapsed(editorPos));
+    }
+    _touchSelection = true;
+    _longPressing = true;
+  }
+
+  void _onLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
+    if (!_longPressing) return;
+    final docPos = _hitTester.positionAt(
+      details.globalPosition,
+      hitTestRoot: _rootKey.currentContext?.findRenderObject(),
+    );
+    if (docPos == null) return;
+    final extent = _toEditorPosition(docPos);
+    final sel = widget.state.selection;
+    if (extent == null || sel == null) return;
+    // 按住直接拖 = 扩选(字符粒度,base 不动;阅读端长按拖同语义)
+    widget.state.updateSelection(
+      EditorSelection(base: sel.base, extent: extent),
+    );
+    // 放大镜跟手
+    final caret = _hitTester.editingCaretRectAt(
+      docPos,
+      lineHeight: _caretLineHeight,
+    );
+    if (caret != null) {
+      (_magnifier ??= SelectionMagnifier(context)).show(
+        gestureGlobal: details.globalPosition,
+        caretRect: caret,
+      );
+    }
+  }
+
+  void _onLongPressEnd(LongPressEndDetails details) {
+    if (!_longPressing) {
+      _magnifier?.hide();
+      return;
+    }
+    _longPressing = false;
+    _magnifier?.hide();
+    _ime.syncFromState(show: false);
+    // end 无状态变化不触发 _onStateChanged → 帧后手动收敛一次
+    // (动作条在 _longPressing 期间被压着,此刻弹出)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _afterFrame();
+    });
+  }
+
+  /// [global] 是否落在孤岛区域内(EditorIsland 的 MetaData 标记)。
+  /// 长按让路用:岛不注册 RenderParagraph,positionAt 的最近块兜底会把
+  /// 岛上的长按吸到**邻段文本**选词 —— 必须在命中前挡掉。
+  bool _hitsIslandRegion(Offset global) {
+    final rootBox = _rootKey.currentContext?.findRenderObject();
+    if (rootBox is! RenderBox || !rootBox.attached) return false;
+    final result = BoxHitTestResult();
+    rootBox.hitTest(result, position: rootBox.globalToLocal(global));
+    for (final entry in result.path) {
+      final t = entry.target;
+      if (t is RenderMetaData && t.metaData == kEditorIslandRegion) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// 当前选区是否恰好整选 [blockId] 块 [offset] 处的图片原子。
@@ -842,6 +1138,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   void _onPanStart(DragStartDetails details) {
     // 自管交互区(表格网格)内不启动编辑器拖选
     if (_hitsSelfManagedRegion(details.globalPosition)) return;
+    _touchSelection = false; // 鼠标路径:收触摸选区 UI
     _dragBase = _positionAtGlobal(details.globalPosition);
     _focusNode.requestFocus();
   }
@@ -1103,6 +1400,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
         // 键盘操作后光标回 downstream(点击行末的 upstream 只对那次点击有效)
         if (event is KeyDownEvent) {
           _caretAffinity = TextAffinity.downstream;
+          _touchSelection = false; // 物理键盘操作 → 收触摸选区 UI
         }
         return handleEditorKeyEvent(
           state,
@@ -1116,12 +1414,53 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
       },
       child: MouseRegion(
         cursor: SystemMouseCursors.text,
-        child: GestureDetector(
+        // RawGestureDetector 按输入设备分流(阅读端 selection_gesture_layer
+        // 同款口径):
+        // - tap:全设备(落光标/图原子选中/双击选词);
+        // - pan 拖选:**仅鼠标/触控板** —— 触摸的 pan 根本不进竞技场,
+        //   竖向滑动完全让给宿主滚动(此前触屏滚页面被编辑器拦成拖选);
+        //   回调里判 kind 早退没用,recognizer 赢了竞技场滚动照样被劫持,
+        //   必须构造期 supportedDevices 分流;
+        // - 长按:仅触摸/触控笔(选词 + 放大镜 + 手柄,系统编辑器惯例)。
+        child: RawGestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTapDown: _onTapDown,
-          onPanStart: _onPanStart,
-          onPanUpdate: _onPanUpdate,
-          onPanEnd: _onPanEnd,
+          gestures: {
+            TapGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+              () => TapGestureRecognizer(debugOwner: this),
+              (r) => r.onTapDown = _onTapDown,
+            ),
+            PanGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<PanGestureRecognizer>(
+              () => PanGestureRecognizer(
+                debugOwner: this,
+                supportedDevices: const {
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.trackpad,
+                },
+              ),
+              (r) => r
+                ..onStart = _onPanStart
+                ..onUpdate = _onPanUpdate
+                ..onEnd = _onPanEnd,
+            ),
+            LongPressGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                    LongPressGestureRecognizer>(
+              () => LongPressGestureRecognizer(
+                debugOwner: this,
+                supportedDevices: const {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.stylus,
+                  PointerDeviceKind.invertedStylus,
+                },
+              ),
+              (r) => r
+                ..onLongPressStart = _onLongPressStart
+                ..onLongPressMoveUpdate = _onLongPressMoveUpdate
+                ..onLongPressEnd = _onLongPressEnd,
+            ),
+          },
           child: SelectionScope(
             controller: _controller,
             child: Stack(

@@ -8,6 +8,7 @@
 /// tester.testTextInput.log 捕获并更新平台值(平台总是接受)。
 library;
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/editor.dart';
@@ -120,7 +121,9 @@ void main() {
     // 渲染偏移 > 内容长度,旧换算把第二行起的所有命中 clamp 到段尾 →
     // 拖选恒折叠(= 报障"后面的文字无法选中")。
     final line3y = rect.bottom - 18;
-    final g = await tester.startGesture(Offset(rect.left + 8, line3y));
+    // kind: mouse —— 触摸 pan 已按设备分流让给滚动(移动端选区靠长按+手柄)
+    final g = await tester.startGesture(Offset(rect.left + 8, line3y),
+        kind: PointerDeviceKind.mouse);
     await tester.pump(const Duration(milliseconds: 40));
     for (var i = 0; i < 10; i++) {
       await g.moveBy(const Offset(20, 0));

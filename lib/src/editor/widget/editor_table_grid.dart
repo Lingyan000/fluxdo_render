@@ -28,6 +28,15 @@ class _SelfManagedRegionTag {
   const _SelfManagedRegionTag();
 }
 
+/// 孤岛区域命中标记(EditorIsland 打标):长按选词让路用 —— 岛不注册
+/// RenderParagraph,positionAt 的最近块兜底会把岛上的长按吸到邻段文本
+/// 选词。tap/整选不受影响(岛自己的 GestureDetector 处理)。
+const Object kEditorIslandRegion = _IslandRegionTag();
+
+class _IslandRegionTag {
+  const _IslandRegionTag();
+}
+
 /// 单 cell 宽度(整表统一;编辑态同宽防跳动)。
 const double _kCellWidth = 132.0;
 

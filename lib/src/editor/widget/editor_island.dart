@@ -23,6 +23,7 @@ import '../../node/node.dart';
 import '../../render/node_factory.dart';
 import '../../selection/selection_registry.dart';
 import '../../selection/selection_scope.dart';
+import 'editor_table_grid.dart' show kEditorIslandRegion;
 
 /// 官方 SCALES 同款档位。
 const kEditorImageScales = [100, 75, 50];
@@ -108,7 +109,13 @@ class _EditorIslandState extends State<EditorIsland> {
       onDoubleTap: widget.onEditRequest,
       child: MouseRegion(
         cursor: SystemMouseCursors.basic,
-        child: content,
+        // 岛区域标记:编辑器长按选词让路(岛无 RenderParagraph,长按
+        // 会被最近块兜底吸到邻段);translucent 不挡岛内已有手势。
+        child: MetaData(
+          metaData: kEditorIslandRegion,
+          behavior: HitTestBehavior.translucent,
+          child: content,
+        ),
       ),
     );
   }
