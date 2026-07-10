@@ -1350,6 +1350,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
                         child: _islandFactory.imageContentBuilder!(
                             ctx, img, total),
                       ),
+              // emoji 原子同走宿主管线(CDN 重写/缓存池;不接的话编辑
+              // 已有帖的相对 URL emoji 全裂成 :name: 占位胶囊)
+              emojiImageBuilder: _islandFactory.emojiImageBuilder,
             ),
           // 孤岛:NodeFactory 渲染,tap 整选,双击请求编辑,选中态描边
           final IslandBlock ib => EditorIsland(

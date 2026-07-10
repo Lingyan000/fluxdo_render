@@ -19,6 +19,7 @@ import 'package:flutter/rendering.dart';
 import '../../flatten/inline_flattener.dart';
 import '../../node/inline_node.dart' show ImageRun;
 import '../../render/block_text_styles.dart';
+import '../../render/emoji_handler.dart' show EmojiImageBuilder;
 import '../../render/image_handler.dart' show ImageContentBuilder;
 import '../../render/list_item_layout.dart';
 import '../../render/selectable_text_box.dart';
@@ -35,6 +36,7 @@ class EditableParagraph extends StatefulWidget {
     this.composing = TextRange.empty,
     this.listMarkerOrdinal = 1,
     this.imageContentBuilder,
+    this.emojiImageBuilder,
   });
 
   final TextBlock block;
@@ -47,6 +49,11 @@ class EditableParagraph extends StatefulWidget {
   /// 行内图片原子(裸图)渲染 builder(FluxdoEditor 透传 NodeFactory 的
   /// imageContentBuilder,与岛内图同一管线);null 用子包默认。
   final ImageContentBuilder? imageContentBuilder;
+
+  /// emoji 原子渲染 builder(宿主的 CDN 重写 + 缓存池;null 用子包默认
+  /// —— 默认 builder 对相对 URL(`/images/emoji/…`,编辑已有帖的
+  /// 客户端 cook 形态)加载失败,显示 `:name:` 占位胶囊)。
+  final EmojiImageBuilder? emojiImageBuilder;
 
   /// 本段的 IME composing 区间(编辑文本坐标);非本段/无 composing 传 empty。
   final TextRange composing;
@@ -87,6 +94,10 @@ class _EditableParagraphState extends State<EditableParagraph> {
           : (ctx, img, total) => AbsorbPointer(
                 child: widget.imageContentBuilder!(ctx, img, total),
               ),
+      // emoji 原子走宿主管线(CDN 重写 + 缓存池):此前编辑段落没接,
+      // 子包默认 builder 对相对 URL(编辑已有帖的 :name: cook 形态)
+      // 加载失败 → 满屏 :face_savoring_food: 占位胶囊。
+      emojiImageBuilder: widget.emojiImageBuilder,
     );
     if (sw != null && sw.elapsedMilliseconds > 4) {
       debugPrint('[EditorPerf] flatten ${sw.elapsedMilliseconds}ms '
