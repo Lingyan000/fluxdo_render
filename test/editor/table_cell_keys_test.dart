@@ -195,4 +195,44 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(seconds: 1));
   });
+
+
+  testWidgets('触屏(无鼠标)cell 编辑态:行/列柄与加条常显', (tester) async {
+    // 测试环境 mouseIsConnected=false,天然触屏态
+    var n = 0;
+    final state = EditorState(
+        blocks: blockNodesToDoc(
+            ParagraphParser().parse(
+                '<div class="md-table"><table><tbody><tr><td>A</td><td>B</td></tr></tbody></table></div>'),
+            () => 'e_${n++}'));
+    addTearDown(state.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: FluxdoEditor(
+            state: state,
+            onTableEdited: (island, md) {},
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    double addBarOpacity() => tester
+        .widget<AnimatedOpacity>(find.descendant(
+          of: find.byTooltip('添加行'),
+          matching: find.byType(AnimatedOpacity),
+        ).first)
+        .opacity;
+
+    // 未编辑未选中:加条透明(不可见)
+    expect(addBarOpacity(), 0);
+
+    // 点 cell 进入编辑 → 柄/加条常显(手机加行加列的入口)
+    await tester.tap(find.text('A'));
+    await tester.pump();
+    await tester.pump();
+    expect(addBarOpacity(), greaterThan(0));
+    await tester.pump(const Duration(seconds: 1));
+  });
 }

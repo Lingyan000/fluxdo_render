@@ -17,6 +17,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RendererBinding;
 import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 
 import '../../node/node.dart';
@@ -305,8 +306,14 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
         clipBehavior: Clip.none,
         children: [
           Padding(padding: const EdgeInsets.only(top: 4), child: body),
-          // 左上角块级选择柄(表格同款;自管区外走编辑器整选)
-          if (widget.onSelectRequest != null && (_hover || widget.selected))
+          // 左上角块级选择柄(表格同款;自管区外走编辑器整选)。
+          // 触屏无 hover:编辑态常显(否则手机上无入口整选删块)
+          if (widget.onSelectRequest != null &&
+              (_hover ||
+                  widget.selected ||
+                  (!RendererBinding
+                          .instance.mouseTracker.mouseIsConnected &&
+                      _editing)))
             Positioned(
               left: -2,
               top: -6,

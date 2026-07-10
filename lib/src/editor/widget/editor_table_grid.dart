@@ -14,6 +14,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RendererBinding;
 
 import '../../node/node.dart';
 import '../model/markdown_serializer.dart';
@@ -84,6 +85,17 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   /// 当前 hover 的行/列(边缘柄显隐)。
   int? _hoverRow;
   int? _hoverCol;
+
+  /// 触屏(无鼠标)设备:hover 永远不会发生 —— 行/列柄、加条改为
+  /// 「cell 编辑态或表格整选态」常显(手机上此前全部隐身,加行加列
+  /// 完全没有入口)。有鼠标设备保持 hover 交互不变。
+  static bool get _hoverCapable =>
+      RendererBinding.instance.mouseTracker.mouseIsConnected;
+
+  /// 柄/加条的"活跃"判定:桌面 = hover;触屏 = 编辑/选中态常显。
+  bool get _handlesActive =>
+      _hoverGrid ||
+      (!_hoverCapable && (_editing != null || widget.selected));
 
   @override
   void initState() {
@@ -331,7 +343,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 for (var c = 0; c < _cols; c++)
                   _ColHandle(
-                    opacity: !_hoverGrid
+                    opacity: !_handlesActive
                         ? 0
                         : (_hoverCol == c ? 1.0 : 0.35),
                     width: _kCellWidth + (c > 0 ? 1 : 0),
@@ -352,7 +364,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
                   // 右缘加列条
                   _EdgeAddBar(
                     axis: Axis.vertical,
-                    visible: _hoverGrid,
+                    visible: _handlesActive,
                     tooltip: '添加列',
                     onTap: () => _insertCol(_cols),
                   ),
@@ -364,7 +376,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
               padding: const EdgeInsets.only(left: _kHandleThickness + 2),
               child: _EdgeAddBar(
                 axis: Axis.horizontal,
-                visible: _hoverGrid,
+                visible: _handlesActive,
                 tooltip: '添加行',
                 length: tableWidth,
                 onTap: () => _insertRow(_rows),
@@ -392,7 +404,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
           // 左上角块级选择柄(hover 或已选中显示;在 MetaData 外 ——
           // 点击走编辑器整选,选中后退格删整表)
           if (widget.onSelectRequest != null &&
-              (_hoverGrid || widget.selected))
+              (_handlesActive || widget.selected))
             Positioned(
               left: -2,
               top: -6,
@@ -454,7 +466,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _RowHandle(
-              opacity: !_hoverGrid ? 0 : (_hoverRow == r ? 1.0 : 0.35),
+              opacity: !_handlesActive ? 0 : (_hoverRow == r ? 1.0 : 0.35),
               onTapDown: (pos) => _showRowMenu(r, pos),
               onHover: (h) => setState(() => _hoverRow = h ? r : null),
             ),
