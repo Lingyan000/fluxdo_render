@@ -1217,25 +1217,74 @@ class NodeFactory {
         ),
       );
     }
+    // 瀑布流(官方 columns.js 对齐):
+    // - <2 张不启用网格(官方 minCount=2 → data-disabled,退化普通图流);
+    // - 列数:2/4 张图 2 列更好看,其余 3 列(官方 count());cooked 带
+    //   data-columns ≥3 时(web 运行时已分列的形态)尊重之。
+    // - 分配:逐图放入**当前累计高度最短**的列(高度按宽高比累计,无
+    //   尺寸按 1:1);列内纵排。
+    // - 瓦片:填满列宽,高按自身宽高比(瀑布流错落感的来源 —— 此前
+    //   Wrap 均分行式布局把每张图 clamp 到统一行高,跟 web 完全不同)。
+    if (node.images.length < 2) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: builder(context, node.images.single, totalImagesInPost),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: LayoutBuilder(
         builder: (context, constraints) {
           const spacing = 6.0;
-          final cols = node.columns.clamp(1, 6);
-          final avail = constraints.maxWidth;
-          final colWidth = (avail - (cols - 1) * spacing) / cols;
-          return Wrap(
-            spacing: spacing,
-            runSpacing: spacing,
+          final n = node.images.length;
+          // parser 默认 2(cooked 无 data-columns 的常态);此时用官方
+          // count() 派生;显式 ≥3 列(web 已分列)尊重
+          final cols = node.columns >= 3
+              ? node.columns.clamp(3, 6)
+              : ((n == 2 || n == 4) ? 2 : 3);
+          final colWidth =
+              (constraints.maxWidth - (cols - 1) * spacing) / cols;
+
+          // 最短列贪心分配(官方 _distributeEvenly)
+          final columns = List.generate(cols, (_) => <ImageRun>[]);
+          final heights = List.filled(cols, 0.0);
+          for (final img in node.images) {
+            var shortest = 0;
+            for (var j = 1; j < cols; j++) {
+              if (heights[j] < heights[shortest]) shortest = j;
+            }
+            final ratio = (img.width != null &&
+                    img.height != null &&
+                    img.width! > 0)
+                ? img.height! / img.width!
+                : 1.0;
+            heights[shortest] += ratio;
+            columns[shortest].add(img);
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final img in node.images)
-                _GridTile(
-                  image: img,
-                  columnWidth: colWidth,
-                  imageContentBuilder: builder,
-                  totalImagesInPost: totalImagesInPost,
+              for (var c = 0; c < cols; c++) ...[
+                if (c > 0) const SizedBox(width: spacing),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final img in columns[c])
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: spacing),
+                          child: _GridTile(
+                            image: img,
+                            columnWidth: colWidth,
+                            imageContentBuilder: builder,
+                            totalImagesInPost: totalImagesInPost,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
+              ],
             ],
           );
         },
@@ -1585,17 +1634,19 @@ class _GridTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 算瓦片高:有宽高比时 colWidth * (h/w) clamp 80..300,否则 colWidth * 0.75
+    // 瀑布流瓦片:填满列宽,高按自身宽高比(错落感来源;官方 CSS
+    // `img { height: 100%; object-fit: cover }` + 列内 flex 纵排)。
+    // 超高图 cap 到列宽 2.5 倍(官方 max-height:1200px 的等价意图:
+    // 防长截图对网格产生离谱影响),cap 时 cover 裁切。
     double tileHeight;
     final w = image.width;
     final h = image.height;
     if (w != null && h != null && w > 0) {
-      tileHeight = (columnWidth * (h / w)).clamp(80.0, 300.0);
+      tileHeight = (columnWidth * (h / w)).clamp(60.0, columnWidth * 2.5);
     } else {
-      tileHeight = columnWidth * 0.75;
+      tileHeight = columnWidth; // 无尺寸按 1:1(官方同款假设)
     }
     return SizedBox(
-      width: columnWidth,
       height: tileHeight,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(4),
