@@ -1,4 +1,5 @@
-/// 图片原子的块级结构命令(官方 ProseMirror composer 图片工具条动作)。
+/// 图片原子/网格的块级结构命令(官方 ProseMirror composer 图片与
+/// GridNodeView 工具动作)。
 ///
 /// **加入网格**(addToGrid,对齐 image-node-view.gjs):
 /// - 相邻块是 grid 岛 → 图挪入(前邻 append / 后邻 prepend);
@@ -6,12 +7,20 @@
 ///   (before 文本 | grid 岛 | after 文本,空半段丢弃)。
 /// 全程 [EditorState.replaceBlockRange] 单事务 —— undo 一步整体还原。
 ///
-/// **移出网格第一期不做**:grid 是原子岛(AbsorbPointer 整体只读),
-/// 内部图不可单选 → 无触发入口。与官方的差异点仅此一处(官方 grid 内
-/// 图可 NodeSelection);做的话需要 grid 岛内图片子选中机制,另立项。
+/// **移除网格**(removeGrid,对齐 grid-node-view.gjs:tr.replaceWith(pos,
+/// pos+nodeSize, node.content) 拆壳保内容):grid 岛 → 每张图一个独立
+/// 图原子段(官方 grid 内每图恰是一个 paragraph,拆出来同构)。
+///
+/// **模式切换**(setMode,grid ⇄ carousel):改 node attr,序列化写
+/// `[grid mode=carousel]`。
+///
+/// **grid 内图不可单选**:grid 是原子岛(AbsorbPointer 整体只读),
+/// 官方"图挪出网格"(moveOutsideGrid)无触发入口 —— 等价能力 =
+/// 移除网格后重新组合;要 1:1 需 grid 岛内图片子选中机制,另立项。
 library;
 
 import '../../node/node.dart';
+import 'editable_text_content.dart';
 import 'editor_state.dart';
 
 /// 把 [blockId] 块 [offset] 处的图片原子加入网格。
@@ -108,6 +117,57 @@ bool addImageAtomToGrid(EditorState state, String blockId, int offset) {
         ),
     ],
     selection: selectIsland(islandId),
+  );
+  return true;
+}
+
+/// 移除网格:grid 岛拆壳,每张图变一个独立图原子段(官方 removeGrid
+/// 的 replaceWith(node.content) 同构 —— grid 内每图恰是一段)。
+/// 光标落首段图后。返回 false = 该块不是 grid 岛。
+bool removeImageGrid(EditorState state, String islandId) {
+  final i = state.indexOfBlock(islandId);
+  if (i < 0) return false;
+  final block = state.blocks[i];
+  if (block is! IslandBlock || block.node is! ImageGridNode) return false;
+  final grid = block.node as ImageGridNode;
+
+  final replacement = <EditorBlock>[
+    for (final img in grid.images)
+      TextBlock(
+        id: state.nextBlockId(),
+        content: EditableTextContent.fromInlines([img]),
+      ),
+  ];
+  state.replaceBlockRange(
+    i,
+    i,
+    replacement,
+    selection: replacement.isEmpty
+        ? null
+        : EditorSelection.collapsed(
+            EditorPosition(blockId: replacement.first.id, offset: 1),
+          ),
+  );
+  return true;
+}
+
+/// 网格模式切换(grid ⇄ carousel):岛节点原位形变,序列化写
+/// `[grid mode=carousel]`。返回 false = 该块不是 grid 岛。
+bool setImageGridMode(EditorState state, String islandId, ImageGridMode mode) {
+  final i = state.indexOfBlock(islandId);
+  if (i < 0) return false;
+  final block = state.blocks[i];
+  if (block is! IslandBlock || block.node is! ImageGridNode) return false;
+  final grid = block.node as ImageGridNode;
+  if (grid.mode == mode) return true;
+  state.updateIslandNode(
+    islandId,
+    ImageGridNode(
+      id: grid.id,
+      images: grid.images,
+      columns: grid.columns,
+      mode: mode,
+    ),
   );
   return true;
 }

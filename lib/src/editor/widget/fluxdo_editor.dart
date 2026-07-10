@@ -18,7 +18,8 @@ import 'package:flutter/rendering.dart' show BoxHitTestResult, RenderMetaData;
 import 'package:flutter/services.dart';
 
 import '../../node/node.dart'
-    show CodeBlockNode, ImageRun, InlineNode, LocalDateRun, TableNode;
+    show CodeBlockNode, ImageGridNode, ImageRun, InlineNode, LocalDateRun,
+        TableNode;
 import '../../render/block_text_styles.dart';
 import '../../render/node_factory.dart';
 import '../../selection/hit_tester.dart';
@@ -27,6 +28,7 @@ import '../../selection/selection_registry.dart';
 import '../../selection/selection_scope.dart';
 import '../input/editor_ime_client.dart';
 import '../input/editor_key_handler.dart';
+import '../model/editor_image_commands.dart';
 import '../model/editor_state.dart';
 import 'editable_paragraph.dart';
 import 'editor_caret.dart';
@@ -886,6 +888,14 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
               onEditRequest: widget.onIslandEditRequest == null
                   ? null
                   : () => widget.onIslandEditRequest!(ib),
+              // 网格岛工具条(纯结构命令,不需要宿主参与):
+              // 模式切换 grid ⇄ carousel、移除网格(拆壳保图为原子段)
+              onGridModeChange: ib.node is ImageGridNode
+                  ? (mode) => setImageGridMode(widget.state, ib.id, mode)
+                  : null,
+              onGridRemove: ib.node is ImageGridNode
+                  ? () => removeImageGrid(widget.state, ib.id)
+                  : null,
             ),
         },
       );

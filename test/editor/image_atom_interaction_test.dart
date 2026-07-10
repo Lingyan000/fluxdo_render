@@ -122,4 +122,54 @@ void main() {
     await tester.pump();
     expect(h.state.selection!.isCollapsed, isTrue, reason: '文字处正常落光标');
   });
+
+
+  // ---- 网格岛工具条(官方 GridNodeView) ----
+
+  testWidgets('grid 岛选中出工具条,切轮播/移除网格生效且不清选区',
+      (tester) async {
+    final state = EditorState(blocks: [
+      TextBlock(id: 'e_0', content: EditableTextContent(text: 'x')),
+      const IslandBlock(
+        id: 'e_g',
+        node: ImageGridNode(id: 'b_g', images: [
+          ImageRun(src: 'upload://1.png', alt: 'a', width: 10, height: 10),
+          ImageRun(src: 'upload://2.png', alt: 'b', width: 20, height: 20),
+        ]),
+      ),
+    ]);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: FluxdoEditor(state: state, autofocus: true),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // 未选中:无工具条
+    expect(find.text('移除网格'), findsNothing);
+
+    // 点岛整选 → 工具条出现
+    await tester.tap(find.byType(EditorIsland));
+    await tester.pump();
+    expect(find.text('移除网格'), findsOneWidget);
+    expect(find.text('轮播'), findsOneWidget);
+
+    // 切轮播:mode 变、选区保持整选(MetaData 让路)
+    await tester.tap(find.text('轮播'), warnIfMissed: false);
+    await tester.pump();
+    expect(
+        ((state.blocks[1] as IslandBlock).node as ImageGridNode).mode,
+        ImageGridMode.carousel);
+    expect(state.selection!.base.blockId, 'e_g', reason: '整选不被清');
+
+    // 移除网格:拆成两个图原子段
+    await tester.tap(find.text('移除网格'), warnIfMissed: false);
+    await tester.pump();
+    expect(state.blocks.whereType<IslandBlock>(), isEmpty);
+    expect(state.blocks, hasLength(3)); // x + 两图段
+    await tester.pump(const Duration(seconds: 1));
+  });
 }

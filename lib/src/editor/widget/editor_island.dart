@@ -12,6 +12,10 @@
 /// 选中/缩放/alt/删除交互由 FluxdoEditor 的 ImageAtomSelection 事件 +
 /// 宿主浮层承载。[EditorImageScaleBar] 保留 —— 主项目源码模式预览
 /// (fluxdo_render_callbacks)仍用它做可缩放图的 100/75/50 胶囊。
+///
+/// **网格岛工具条**(官方 GridNodeView 对齐):ImageGridNode 岛选中时
+/// 顶部浮 [网格|轮播] 模式切换 + [移除网格];动作经 [onGridModeChange]/
+/// [onGridRemove] 上抛(宿主接 setImageGridMode/removeImageGrid)。
 library;
 
 import 'package:flutter/material.dart';
@@ -20,6 +24,7 @@ import '../../node/node.dart';
 import '../../render/node_factory.dart';
 import '../../selection/selection_registry.dart';
 import '../../selection/selection_scope.dart';
+import 'editor_table_grid.dart' show kEditorSelfManagedRegion;
 
 /// 官方 SCALES 同款档位。
 const kEditorImageScales = [100, 75, 50];
@@ -32,6 +37,8 @@ class EditorIsland extends StatefulWidget {
     required this.selected,
     required this.onTapSelect,
     this.onEditRequest,
+    this.onGridModeChange,
+    this.onGridRemove,
   });
 
   final BlockNode node;
@@ -45,6 +52,12 @@ class EditorIsland extends StatefulWidget {
 
   /// 双击 → 请求编辑本岛(宿主弹源码对话框;null = 岛不可编辑)。
   final VoidCallback? onEditRequest;
+
+  /// 网格岛工具条:模式切换(grid ⇄ carousel)。null = 不出工具条。
+  final ValueChanged<ImageGridMode>? onGridModeChange;
+
+  /// 网格岛工具条:移除网格(拆壳保图)。null = 不出移除按钮。
+  final VoidCallback? onGridRemove;
 
   @override
   State<EditorIsland> createState() => _EditorIslandState();
@@ -89,6 +102,35 @@ class _EditorIslandState extends State<EditorIsland> {
       ),
     );
 
+    // 网格岛选中态工具条(官方 GridNodeView:[网格|轮播] + 移除网格)。
+    // 结构恒定(Column 恒挂、工具条条件子)避免选中切换重建内容子树;
+    // 工具条区 MetaData 自管 + Listener 原始 down(编辑器让路,点击
+    // 不清整选 —— 图片胶囊同款机制)。
+    final gridNode = widget.node;
+    if (gridNode is ImageGridNode &&
+        (widget.onGridModeChange != null || widget.onGridRemove != null)) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.selected)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: MetaData(
+                metaData: kEditorSelfManagedRegion,
+                behavior: HitTestBehavior.opaque,
+                child: _GridToolbar(
+                  mode: gridNode.mode,
+                  onModeChange: widget.onGridModeChange,
+                  onRemove: widget.onGridRemove,
+                ),
+              ),
+            ),
+          content,
+        ],
+      );
+    }
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onTapSelect,
@@ -98,6 +140,104 @@ class _EditorIslandState extends State<EditorIsland> {
         child: content,
       ),
     );
+  }
+}
+
+/// 网格岛工具条:[网格|轮播] 分段切换 + 移除网格(浮层统一规格)。
+class _GridToolbar extends StatelessWidget {
+  const _GridToolbar({
+    required this.mode,
+    this.onModeChange,
+    this.onRemove,
+  });
+
+  final ImageGridMode mode;
+  final ValueChanged<ImageGridMode>? onModeChange;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    Widget segBtn(String label, IconData icon, ImageGridMode m) {
+      final active = mode == m;
+      final onModeChange = this.onModeChange;
+      return Listener(
+        onPointerDown: (onModeChange == null || active)
+            ? null
+            : (_) => onModeChange(m),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: active ? scheme.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon,
+                size: 14,
+                color: active ? scheme.onPrimary : scheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.2,
+                fontWeight: FontWeight.w500,
+                color: active ? scheme.onPrimary : scheme.onSurfaceVariant,
+              ),
+            ),
+          ]),
+        ),
+      );
+    }
+
+    Widget panel(Widget child) => DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.5),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.10),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Padding(padding: const EdgeInsets.all(2), child: child),
+        );
+
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      panel(Row(mainAxisSize: MainAxisSize.min, children: [
+        segBtn('网格', Icons.grid_view_rounded, ImageGridMode.grid),
+        segBtn('轮播', Icons.view_carousel_rounded, ImageGridMode.carousel),
+      ])),
+      if (onRemove != null) ...[
+        const SizedBox(width: 6),
+        panel(Listener(
+          onPointerDown: (_) => onRemove!(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.grid_off_rounded,
+                  size: 14, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(
+                '移除网格',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.2,
+                  fontWeight: FontWeight.w500,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ]),
+          ),
+        )),
+      ],
+    ]);
   }
 }
 

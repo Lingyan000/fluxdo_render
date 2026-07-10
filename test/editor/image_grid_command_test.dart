@@ -103,4 +103,69 @@ void main() {
     expect(img.copyWith(alt: '').alt, '');
     expect(img.copyWith(scale: 50).alt, '原');
   });
+
+  gridOpsTests();
+}
+
+// ---- 网格自身操作(官方 GridNodeView:removeGrid / setMode) ----
+
+IslandBlock _grid3(String id) => IslandBlock(
+      id: id,
+      node: const ImageGridNode(id: 'b_g3', images: [
+        ImageRun(src: 'upload://1.png', alt: 'a', width: 10, height: 10),
+        ImageRun(src: 'upload://2.png', alt: 'b', width: 20, height: 20),
+        ImageRun(src: 'upload://3.png', alt: 'c', width: 30, height: 30),
+      ]),
+    );
+
+void gridOpsTests() {
+  test('removeImageGrid:拆壳,每图一原子段,undo 一步还原', () {
+    final s = EditorState(blocks: [
+      TextBlock(id: 'e_0', content: EditableTextContent(text: '前')),
+      _grid3('e_g'),
+    ]);
+    addTearDown(s.dispose);
+
+    expect(removeImageGrid(s, 'e_g'), isTrue);
+    expect(s.blocks, hasLength(4)); // 前 + 三图段
+    for (var i = 1; i <= 3; i++) {
+      final b = s.blocks[i] as TextBlock;
+      expect(b.content.atoms[0], isA<ImageRun>());
+      expect(b.content.text, '￼');
+    }
+    // 序列化:不再有 [grid],三图各自独段
+    final md = docToMarkdown(s.blocks);
+    expect(md, isNot(contains('[grid]')));
+    expect(md, contains('![a|10x10](upload://1.png)'));
+
+    s.undo();
+    expect(s.blocks, hasLength(2));
+    expect(s.blocks[1], isA<IslandBlock>());
+  });
+
+  test('setImageGridMode:grid ⇄ carousel,序列化带 mode 后缀', () {
+    final s = EditorState(blocks: [_grid3('e_g'),
+      TextBlock(id: 'e_t', content: EditableTextContent.empty)]);
+    addTearDown(s.dispose);
+
+    expect(setImageGridMode(s, 'e_g', ImageGridMode.carousel), isTrue);
+    final grid = (s.blocks[0] as IslandBlock).node as ImageGridNode;
+    expect(grid.mode, ImageGridMode.carousel);
+    expect(docToMarkdown(s.blocks), contains('[grid mode=carousel]'));
+
+    // 切回 grid:无 mode 后缀
+    setImageGridMode(s, 'e_g', ImageGridMode.grid);
+    expect(docToMarkdown(s.blocks), isNot(contains('mode=carousel')));
+    // 同值幂等
+    expect(setImageGridMode(s, 'e_g', ImageGridMode.grid), isTrue);
+  });
+
+  test('非 grid 岛返回 false', () {
+    final s = EditorState.fromTexts(['x']);
+    addTearDown(s.dispose);
+    expect(removeImageGrid(s, s.blocks.first.id), isFalse);
+    expect(
+        setImageGridMode(s, s.blocks.first.id, ImageGridMode.carousel),
+        isFalse);
+  });
 }
