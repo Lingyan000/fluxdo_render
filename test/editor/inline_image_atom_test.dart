@@ -1,10 +1,12 @@
 /// 行内图片原子化(裸图):白名单判据分流、flatten 原子入表、序列化
-/// 写回、投影宽 1(图后打字光标坐标正确)。
+/// 写回、投影宽 1(图后打字光标坐标正确)、行高不被 strut 压制。
 library;
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/editor.dart';
 import 'package:fluxdo_render/fluxdo_render.dart';
+import 'package:fluxdo_render/src/editor/widget/editable_paragraph.dart';
 import 'package:fluxdo_render/src/selection/projection_builder.dart';
 
 const _bare = ImageRun(
@@ -109,5 +111,37 @@ void main() {
     // 原子后位置(内容 2)= 渲染坐标也在 FFFC 之后
     final render = proj.renderOffsetForContent(2);
     expect(proj.contentOffsetForRender(render), 2, reason: '双射');
+  });
+
+  testWidgets('段高被图撑起(strut 强制是双向钳制,含图段必须放开)',
+      (tester) async {
+    // 153x153 大图(用户实测形态:heart webp 表情)
+    const big = ImageRun(
+        src: 'https://cdn3.ldstatic.com/x.webp', alt: '❤️_20.webp',
+        width: 153, height: 153);
+    final s = EditorState(blocks: [
+      TextBlock(
+        id: 'e_0',
+        content: EditableTextContent.fromInlines(const [
+          TextRun('a'), big, TextRun('b'),
+        ]),
+      ),
+    ]);
+    addTearDown(s.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: FluxdoEditor(
+            state: s,
+            baseTextStyle: const TextStyle(fontSize: 16, height: 1.6),
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+    final h = tester.getSize(find.byType(EditableParagraph)).height;
+    // forceStrutHeight 双向钳制下整段只有 ~26px,153px 图溢出绘制盖邻块
+    expect(h, greaterThanOrEqualTo(153),
+        reason: '含图段高 $h 必须 ≥ 图高 153(strut 未放开会压到一行高)');
   });
 }

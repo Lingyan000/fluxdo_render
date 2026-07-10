@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../../flatten/inline_flattener.dart';
+import '../../node/inline_node.dart' show ImageRun;
 import '../../render/block_text_styles.dart';
 import '../../render/image_handler.dart' show ImageContentBuilder;
 import '../../render/list_item_layout.dart';
@@ -161,20 +162,25 @@ class _EditableParagraphState extends State<EditableParagraph> {
     final style = _effectiveStyle;
     final em = widget.baseStyle.fontSize ?? 14;
 
+    // forceStrutHeight 是**双向钳制**(探针实锤:153px WidgetSpan 的行
+    // 被压到 26px,图片溢出绘制盖到邻块)—— 含图片原子的段落必须放开
+    // (行高由图撑,输入文字不改行高,caret 走 editingCaretRectIn 的
+    // 行盒校正);无图段落维持强制(M1 光标稳定性:空段=满段=恒定行高,
+    // emoji/mention/date 原子都不超行高,不受影响)。
+    final hasImageAtom =
+        block.content.atoms.values.any((a) => a is ImageRun);
+
     Widget text = KeyedSubtree(
       key: _textKey,
       // forceStrutHeight 关键(探针实测):默认布局下空段落只有裸字体高度
       // (20px)、段末 caret 度量下坠(top 3.71 vs 行内 0.4)—— 输入前后
       // 光标/段高都在跳。强制 strut 后:空段=满段=26px,caret top/height
       // 处处一致,光标稳定性由布局构造保证(EditableText 同思路)。
-      // M2 注意:行内大元素(only-emoji 32dp / WidgetSpan)会被 strut
-      // 压制吗?不会 —— strut 是**最小**行高,更高的 span 仍能撑行,
-      // 届时 editingCaretRectIn 的行盒校正兜住非均匀行。
       child: Text.rich(
         result.span,
         strutStyle: StrutStyle.fromTextStyle(
           style,
-          forceStrutHeight: true,
+          forceStrutHeight: !hasImageAtom,
         ),
       ),
     );
