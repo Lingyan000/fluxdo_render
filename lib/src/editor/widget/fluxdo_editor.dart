@@ -645,13 +645,18 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
 
     // 图片原子探测(**先于落光标**,官方 NodeSelection 语义:点图 =
     // 整选原子,不落 caret 不弹 IME;已选中再点 = 请求打开查看器)。
-    // 命中左右各探一格(date chip 同机制:tap 落点在原子两侧边界都算)。
+    // 命中判定 = tap 点**落在图的渲染盒内**(getBoxesForSelection):
+    // 只按"最近文本位置左右一格"判会把图片行右侧整片空白都当图 ——
+    // 点空白误选图/误开查看器。
     final tapBlock = widget.state.textBlockById(hit.$1.blockId);
     if (tapBlock != null) {
       for (final off in [hit.$1.offset, hit.$1.offset - 1]) {
         if (off < 0) continue;
         final atom = tapBlock.content.atoms[off];
         if (atom is! ImageRun) continue;
+        if (!_tapInsideAtomBox(tapBlock.id, off, details.globalPosition)) {
+          continue;
+        }
         final already = _imageAtomSelectionAt(tapBlock.id, off) != null;
         if (already) {
           final sel = _lastImageAtomSel;
@@ -700,6 +705,29 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     if (from.blockId != blockId || to.blockId != blockId) return null;
     if (from.offset != offset || to.offset != offset + 1) return null;
     return (blockId, offset);
+  }
+
+  /// tap 全局坐标是否落在 [blockId] 块 [offset] 原子的渲染盒内。
+  /// 横向命中即可(纵向放 4px 容差):FFFC 的 selection box 覆盖整行高,
+  /// 图旁小字行的纵向空白仍算图列范围,与直觉一致。
+  bool _tapInsideAtomBox(String blockId, int offset, Offset global) {
+    final index = widget.state.indexOfBlock(blockId);
+    if (index < 0) return false;
+    final id = _renderIdOf(index);
+    final proj = _controller.registry.logicalById(id)?.projection;
+    final p = _controller.registry.byId(id)?.paragraph;
+    if (proj == null || p == null || !p.attached) return false;
+    final rs = proj.renderOffsetForContent(offset);
+    final re = proj.renderOffsetForContent(offset + 1);
+    final boxes = p.getBoxesForSelection(
+      TextSelection(baseOffset: rs, extentOffset: re),
+      boxHeightStyle: ui.BoxHeightStyle.tight,
+    );
+    final local = p.globalToLocal(global);
+    for (final b in boxes) {
+      if (b.toRect().inflate(4).contains(local)) return true;
+    }
+    return false;
   }
 
   /// 当前文档选区若恰覆盖单个图片原子,返回其选中态(矩形帧后算)。

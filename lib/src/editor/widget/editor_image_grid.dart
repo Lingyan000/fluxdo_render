@@ -1,10 +1,12 @@
 /// 编辑器网格(grid 岛的专属交互视图,官方 grid 内图可 NodeSelection
 /// 的等价物):
 ///
-/// - 瀑布流布局与阅读端同源(image_grid_layout 三函数);
+/// - **布局 = 官方编辑器形态**(rich-editor.scss `.composer-image-grid`):
+///   flex-wrap 等大方块缩略图流,img 固定 200px(容器宽 <640 时 150px)
+///   object-fit:cover,虚线边框 + 内边距 —— **不是**阅读端的瀑布流
+///   (那是 cooked 渲染形态,columns.js 分列);
 /// - **瓦片可单击** → 子选中(primary 描边)+ 上抛 [onImageTap](宿主
-///   浮出官方 isInGrid 工具条:[删除|移出网格] + alt 条,无缩放 ——
-///   官方 isInGrid 时不出 zoom 按钮,grid 布局吃掉显示尺寸);
+///   浮出官方 isInGrid 工具条:[删除|移出网格] + alt 条,无缩放);
 /// - 已子选中再点 → [onImageOpen](查看器);
 /// - 瓦片区在 [kEditorSelfManagedRegion] 自管区内(编辑器手势让路,
 ///   点瓦片不触发岛整选);网格空白边缘仍走岛整选(外层 GestureDetector)。
@@ -15,7 +17,6 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../node/node.dart';
-import '../../render/image_grid_layout.dart';
 import '../../render/image_handler.dart';
 import '../../render/node_factory.dart';
 import 'editor_table_grid.dart' show kEditorSelfManagedRegion;
@@ -120,80 +121,79 @@ class _EditorImageGridState extends State<EditorImageGrid> {
 
     if (images.isEmpty) return const SizedBox.shrink();
 
-    Widget tile(int index, ImageRun img, double colWidth) {
-      final selected = widget.selectedIndex == index;
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => _onTileTap(index),
-          child: Container(
-            key: _keyFor(index),
-            height: gridTileHeight(img, colWidth),
-            foregroundDecoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                color: selected ? scheme.primary : Colors.transparent,
-                width: 2,
-              ),
-              color: selected
-                  ? scheme.primary.withValues(alpha: 0.10)
-                  : Colors.transparent,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: FittedBox(
-                fit: BoxFit.cover,
-                clipBehavior: Clip.hardEdge,
-                child: AbsorbPointer(
-                  child: builder(context, img, images.length),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    // 单图:无分列
-    if (images.length < 2) {
-      return MetaData(
-        metaData: kEditorSelfManagedRegion,
-        behavior: HitTestBehavior.opaque,
-        child: LayoutBuilder(
-          builder: (context, c) => tile(0, images.single, c.maxWidth),
-        ),
-      );
-    }
-
     return MetaData(
       metaData: kEditorSelfManagedRegion,
       behavior: HitTestBehavior.opaque,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          const spacing = 6.0;
-          final cols = gridColumnCount(images.length, widget.node.columns);
-          final colWidth =
-              (constraints.maxWidth - (cols - 1) * spacing) / cols;
-          final columns = distributeGridImages(images, cols);
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var c = 0; c < cols; c++) ...[
-                if (c > 0) const SizedBox(width: spacing),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (final (i, img) in columns[c])
-                        tile(i, img, colWidth),
-                    ],
-                  ),
-                ),
+          // 官方:viewport <md 150px,≥md 200px(编辑器列宽近似判)
+          final tileSize = constraints.maxWidth < 640 ? 150.0 : 200.0;
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: scheme.outlineVariant,
+                width: 2,
+                strokeAlign: BorderSide.strokeAlignInside,
+                style: BorderStyle.solid,
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            // 官方是 dashed 虚线;Flutter 无原生 dashed border,细节
+            // 用 outlineVariant 实线弱化近似(视觉层级一致即可)
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (var i = 0; i < images.length; i++)
+                  _tile(context, scheme, builder, i, images[i], tileSize,
+                      images.length),
               ],
-            ],
+            ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _tile(
+    BuildContext context,
+    ColorScheme scheme,
+    ImageContentBuilder builder,
+    int index,
+    ImageRun img,
+    double size,
+    int total,
+  ) {
+    final selected = widget.selectedIndex == index;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _onTileTap(index),
+      child: Container(
+        key: _keyFor(index),
+        width: size,
+        height: size,
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: selected ? scheme.primary : Colors.transparent,
+            width: 2,
+          ),
+          color: selected
+              ? scheme.primary.withValues(alpha: 0.10)
+              : Colors.transparent,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: FittedBox(
+            fit: BoxFit.cover,
+            clipBehavior: Clip.hardEdge,
+            child: AbsorbPointer(
+              child: builder(context, img, total),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -114,6 +114,22 @@ void main() {
     expect(ev!.image.scale, 75, reason: '事件携带更新后的 ImageRun');
   });
 
+  testWidgets('点图片行右侧空白 → 落光标,不选图不开查看器', (tester) async {
+    final h = await pump(tester);
+    // 图矩形右侧远处(同一行的行内空白)
+    final imgRect = tester.getRect(find.byType(Image, skipOffstage: false).first);
+    await tester.tapAt(Offset(imgRect.right + 120, imgRect.center.dy));
+    await tester.pump();
+    await tester.pump();
+    expect(h.state.selection!.isCollapsed, isTrue, reason: '空白处落光标');
+    expect(h.selEvents.whereType<ImageAtomSelection>(), isEmpty,
+        reason: '不触发图选中');
+    // 再点一次也不能变成"已选中再点"误开查看器
+    await tester.tapAt(Offset(imgRect.right + 120, imgRect.center.dy));
+    await tester.pump();
+    expect(h.openEvents, isEmpty);
+  });
+
   testWidgets('点文字落光标(图原子路由不干扰正常编辑)', (tester) async {
     final h = await pump(tester);
     // 点段首文字位置(远离图片)
@@ -151,8 +167,10 @@ void main() {
     // 未选中:无工具条
     expect(find.text('移除网格'), findsNothing);
 
-    // 点岛整选 → 工具条出现
-    await tester.tap(find.byType(EditorIsland));
+    // 点岛**边缘空白**(瓦片区是自管区走子选中;边缘 padding 才是岛
+    // 整选入口)→ 工具条出现
+    final islandRect = tester.getRect(find.byType(EditorIsland));
+    await tester.tapAt(islandRect.topLeft + const Offset(4, 4));
     await tester.pump();
     expect(find.text('移除网格'), findsOneWidget);
     expect(find.text('轮播'), findsOneWidget);
