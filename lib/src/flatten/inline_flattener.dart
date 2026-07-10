@@ -748,7 +748,11 @@ class InlineFlattener {
           imageBuilder(context ?? ctx, image, totalImagesInPost),
     );
     return WidgetSpan(
-      alignment: PlaceholderAlignment.middle,
+      // bottom(≈ CSS img 默认 vertical-align:baseline):图底边贴文字
+      // 底部。middle 会让大图行的文字挂在图片垂直中点(浏览器/官方
+      // composer 里文字都在图底部)—— 行内大图进编辑器后这个偏差被
+      // 放大成明显 bug;小图两种对齐只差几 px。
+      alignment: PlaceholderAlignment.bottom,
       child: isLightbox
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),

@@ -162,8 +162,11 @@ class SelectionHitTester {
   ///   上一行行末,downstream 落下一行行首,跟用户点击的行走);
   /// - 高度:恒 [lineHeight](构造保证一致);
   /// - top:getOffsetForCaret 的 dy 在**段末**回退字体度量(实测 3.71 vs
-  ///   行内 0.4)→ 用相邻字符的**整行盒**(BoxHeightStyle.max)top 校正;
+  ///   行内 0.4)→ 用相邻字符的**整行盒**(BoxHeightStyle.max)校正;
   ///   前后盒都有时取与 dy 更近的那个;无盒(空段落)保留 dy。
+  ///   校正基准 = 行盒 **bottom - lineHeight**(非 top):非均匀行
+  ///   (行内大图 WidgetSpan bottom 对齐撑高行)行盒 top 是图顶,而
+  ///   文字/光标在行底部 —— 用 top 光标悬到图顶。均匀行两者等价。
   @visibleForTesting
   static Rect editingCaretRectIn(
     RenderParagraph p,
@@ -195,7 +198,7 @@ class SelectionHitTester {
         nearest = a;
       }
     }
-    if (nearest != null) top = nearest.top;
+    if (nearest != null) top = nearest.bottom - lineHeight;
 
     return Offset(local.dx, top) & Size(0, lineHeight);
   }
