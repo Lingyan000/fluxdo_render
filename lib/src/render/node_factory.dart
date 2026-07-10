@@ -1218,14 +1218,15 @@ class NodeFactory {
         ),
       );
     }
-    // 瀑布流(官方 columns.js 对齐):
+    // 瀑布流(官方 columns.js + d-image-grid.scss 逐条对齐):
     // - <2 张不启用网格(官方 minCount=2 → data-disabled,退化普通图流);
-    // - 列数:2/4 张图 2 列更好看,其余 3 列(官方 count());cooked 带
-    //   data-columns ≥3 时(web 运行时已分列的形态)尊重之。
-    // - 分配:逐图放入**当前累计高度最短**的列(高度按宽高比累计,无
-    //   尺寸按 1:1);列内纵排。
-    // - 瓦片:填满列宽,高按自身宽高比(瀑布流错落感的来源 —— 此前
-    //   Wrap 均分行式布局把每张图 clamp 到统一行高,跟 web 完全不同)。
+    // - 列数:2/4 张图 2 列,其余 3 列(官方 count());cooked 带
+    //   data-columns ≥3 时(web 运行时已分列的形态)尊重之;
+    // - 分配:逐图放入**当前累计高度最短**的列(高度按宽高比累计);
+    // - **列强制等高**(官方 flex-grow:1 + object-fit:cover):高度差
+    //   平分给列内瓦片、cover 裁切吸收 —— 底边平齐是官方观感的关键,
+    //   列尾错落的"纯瀑布"不是官方形态;
+    // - 瓦片间距 6px(官方 $grid-column-gap)。
     if (node.images.length < 2) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1241,6 +1242,8 @@ class NodeFactory {
           final colWidth =
               (constraints.maxWidth - (cols - 1) * spacing) / cols;
           final columns = distributeGridImages(node.images, cols);
+          final heights =
+              gridEqualizedTileHeights(columns, colWidth, spacing);
 
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1251,12 +1254,15 @@ class NodeFactory {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final (_, img) in columns[c])
+                      for (var r = 0; r < columns[c].length; r++)
                         Padding(
-                          padding: const EdgeInsets.only(bottom: spacing),
+                          padding: EdgeInsets.only(
+                            bottom:
+                                r == columns[c].length - 1 ? 0 : spacing,
+                          ),
                           child: _GridTile(
-                            image: img,
-                            columnWidth: colWidth,
+                            image: columns[c][r].$2,
+                            tileHeight: heights[c][r],
                             imageContentBuilder: builder,
                             totalImagesInPost: totalImagesInPost,
                           ),
@@ -1602,22 +1608,24 @@ class _VideoPlaceholder extends StatelessWidget {
 class _GridTile extends StatelessWidget {
   const _GridTile({
     required this.image,
-    required this.columnWidth,
+    required this.tileHeight,
     required this.imageContentBuilder,
     required this.totalImagesInPost,
   });
 
   final ImageRun image;
-  final double columnWidth;
+
+  /// 等高化后的瓦片高(gridEqualizedTileHeights 产出;与自然比例的差
+  /// 由 cover 裁切吸收 —— 官方 flex-grow + object-fit:cover 同构)。
+  final double tileHeight;
+
   final ImageContentBuilder imageContentBuilder;
   final int totalImagesInPost;
 
   @override
   Widget build(BuildContext context) {
-    // 瀑布流瓦片:填满列宽,高按自身宽高比(错落感来源;官方 CSS
-    // `img { height: 100%; object-fit: cover }` + 列内 flex 纵排)。
     return SizedBox(
-      height: gridTileHeight(image, columnWidth),
+      height: tileHeight,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(4),
         // FittedBox + cover:让 imageContentBuilder 产生的 widget(主项目
