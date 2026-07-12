@@ -162,10 +162,13 @@ class _SelectableTextBoxState extends State<SelectableTextBox> {
 
     // 行内代码背景:文字下层自绘圆角灰底(跨行 RRect 合并),与选区无关 →
     // selectionEnabled 与否都画。代码**块**(codeLanguage != null,整块自带背景)
-    // 不画。用 painter(非 foregroundPainter)→ 画在文字底下,文字照常透出;
-    // painter 内部自 clip 到块边界(对齐 legacy overlay 的 ClipRect,防 padding
-    // 出血画到相邻块文字上,见 InlineCodeBackgroundPainter 顶部说明)。
-    if (widget.codeLanguage == null) {
+    // 不画;**本段无行内代码区间时也不挂**(绝大多数段落,省一个
+    // RenderCustomPaint 与其空跑 paint)。用 painter(非 foregroundPainter)
+    // → 画在文字底下,文字照常透出;painter 内部自 clip 到块边界(对齐
+    // legacy overlay 的 ClipRect,防 padding 出血画到相邻块文字上,见
+    // InlineCodeBackgroundPainter 顶部说明)。内容变化(重新 flatten 产生
+    // 新 projection)会触发本 build 重跑,挂载条件随之重估。
+    if (widget.codeLanguage == null && widget.projectionGetter().hasInlineCode) {
       keyedChild = CustomPaint(
         painter: InlineCodeBackgroundPainter(
           paragraphGetter: _findParagraph,

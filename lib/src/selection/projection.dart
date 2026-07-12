@@ -83,6 +83,12 @@ class RenderTextProjection {
   /// 总渲染长度,应 == RenderParagraph.text.toPlainText().length。
   final int renderLength;
 
+  /// 本段是否含行内代码区间。供 SelectableTextBox 决定是否挂灰底
+  /// painter —— 绝大多数段落无行内代码,不挂即省一个 RenderCustomPaint
+  /// 与其每次重录制的空跑 paint。entries 量级为段内 run 数,any 短路。
+  bool get hasInlineCode =>
+      entries.any((e) => e.kind == ProjectionKind.inlineCode);
+
   static final RenderTextProjection empty = RenderTextProjection(const []);
 
   /// 把渲染偏移区间 `[renderStart, renderEnd)` 投影成逻辑文本。
