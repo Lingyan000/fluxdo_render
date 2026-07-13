@@ -508,5 +508,60 @@ void main() {
         '> 段一\n>\n> 段二',
       );
     });
+
+    test('裸 <audio> 标签帖(短链路径 src)写回标签而非裸 URL', () {
+      expect(
+        serializeIslandNode(const AudioNode(
+          id: 'b',
+          src: '/uploads/short-url/abc123.xz',
+          mime: 'audio/mp4',
+        )),
+        '<audio controls>\n'
+        '  <source src="/uploads/short-url/abc123.xz" type="audio/mp4">\n'
+        '</audio>',
+      );
+    });
+
+    test('语音消息 AudioNode(voice)带 [wrap=voice] 壳', () {
+      expect(
+        serializeIslandNode(const AudioNode(
+          id: 'b',
+          src: '/uploads/short-url/abc123.xz',
+          mime: 'audio/mp4',
+          voice: true,
+        )),
+        '[wrap=voice]\n'
+        '<audio controls>\n'
+        '  <source src="/uploads/short-url/abc123.xz" type="audio/mp4">\n'
+        '</audio>\n'
+        '[/wrap]',
+      );
+    });
+
+    test('upload:// 音频仍走官方短链形态(不受标签写回影响)', () {
+      expect(
+        serializeIslandNode(const AudioNode(
+          id: 'b',
+          src: '/uploads/x.mp3',
+          origSrc: 'upload://abc.mp3',
+        )),
+        '![|audio](upload://abc.mp3)',
+      );
+    });
+
+    test('裸 <video> 标签帖写回标签(含宽高)', () {
+      expect(
+        serializeIslandNode(const VideoNode(
+          id: 'b',
+          src: '/uploads/short-url/xyz.xz',
+          mime: 'video/mp4',
+          width: 640,
+          height: 360,
+        )),
+        '<video width="640" height="360" controls>\n'
+        '  <source src="/uploads/short-url/xyz.xz" type="video/mp4">\n'
+        '</video>',
+      );
+    });
   });
 }

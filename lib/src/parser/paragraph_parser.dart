@@ -231,6 +231,21 @@ class ParagraphParser {
           // markdown 段间格式残留(浏览器里因为 block 之间已有 margin 而
           // 几乎不可见),不能让它单起一行 ParagraphNode 占额外高度。
           if (tag == 'br' && pendingInlines.isEmpty) continue;
+          // div.d-wrap[data-wrap=voice]:语音消息容器(本 app 约定,
+          // `[wrap=voice]` BBCode 产物)。内部 audio 升格语音条;容器内
+          // 其余内容照常递归(约定形态只有 audio,防御性保留)。
+          if (tag == 'div' &&
+              node.classes.contains('d-wrap') &&
+              node.attributes['data-wrap'] == 'voice') {
+            flushInlines();
+            var hasAudio = false;
+            for (final a in node.querySelectorAll('audio')) {
+              out.add(_parseAudio(a, nextId, voice: true));
+              hasAudio = true;
+            }
+            if (hasAudio) continue;
+            // 无 audio 的 wrap=voice:当普通容器落到下方通用 div 逻辑
+          }
           // div.lazy-video-container:懒加载视频卡片(youtube / vimeo / tiktok)
           if (tag == 'div' && node.classes.contains('lazy-video-container')) {
             flushInlines();
@@ -1904,7 +1919,9 @@ class ParagraphParser {
   }
 
   /// 解析音频节点 —— <audio><source src .. type ..><a>文本</a></audio>。
-  AudioNode _parseAudio(dom.Element el, String Function() nextId) {
+  /// [voice] = 位于 `[wrap=voice]` 语音消息容器内。
+  AudioNode _parseAudio(dom.Element el, String Function() nextId,
+      {bool voice = false}) {
     final source = el.querySelector('source');
     final srcAttr = source?.attributes['src']?.trim();
     final origAttr = source?.attributes['data-orig-src']?.trim();
@@ -1923,6 +1940,7 @@ class ParagraphParser {
       title: (title == null || title.isEmpty) ? null : title,
       mime: (mime == null || mime.isEmpty) ? null : mime,
       origSrc: (origAttr == null || origAttr.isEmpty) ? null : origAttr,
+      voice: voice,
     );
   }
 

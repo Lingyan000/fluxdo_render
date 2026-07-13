@@ -62,6 +62,22 @@ legacy 走 fwfh_just_audio 默认音频条。
     edgeCase: false,
   ),
   FixtureEntry(
+    relativePath: r'''audio/voice_message.html''',
+    html: r'''<div class="d-wrap" data-wrap="voice">
+<audio controls>
+  <source src="/uploads/short-url/qUJGpoUSJLSWlI37sAVBL3tPG91.xz" type="audio/mp4">
+</audio>
+</div>
+''',
+    notes: r'''本 app 语音消息约定形态:raw = [wrap=voice] + 裸 <audio> 标签(媒体改名
+.xz 上传),cook 产 <div class="d-wrap" data-wrap="voice"> 包住原生 audio。
+网页端:无样式 div + 原生 controls,零影响。
+本 app:parser 识别 data-wrap=voice → AudioNode(voice:true) → 语音条 UI
+(主项目 audioBuilder 分流);子包 fallback 仍是占位卡。''',
+    source: r'''cook 探针实测(tools/discourse-cook-bundle,[wrap=voice] BBCode 产物)''',
+    edgeCase: false,
+  ),
+  FixtureEntry(
     relativePath: r'''blockquote/multi_paragraph.html''',
     html: r'''<blockquote>
 <p>第一段引用。</p>

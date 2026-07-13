@@ -77,6 +77,7 @@ class EditorImageGrid extends StatefulWidget {
     this.onRemoveImage,
     this.onMoveImageOut,
     this.onAltChanged,
+    this.onReorder,
   });
 
   final ImageGridNode node;
@@ -106,6 +107,10 @@ class EditorImageGrid extends StatefulWidget {
 
   /// 瓦片 alt 原位编辑保存(index, 新 alt)。
   final void Function(int index, String alt)? onAltChanged;
+
+  /// 瓦片拖拽排序:第 [from] 张拖放到第 [to] 张瓦片上(落位 to 下标,
+  /// 目标侧让位)。null = 不可排序。
+  final void Function(int from, int to)? onReorder;
 
   @override
   State<EditorImageGrid> createState() => _EditorImageGridState();
@@ -253,6 +258,73 @@ class _EditorImageGridState extends State<EditorImageGrid> {
   }
 
   Widget _tile(
+    BuildContext context,
+    ColorScheme scheme,
+    ImageContentBuilder builder,
+    int index,
+    ImageRun img,
+    double size,
+    int total,
+  ) {
+    final body = _tileBody(context, scheme, builder, index, img, size, total);
+    if (widget.onReorder == null || total < 2) return body;
+
+    // 拖拽排序:长按提起(触摸/鼠标同一手势 —— 立即拖会抢瓦片单击与
+    // 页面滚动的竞技场);每瓦片同时是放置目标,drop = 落位该瓦片下标。
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (d) => d.data != index,
+      onAcceptWithDetails: (d) => widget.onReorder!(d.data, index),
+      builder: (context, candidates, _) => DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: candidates.isEmpty ? Colors.transparent : scheme.primary,
+            width: 2,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: LongPressDraggable<int>(
+          data: index,
+          maxSimultaneousDrags: 1,
+          feedback: _dragFeedback(context, builder, img, size, total),
+          childWhenDragging: Opacity(opacity: 0.35, child: body),
+          child: body,
+        ),
+      ),
+    );
+  }
+
+  /// 拖拽影像:瓦片同尺寸缩略 + 提起阴影(脱离树,需自带 Material)。
+  Widget _dragFeedback(
+    BuildContext context,
+    ImageContentBuilder builder,
+    ImageRun img,
+    double size,
+    int total,
+  ) {
+    return Material(
+      color: Colors.transparent,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(6),
+      clipBehavior: Clip.antiAlias,
+      child: Opacity(
+        opacity: 0.9,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: FittedBox(
+            fit: BoxFit.cover,
+            clipBehavior: Clip.hardEdge,
+            child: AbsorbPointer(
+              child: builder(context, img, total),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tileBody(
     BuildContext context,
     ColorScheme scheme,
     ImageContentBuilder builder,

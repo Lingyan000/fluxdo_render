@@ -243,3 +243,32 @@ bool moveImageOutsideGrid(EditorState state, String islandId, int imageIndex) {
   );
   return true;
 }
+
+/// grid 内图片重排(瓦片拖拽排序):第 [from] 张抽出插到 [to] 位
+/// (插入语义,官方 ProseMirror 拖放同款)。岛节点原位形变不经 cook,
+/// undo 一步。返回 false = 不是 grid 岛或下标越界。
+bool reorderImageInGrid(
+    EditorState state, String islandId, int from, int to) {
+  final i = state.indexOfBlock(islandId);
+  if (i < 0) return false;
+  final block = state.blocks[i];
+  if (block is! IslandBlock || block.node is! ImageGridNode) return false;
+  final grid = block.node as ImageGridNode;
+  if (from < 0 || from >= grid.images.length) return false;
+  if (to < 0 || to >= grid.images.length) return false;
+  if (from == to) return true;
+
+  final images = [...grid.images];
+  final img = images.removeAt(from);
+  images.insert(to, img);
+  state.updateIslandNode(
+    islandId,
+    ImageGridNode(
+      id: grid.id,
+      images: images,
+      columns: grid.columns,
+      mode: grid.mode,
+    ),
+  );
+  return true;
+}

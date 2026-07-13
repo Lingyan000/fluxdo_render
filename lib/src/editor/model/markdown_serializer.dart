@@ -466,16 +466,47 @@ String serializeIslandNode(BlockNode node) {
           .map((e) =>
               '[^${e.number}]: ${_serializeIslandInlines(e.inlines)}')
           .join('\n\n');
-    case VideoNode(:final src, :final origSrc):
-      // upload:// 上传 → `![|video](短链)`;直链 → 裸 URL(onebox 语义)
+    case VideoNode(
+        :final src,
+        :final origSrc,
+        :final mime,
+        :final width,
+        :final height,
+      ):
+      // upload:// 上传 → `![|video](短链)`;短链路径/直链 = raw 手写
+      // <video> 标签帖(媒体改名上传),写回标签本身(cook 原样保留,
+      // 二次 cook 等价)—— 回裸 URL 会被 cook 成链接,毁形态。
       final upload = origSrc ??
           (src.startsWith('upload://') ? src : null);
       if (upload != null) return '![|video]($upload)';
+      // 站内相对路径(/uploads/short-url/…,媒体改名上传的手写标签帖)
+      // → 写回标签本身(裸相对路径 cook 不成 onebox,回 URL 即毁形态);
+      // http(s) 直链维持裸 URL(onebox 语义,原 raw 就是链接)。
+      if (src.startsWith('/')) {
+        final sizeAttr = (width != null && height != null)
+            ? ' width="${width.round()}" height="${height.round()}"'
+            : '';
+        final typeAttr = mime == null ? '' : ' type="$mime"';
+        return '<video$sizeAttr controls>\n'
+            '  <source src="$src"$typeAttr>\n'
+            '</video>';
+      }
       return src;
-    case AudioNode(:final src, :final origSrc):
+    case AudioNode(:final src, :final origSrc, :final mime, :final voice):
       final upload = origSrc ??
           (src.startsWith('upload://') ? src : null);
       if (upload != null) return '![|audio]($upload)';
+      // 站内相对路径/语音消息 → 写回标签(voice 恒标签:录音上传必是
+      // 短链路径,壳内直链是防御分支);http(s) 直链维持裸 URL。
+      if (src.startsWith('/') || voice) {
+        final typeAttr = mime == null ? '' : ' type="$mime"';
+        final tag = '<audio controls>\n'
+            '  <source src="$src"$typeAttr>\n'
+            '</audio>';
+        // 语音消息:带回 [wrap=voice] 壳(cook 产 d-wrap div,本 app
+        // 渲染语音条;网页端无样式影响)
+        return voice ? '[wrap=voice]\n$tag\n[/wrap]' : tag;
+      }
       return src;
     case IframeNode():
       return _serializeIframe(node);

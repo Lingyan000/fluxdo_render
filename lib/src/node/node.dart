@@ -1352,6 +1352,7 @@ class AudioNode extends BlockNode {
     this.title,
     this.mime,
     this.origSrc,
+    this.voice = false,
   });
 
   /// 播放源 URL(首个 `source[src]` / `audio[src]`)。可能是 `upload://` 短链;
@@ -1368,6 +1369,11 @@ class AudioNode extends BlockNode {
   /// 首个 `source[type]`(如 `audio/mpeg`),可空。
   final String? mime;
 
+  /// 语音消息(`[wrap=voice]` 容器内的 audio,本 app 约定):渲染成
+  /// 紧凑语音条而非通用音频播放器。网页端无此概念 —— d-wrap 只是
+  /// 无样式 div,原生 controls 照常。
+  final bool voice;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1376,10 +1382,11 @@ class AudioNode extends BlockNode {
           src == other.src &&
           title == other.title &&
           mime == other.mime &&
-          origSrc == other.origSrc;
+          origSrc == other.origSrc &&
+          voice == other.voice;
 
   @override
-  int get hashCode => Object.hash(src, title, mime, origSrc);
+  int get hashCode => Object.hash(src, title, mime, origSrc, voice);
 
   @override
   String toString() => 'AudioNode($id, $src)';

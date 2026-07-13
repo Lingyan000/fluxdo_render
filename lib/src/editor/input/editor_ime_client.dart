@@ -52,6 +52,10 @@ class EditorImeClient with TextInputClient {
   /// 链路产,状态层不造岛)。参数 = 触发块 id(标记文本已清空)。
   void Function(String blockId)? onHorizontalRuleRequest;
 
+  /// iOS 浮动光标报文(长按空格 trackpad 模式)。IME 客户端只转发 ——
+  /// 几何(基准光标矩形/命中/幽灵绘制)全在视图层。
+  void Function(RawFloatingCursorPoint point)? onFloatingCursor;
+
   TextInputConnection? _connection;
 
   /// 当前 attach 的段落 id(IME 窗口)。
@@ -466,7 +470,7 @@ class EditorImeClient with TextInputClient {
 
   @override
   void updateFloatingCursor(RawFloatingCursorPoint point) {
-    // iOS 浮动光标:M1 桌面优先,移动端接入(M3)时实现。
+    onFloatingCursor?.call(point);
   }
 
   @override

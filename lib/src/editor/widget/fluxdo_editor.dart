@@ -91,6 +91,9 @@ class ImageAtomSelection {
   int get hashCode => Object.hash(blockId, offset, image, globalRect);
 }
 
+/// 浮动幽灵光标定位用(widget test;iOS 长按空格 trackpad 模式)。
+const Key kFloatingCursorGhostKey = ValueKey('editor-floating-cursor-ghost');
+
 class FluxdoEditor extends StatefulWidget {
   const FluxdoEditor({
     super.key,
@@ -100,6 +103,7 @@ class FluxdoEditor extends StatefulWidget {
     this.focusNode,
     this.nodeFactory,
     this.markdownImporter,
+    this.richPasteImporter,
     this.onIslandEditRequest,
     this.onContainerTitleEdit,
     this.onTableEdited,
@@ -133,6 +137,12 @@ class FluxdoEditor extends StatefulWidget {
   /// 剪贴板策略:复制/剪切写 markdown 文本(跨 app 通用、粘回自身经
   /// cook 还原富内容 —— Discourse 官方富文本 composer 同款语义)。
   final Future<List<EditorBlock>?> Function(String markdown)? markdownImporter;
+
+  /// 富粘贴导入器:粘贴时**先**问它 —— 宿主自行读系统剪贴板的富格式
+  /// (text/html 等,子包不背平台剪贴板依赖)并转成编辑块。返回 null /
+  /// 空 = 剪贴板无富内容或转换失败,回落 [markdownImporter] 纯文本路径;
+  /// 抛异常同回落。null = 不启用富粘贴。
+  final Future<List<EditorBlock>?> Function()? richPasteImporter;
 
   /// 双击岛 → 请求编辑(宿主弹源码对话框,改完调 state.replaceIsland)。
   /// null = 岛只读不可编辑。
@@ -213,6 +223,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     // input rule `--- ` → 分隔线岛(经 cook 链路;importer 未注入时用
     // markdown 纯文本兜底 —— 至少不静默)
     _ime.onHorizontalRuleRequest = _insertHorizontalRule;
+    // iOS 浮动光标(长按空格 trackpad 模式)
+    _ime.onFloatingCursor = _onFloatingCursor;
     _islandFactory = widget.nodeFactory ?? NodeFactory();
     widget.state.addListener(_onStateChanged);
     _focusNode.addListener(_onFocusChanged);
@@ -243,6 +255,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     _collapsedHandle?.hide();
     _contextBar?.hide();
     _magnifier?.hide();
+    _removeFloatingGhost();
     _autoScrollTicker?.dispose();
     _scrollPosition?.removeListener(_onScrolled);
     _caretInfo.dispose();
@@ -277,6 +290,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
         _dragBase == null &&
         !_longPressing &&
         !_handleDragging &&
+        !_floatingCursor &&
         _focusNode.hasPrimaryFocus) {
       _ime.syncFromState(show: false);
     }
@@ -513,6 +527,143 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     _showContextBarForSelection();
   }
 
+  // -----------------------------------------------------------------
+  // iOS 浮动光标(长按空格 trackpad 模式)
+  // -----------------------------------------------------------------
+
+  /// 浮动光标进行中(IME 门之一:平台在拖光标,选区高频变化,End 时
+  /// 统一回喂;期间 setEditingState 会打断系统手势)。
+  bool _floatingCursor = false;
+
+  /// Start 时的光标中心(全局;Update 的 offset 以此为基准累加)。
+  Offset? _floatingBase;
+  Offset _floatingPos = Offset.zero;
+  OverlayEntry? _floatingGhost;
+
+  void _onFloatingCursor(RawFloatingCursorPoint point) {
+    if (!mounted) return;
+    switch (point.state) {
+      case FloatingCursorDragState.Start:
+        final sel = widget.state.selection;
+        if (sel == null || !sel.isCollapsed) return;
+        final docPos =
+            _toDocumentPosition(sel.extent, affinity: _caretAffinity);
+        final rect = docPos == null
+            ? null
+            : _hitTester.editingCaretRectAt(docPos,
+                lineHeight: _caretLineHeight);
+        if (rect == null) return;
+        _floatingCursor = true;
+        _floatingBase = rect.center;
+        _floatingPos = rect.center + (point.offset ?? Offset.zero);
+        widget.state.sealHistory();
+        _collapsedHandle?.hide();
+        _contextBar?.hide();
+        _showFloatingGhost();
+        setState(() {}); // 实光标切灰色残影态
+
+      case FloatingCursorDragState.Update:
+        final base = _floatingBase;
+        if (!_floatingCursor || base == null) return;
+        var pos = base + (point.offset ?? Offset.zero);
+        // 钳到可视视口内(编辑区上缘/键盘上缘;半行余量让幽灵整条可见)。
+        // 无滚动宿主(demo/测试)退回编辑器根矩形。
+        var vp = _visibleViewportRect();
+        if (vp == null) {
+          final rootBox = _rootKey.currentContext?.findRenderObject();
+          if (rootBox is RenderBox && rootBox.attached && rootBox.hasSize) {
+            vp = rootBox.localToGlobal(Offset.zero) & rootBox.size;
+          }
+        }
+        if (vp != null && !vp.isEmpty) {
+          final half = _caretLineHeight / 2;
+          // x 留幽灵条半宽(1.25),整条不出界
+          pos = Offset(
+            pos.dx.clamp(vp.left + 1.25, vp.right - 1.25),
+            pos.dy.clamp(vp.top + half, vp.bottom - half),
+          );
+        }
+        _floatingPos = pos;
+        _floatingGhost?.markNeedsBuild();
+        // 实光标就近吸附(EditableText 的灰色残影等价物:吸附位即落点)
+        _applyFloatingHit(pos);
+        // 贴视口上下缘 → 边缘自动滚(键盘态可视区小,长文档必需;
+        // tick 每帧滚动后按幽灵位置重命中,吸附点随内容继续走)
+        _updateAutoScroll(pos);
+
+      case FloatingCursorDragState.End:
+        if (!_floatingCursor) return;
+        _floatingCursor = false;
+        _floatingBase = null;
+        _stopAutoScroll();
+        _removeFloatingGhost();
+        _ime.syncFromState(show: false);
+        setState(() {}); // 实光标恢复主题色
+    }
+  }
+
+  /// 浮动点 → 实光标吸附(Update 与自动滚 tick 共用;无半行补偿 ——
+  /// 浮动点即文本行内坐标,与手柄"手指在行下方"不同)。
+  void _applyFloatingHit(Offset pos) {
+    final docPos = _hitTester.positionAt(
+      pos,
+      hitTestRoot: _rootKey.currentContext?.findRenderObject(),
+    );
+    if (docPos == null) return;
+    final editorPos = _toEditorPosition(docPos);
+    if (editorPos != null && editorPos != widget.state.selection?.extent) {
+      _caretAffinity = docPos.affinity;
+      _verticalGoalX = null;
+      widget.state.updateSelection(EditorSelection.collapsed(editorPos));
+    }
+  }
+
+  /// 浮动幽灵光标:主题色圆角条 + 轻阴影,Overlay 顶层跟手平滑移动
+  /// (实光标按字符格吸附,幽灵负责"浮动"体感)。
+  void _showFloatingGhost() {
+    if (_floatingGhost != null) {
+      _floatingGhost!.markNeedsBuild();
+      return;
+    }
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+    _floatingGhost = OverlayEntry(builder: (ctx) {
+      final overlayBox =
+          Overlay.of(context).context.findRenderObject() as RenderBox?;
+      final local = overlayBox == null
+          ? _floatingPos
+          : overlayBox.globalToLocal(_floatingPos);
+      return Positioned(
+        left: local.dx - 1.25,
+        top: local.dy - _caretLineHeight / 2,
+        child: IgnorePointer(
+          child: Container(
+            key: kFloatingCursorGhostKey,
+            width: 2.5,
+            height: _caretLineHeight,
+            decoration: BoxDecoration(
+              color: Theme.of(ctx).colorScheme.primary,
+              borderRadius: BorderRadius.circular(1.25),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 3,
+                  offset: Offset(0, 1),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    });
+    overlay.insert(_floatingGhost!);
+  }
+
+  void _removeFloatingGhost() {
+    _floatingGhost?.remove();
+    _floatingGhost = null;
+  }
+
   /// 按当前选区几何弹动作条(复制/剪切/粘贴/全选)。
   void _showContextBarForSelection() {
     final docSel = _controller.selection;
@@ -627,9 +778,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   void _ensureCaretVisible(Rect caretGlobal) {
     final pos = _scrollPosition;
     if (pos == null || !pos.hasContentDimensions) return;
-    // 手柄拖动中光标由手指驱动,滚动交给边缘自动滚 —— ensure 的
-    // animateTo 会与 tick 的 jumpTo 抢滚动位置(来回抖)。
-    if (_handleDragging) return;
+    // 手柄拖动/浮动光标中光标由手指驱动,滚动交给边缘自动滚 —— ensure
+    // 的 animateTo 会与 tick 的 jumpTo(或幽灵跟手)抢滚动位置(来回抖)。
+    if (_handleDragging || _floatingCursor) return;
     final sel = widget.state.selection;
     if (sel == null || !sel.isCollapsed) return;
     final key = (widget.state.docRevision, sel);
@@ -718,11 +869,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   void _onAutoScrollTick(Duration _) {
     final pos = _scrollPosition;
-    final drag = _handleDragPoint;
-    if (pos == null ||
-        drag == null ||
-        _autoScrollStep == 0 ||
-        !_handleDragging) {
+    // 拖拽点:手柄用 pan 上报的 _handleDragPoint,浮动光标用幽灵位置。
+    final drag = _floatingCursor ? _floatingPos : _handleDragPoint;
+    final dragging = _handleDragging || _floatingCursor;
+    if (pos == null || drag == null || _autoScrollStep == 0 || !dragging) {
       _stopAutoScroll();
       return;
     }
@@ -735,8 +885,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
     pos.jumpTo(target);
     // 拖拽点全局没动、内容滚过去了 → 用当前拖拽点重新命中,让被拖端
-    // (或 collapsed 光标)随滚动继续走;否则只滚屏不扩选。
-    if (_handles?.isShowing ?? false) {
+    // (或 collapsed 光标/浮动吸附点)随滚动继续走;否则只滚屏不扩选。
+    if (_floatingCursor) {
+      _applyFloatingHit(drag);
+    } else if (_handles?.isShowing ?? false) {
       _handles!.reapplyDrag();
     } else if (_collapsedHandle?.isShowing ?? false) {
       _onCollapsedHandleDragMoved(drag);
@@ -927,6 +1079,25 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   Future<void> _clipboardPaste() async {
     final ticket = ++_pasteTicket;
+
+    // 富格式优先(text/html 等):宿主读剪贴板+转换,拿到块直接插;
+    // 任何一步落空回落纯文本路径(不叠加插入)。
+    final rich = widget.richPasteImporter;
+    if (rich != null) {
+      List<EditorBlock>? frag;
+      try {
+        frag = await rich();
+      } catch (_) {
+        frag = null;
+      }
+      if (!mounted || ticket != _pasteTicket) return;
+      if (frag != null && frag.isNotEmpty) {
+        widget.state.pasteBlocks(frag);
+        _ime.syncFromState(show: false);
+        return;
+      }
+    }
+
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text == null || text.isEmpty) return;
@@ -1327,6 +1498,23 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     );
   }
 
+  /// grid 内瓦片拖拽排序落地:结构命令重排 + 子选中下标跟随(被拖图
+  /// 落位 to;from→to 之间的图让位漂移一格)。
+  void _onGridReorder(String islandId, int from, int to) {
+    if (!reorderImageInGrid(widget.state, islandId, from, to)) return;
+    final sel = _gridImageSel;
+    if (sel == null || sel.$1 != islandId) return;
+    var s = sel.$2;
+    if (s == from) {
+      s = to;
+    } else if (from < s && s <= to) {
+      s -= 1;
+    } else if (to <= s && s < from) {
+      s += 1;
+    }
+    if (s != sel.$2) _gridImageSel = (islandId, s);
+  }
+
   ImageAtomSelection? _computeImageAtomSelection() {
     final norm = widget.state.normalizedSelection();
     if (norm == null) return null;
@@ -1579,6 +1767,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                           moveImageOutsideGrid(widget.state, ib.id, index),
                       onAltChanged: (index, alt) =>
                           _setGridImageAlt(ib.id, index, alt),
+                      onReorder: (from, to) =>
+                          _onGridReorder(ib.id, from, to),
                     )
                   : null,
             ),
@@ -1733,8 +1923,13 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                   valueListenable: _caretInfo,
                   builder: (context, info, _) => EditorCaret(
                     caretRect: info.$1,
-                    color: Theme.of(context).colorScheme.primary,
-                    alwaysVisible: state.hasComposing,
+                    // 浮动光标期间 = 灰色吸附残影、常亮不闪(iOS 系统
+                    // 同款:浮动 caret 跟手,原位灰 caret 停在吸附位;
+                    // EditableText backgroundCursorColor 同语义)。
+                    color: _floatingCursor
+                        ? Theme.of(context).colorScheme.outline
+                        : Theme.of(context).colorScheme.primary,
+                    alwaysVisible: state.hasComposing || _floatingCursor,
                     moveGeneration: info.$2,
                   ),
                 ),
