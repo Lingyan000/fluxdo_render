@@ -23,6 +23,7 @@ import 'package:flutter/gestures.dart'
         kDoubleTapSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show BoxHitTestResult, RenderMetaData;
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart';
 
 import '../../node/node.dart'
@@ -44,6 +45,7 @@ import '../model/editor_state.dart';
 import 'editable_paragraph.dart';
 import 'editor_caret.dart';
 import 'editor_code_block.dart';
+import 'editor_collapsed_handle.dart';
 import 'editor_container_shell.dart';
 import 'editor_context_bar.dart';
 import 'editor_image_grid.dart';
@@ -183,7 +185,8 @@ class FluxdoEditor extends StatefulWidget {
   State<FluxdoEditor> createState() => _FluxdoEditorState();
 }
 
-class _FluxdoEditorState extends State<FluxdoEditor> {
+class _FluxdoEditorState extends State<FluxdoEditor>
+    with SingleTickerProviderStateMixin {
   late final SelectionController _controller;
   late final SelectionHitTester _hitTester;
   late final EditorImeClient _ime;
@@ -237,8 +240,10 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   @override
   void dispose() {
     _handles?.hide();
+    _collapsedHandle?.hide();
     _contextBar?.hide();
     _magnifier?.hide();
+    _autoScrollTicker?.dispose();
     _scrollPosition?.removeListener(_onScrolled);
     _caretInfo.dispose();
     widget.state.removeListener(_onStateChanged);
@@ -260,6 +265,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   void _onStateChanged() {
     if (!mounted) return;
     if (kDebugMode) _editFrameWatch = Stopwatch()..start();
+    // 打字/退格(IME 平台增量应用中)→ 收触摸选区 UI(系统同款:输入
+    // 即隐手柄;实际显隐由帧后 _syncHandlesAndContextBar 收敛)。
+    if (_ime.isApplyingPlatformUpdate) _touchSelection = false;
     // 外部变更(undo/redo 按钮、程序化改文档)→ IME 的 diff 基准已过期,
     // 必须重喂;IME 自身回调引发的通知、以及拖选/长按扩选/手柄拖动进行
     // 中(高频选区变化,end 时统一喂)除外。
@@ -378,10 +386,11 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   // -----------------------------------------------------------------
 
   SelectionHandlesController? _handles;
+  CollapsedHandleController? _collapsedHandle;
   EditorContextBar? _contextBar;
 
   /// 手柄拖动进行中(高频选区变化不逐帧重喂 IME;controller → state 的
-  /// 反向回写只在此期间开启)。
+  /// 反向回写只在此期间开启)。collapsed 单手柄拖动同样复用此门。
   bool _handleDragging = false;
 
   /// 手柄拖动:_controller(DocumentSelection)→ EditorState 回写。
@@ -399,13 +408,13 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   /// 帧后统一收敛手柄/动作条显隐(唯一真源:state.selection + 触摸来源)。
   void _syncHandlesAndContextBar() {
     final sel = widget.state.selection;
-    final show = _touchSelection &&
-        _focusNode.hasPrimaryFocus &&
+    final touchReady = _touchSelection && _focusNode.hasPrimaryFocus;
+    final showRange = touchReady &&
         sel != null &&
         !sel.isCollapsed &&
         _lastImageAtomSel == null && // 图原子选中走宿主工具条
         _controller.selection != null; // 文档几何可得(失焦已清)
-    if (show) {
+    if (showRange) {
       (_handles ??= SelectionHandlesController(
         context: context,
         controller: _controller,
@@ -413,11 +422,8 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
           _handleDragging = true;
           _contextBar?.hide();
         },
-        onDragEnd: () {
-          _handleDragging = false;
-          _ime.syncFromState(show: false);
-          _showContextBarForSelection();
-        },
+        onDragMove: _onRangeHandleDragMoved,
+        onDragEnd: _onHandleDragFinished,
       )).show();
       if (!_handleDragging && !_longPressing) {
         _showContextBarForSelection();
@@ -426,6 +432,85 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
       _handles?.hide();
       _contextBar?.hide();
     }
+
+    // collapsed 单手柄:触摸落光标后可拖动微调(Android 系统同款;
+    // iOS 无此形态 —— 系统绘制即空盒,platformHasHandle 挡掉)。
+    final caretLocal = _caretInfo.value.$1;
+    final rootBox = _rootKey.currentContext?.findRenderObject();
+    final showCollapsed = !showRange &&
+        touchReady &&
+        sel != null &&
+        sel.isCollapsed &&
+        caretLocal != null &&
+        rootBox is RenderBox &&
+        rootBox.attached &&
+        CollapsedHandleController.platformHasHandle(context);
+    if (showCollapsed) {
+      final caretGlobal =
+          rootBox.localToGlobal(caretLocal.topLeft) & caretLocal.size;
+      (_collapsedHandle ??= CollapsedHandleController(
+        context: context,
+        tapRegionGroupId: _controller,
+        onDragStart: () {
+          _handleDragging = true; // IME 三门复用(拖动高频变化 end 时统一喂)
+          widget.state.sealHistory();
+        },
+        onDragMove: _onCollapsedHandleDragMoved,
+        onDragEnd: _onHandleDragFinished,
+      )).show(caretGlobal);
+    } else {
+      _collapsedHandle?.hide();
+    }
+  }
+
+  /// 双手柄拖拽点移动:记录拖拽点 + 驱动边缘自动滚(选区更新由
+  /// SelectionHandlesController 内部完成)。
+  void _onRangeHandleDragMoved(Offset dragGlobal) {
+    _handleDragPoint = dragGlobal;
+    _updateAutoScroll(dragGlobal);
+  }
+
+  /// collapsed 手柄拖拽点移动:半行上移命中行中心 → 移光标 + 放大镜 +
+  /// 边缘自动滚(与双手柄/长按同口径)。
+  void _onCollapsedHandleDragMoved(Offset dragGlobal) {
+    _handleDragPoint = dragGlobal;
+    final docPos = _hitTester.positionAt(
+      dragGlobal - Offset(0, _caretLineHeight / 2),
+      hitTestRoot: _rootKey.currentContext?.findRenderObject(),
+    );
+    if (docPos != null) {
+      final editorPos = _toEditorPosition(docPos);
+      if (editorPos != null &&
+          editorPos != widget.state.selection?.extent) {
+        _caretAffinity = docPos.affinity;
+        _verticalGoalX = null;
+        widget.state.updateSelection(EditorSelection.collapsed(editorPos));
+        HapticFeedback.selectionClick();
+      }
+      // 放大镜:X 跟拖拽点、Y 锁光标行(长按/双手柄同口径)
+      final caret = _hitTester.editingCaretRectAt(
+        docPos,
+        lineHeight: _caretLineHeight,
+      );
+      if (caret != null) {
+        (_magnifier ??= SelectionMagnifier(context)).show(
+          gestureGlobal: dragGlobal,
+          caretRect: caret,
+        );
+      }
+    }
+    _updateAutoScroll(dragGlobal);
+  }
+
+  /// 手柄(双/单)拖动结束的统一收尾。
+  void _onHandleDragFinished() {
+    _handleDragging = false;
+    _handleDragPoint = null;
+    _stopAutoScroll();
+    _magnifier?.hide();
+    _ime.syncFromState(show: false);
+    // 双手柄:按新选区重新定位显示动作条;collapsed 无区间几何,内部早退。
+    _showContextBarForSelection();
   }
 
   /// 按当前选区几何弹动作条(复制/剪切/粘贴/全选)。
@@ -477,6 +562,7 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     _touchSelection = false;
     _contextBar?.hide();
     _handles?.hide();
+    _collapsedHandle?.hide();
   }
 
   /// 滚动跟随:编辑器在宿主滚动容器内,纯滚动不触发 _onStateChanged →
@@ -495,6 +581,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
     if (_handles?.isShowing ?? false) {
       _handles!.update(yCompensation: delta);
       _contextBar?.reposition(yCompensation: delta);
+    }
+    if (_collapsedHandle?.isShowing ?? false) {
+      _collapsedHandle!.translate(delta);
     }
     if (_lastImageAtomSel == null && _caretInfo.value.$1 == null) return;
     // coalesce:滚动一帧内 position listener 可触发多次,每次都排
@@ -538,23 +627,20 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
   void _ensureCaretVisible(Rect caretGlobal) {
     final pos = _scrollPosition;
     if (pos == null || !pos.hasContentDimensions) return;
+    // 手柄拖动中光标由手指驱动,滚动交给边缘自动滚 —— ensure 的
+    // animateTo 会与 tick 的 jumpTo 抢滚动位置(来回抖)。
+    if (_handleDragging) return;
     final sel = widget.state.selection;
     if (sel == null || !sel.isCollapsed) return;
     final key = (widget.state.docRevision, sel);
     if (key == _lastEnsuredKey) return;
     _lastEnsuredKey = key;
 
-    final scrollableCtx = Scrollable.maybeOf(context)?.context;
-    final vpBox = scrollableCtx?.findRenderObject();
-    if (vpBox is! RenderBox || !vpBox.hasSize) return;
-    final vpRect = vpBox.localToGlobal(Offset.zero) & vpBox.size;
-
-    final mq = MediaQuery.maybeOf(context);
-    final screenH = mq?.size.height ?? vpRect.bottom;
-    final kbTop = screenH - (mq?.viewInsets.bottom ?? 0);
+    final visible = _visibleViewportRect();
+    if (visible == null) return;
     const pad = 24.0;
-    final visBottom = (vpRect.bottom < kbTop ? vpRect.bottom : kbTop) - pad;
-    final visTop = vpRect.top + pad;
+    final visBottom = visible.bottom - pad;
+    final visTop = visible.top + pad;
     if (visBottom <= visTop) return;
 
     double? delta;
@@ -572,6 +658,94 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
       duration: const Duration(milliseconds: 120),
       curve: Curves.easeOut,
     );
+  }
+
+  /// 宿主滚动视口的全局矩形(键盘遮挡部分已截掉)。
+  Rect? _visibleViewportRect() {
+    final scrollableCtx = Scrollable.maybeOf(context)?.context;
+    final vpBox = scrollableCtx?.findRenderObject();
+    if (vpBox is! RenderBox || !vpBox.attached || !vpBox.hasSize) return null;
+    final vpRect = vpBox.localToGlobal(Offset.zero) & vpBox.size;
+    final mq = MediaQuery.maybeOf(context);
+    final screenH = mq?.size.height ?? vpRect.bottom;
+    final kbTop = screenH - (mq?.viewInsets.bottom ?? 0);
+    final bottom = vpRect.bottom < kbTop ? vpRect.bottom : kbTop;
+    if (bottom <= vpRect.top) return null;
+    return Rect.fromLTRB(vpRect.left, vpRect.top, vpRect.right, bottom);
+  }
+
+  // -----------------------------------------------------------------
+  // 手柄拖动边缘自动滚
+  // -----------------------------------------------------------------
+
+  /// 拖拽点距可视区上/下沿多近开始自动滚。
+  static const double _kAutoScrollEdge = 56.0;
+
+  /// 每帧最大滚动步长(px,≈900px/s@60fps;越贴边越快,线性)。
+  static const double _kAutoScrollMaxStep = 15.0;
+
+  /// 手柄拖拽点(双手柄/collapsed 共用,全局坐标):自动滚每帧滚动后
+  /// 按它重新命中,让被拖端随内容滚动继续走。
+  Offset? _handleDragPoint;
+
+  Ticker? _autoScrollTicker;
+  double _autoScrollStep = 0;
+
+  void _updateAutoScroll(Offset dragGlobal) {
+    final visible = _visibleViewportRect();
+    if (_scrollPosition == null || visible == null) {
+      _stopAutoScroll();
+      return;
+    }
+    final topDist = dragGlobal.dy - visible.top;
+    final bottomDist = visible.bottom - dragGlobal.dy;
+    double step = 0;
+    if (topDist < _kAutoScrollEdge) {
+      step = -_kAutoScrollMaxStep *
+          (1 - topDist / _kAutoScrollEdge).clamp(0.0, 1.0);
+    } else if (bottomDist < _kAutoScrollEdge) {
+      step = _kAutoScrollMaxStep *
+          (1 - bottomDist / _kAutoScrollEdge).clamp(0.0, 1.0);
+    }
+    _autoScrollStep = step;
+    if (step != 0) {
+      final ticker = _autoScrollTicker ??= createTicker(_onAutoScrollTick);
+      if (!ticker.isActive) ticker.start();
+    } else {
+      _autoScrollTicker?.stop();
+    }
+  }
+
+  void _onAutoScrollTick(Duration _) {
+    final pos = _scrollPosition;
+    final drag = _handleDragPoint;
+    if (pos == null ||
+        drag == null ||
+        _autoScrollStep == 0 ||
+        !_handleDragging) {
+      _stopAutoScroll();
+      return;
+    }
+    final target = (pos.pixels + _autoScrollStep)
+        .clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    if (target == pos.pixels) {
+      // 滚到头:停表等待反向拖动(方向反转会有新的 pan update 重启)
+      _autoScrollTicker?.stop();
+      return;
+    }
+    pos.jumpTo(target);
+    // 拖拽点全局没动、内容滚过去了 → 用当前拖拽点重新命中,让被拖端
+    // (或 collapsed 光标)随滚动继续走;否则只滚屏不扩选。
+    if (_handles?.isShowing ?? false) {
+      _handles!.reapplyDrag();
+    } else if (_collapsedHandle?.isShowing ?? false) {
+      _onCollapsedHandleDragMoved(drag);
+    }
+  }
+
+  void _stopAutoScroll() {
+    _autoScrollStep = 0;
+    _autoScrollTicker?.stop();
   }
 
   /// 岛是否处于「整选」态(选区恰覆盖该岛 0..1)。
@@ -893,7 +1067,9 @@ class _FluxdoEditorState extends State<FluxdoEditor> {
       return;
     }
 
-    _touchSelection = false;
+    // 触摸落光标 → collapsed 单手柄显示依据(鼠标/触控板点击不出手柄)
+    _touchSelection = details.kind == PointerDeviceKind.touch ||
+        details.kind == PointerDeviceKind.stylus;
     _verticalGoalX = null;
     _caretAffinity = hit.$2;
     widget.state.sealHistory();

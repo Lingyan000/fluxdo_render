@@ -25,6 +25,7 @@ class SelectionHandlesController {
     required this.context,
     required this.controller,
     this.onDragStart,
+    this.onDragMove,
     this.onDragEnd,
   })  : _hit = SelectionHitTester(controller.registry),
         _exporter = SelectionExporter(controller.registry),
@@ -35,6 +36,10 @@ class SelectionHandlesController {
 
   /// 手柄开始拖动 —— 上层据此隐藏 toolbar(拖动中不挡视线)。
   final VoidCallback? onDragStart;
+
+  /// 拖拽点移动上报(全局坐标,已含「端点锚起步 + 手势 delta 累加」)。
+  /// 上层驱动边缘自动滚用;不接不影响既有行为。
+  final ValueChanged<Offset>? onDragMove;
 
   /// 手柄结束拖动 —— 上层据此按新选区重新定位显示 toolbar。
   final VoidCallback? onDragEnd;
@@ -219,6 +224,15 @@ class SelectionHandlesController {
     HapticFeedback.selectionClick();
     _showMagnifierAtDragPosition();
     onDragStart?.call();
+    onDragMove?.call(_dragPosition);
+  }
+
+  /// 用当前拖拽点重新命中一次。边缘自动滚每帧滚动后调:拖拽点全局
+  /// 不动、内容已滚过,被拖端应随之继续走(否则只滚屏不扩选)。
+  /// 非拖动中 no-op。
+  void reapplyDrag() {
+    if (_dragging == null) return;
+    _onDragUpdate(Offset.zero);
   }
 
   void _onDragUpdate(Offset delta) {
@@ -227,6 +241,7 @@ class SelectionHandlesController {
     // 累加手势 delta(对齐 SDK:dragPosition += details.delta),命中点上移
     // 半行指向**行中心** → 拖到哪行选到哪行,且可越过固定端向回反选。
     _dragPosition += delta;
+    onDragMove?.call(_dragPosition);
     final hitPoint = _dragPosition - Offset(0, _dragLineHeight / 2);
     final pos = _hit.positionAt(hitPoint);
     if (pos == null) return;

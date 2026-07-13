@@ -18,5 +18,7 @@ export 'src/editor/model/markdown_serializer.dart';
 export 'src/editor/widget/editor_island.dart';
 export 'src/editor/widget/editor_image_grid.dart';
 export 'src/editor/widget/editor_code_block.dart';
+export 'src/editor/widget/editor_collapsed_handle.dart'
+    show kCollapsedHandleKey;
 export 'src/editor/widget/editor_toolbar.dart';
 export 'src/editor/widget/fluxdo_editor.dart';

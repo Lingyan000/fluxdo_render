@@ -4,6 +4,7 @@ library;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kLongPressTimeout;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/editor.dart';
 import 'package:fluxdo_render/fluxdo_render.dart';
@@ -168,5 +169,109 @@ void main() {
 
     expect(state.selection!.isCollapsed, isFalse, reason: '鼠标拖选生效');
     expect(scroll.offset, 0, reason: '鼠标拖选不滚动');
+  });
+
+  // -----------------------------------------------------------------
+  // collapsed 单手柄(光标拖柄)
+  // -----------------------------------------------------------------
+
+  testWidgets('触摸落光标 = collapsed 手柄出现;鼠标点击不出', (tester) async {
+    final (_, state) = await pumpMobile(tester);
+    final para = tester.getRect(find.textContaining('hello').first);
+    final target = Offset(para.left + 20, para.center.dy);
+
+    // 触摸 tap(tester.tapAt 默认即 touch)
+    await tester.tapAt(target);
+    await tester.pump();
+    await tester.pump(); // _afterFrame → sync 手柄
+
+    expect(state.selection!.isCollapsed, isTrue);
+    expect(find.byKey(kCollapsedHandleKey), findsOneWidget,
+        reason: '触摸落光标出单手柄');
+
+    // 鼠标点击另一处(横向远离手柄 44px 命中区 —— 手柄区内的点击
+    // 归手柄手势,与系统一致)→ 手柄收
+    final para2 = tester.getRect(find.textContaining('second').first);
+    final g = await tester.startGesture(
+      Offset(para2.left + 160, para2.center.dy),
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.up();
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(kCollapsedHandleKey), findsNothing,
+        reason: '鼠标来源不出手柄');
+  });
+
+  testWidgets('拖 collapsed 手柄 = 移光标(不产生范围选区)', (tester) async {
+    final (_, state) = await pumpMobile(tester);
+    final para = tester.getRect(find.textContaining('hello').first);
+    await tester.tapAt(Offset(para.left + 8, para.center.dy));
+    await tester.pump();
+    await tester.pump();
+    final before = state.selection!.extent.offset;
+
+    final handle = tester.getCenter(find.byKey(kCollapsedHandleKey));
+    final g = await tester.startGesture(handle, kind: PointerDeviceKind.touch);
+    for (var i = 0; i < 6; i++) {
+      await g.moveBy(const Offset(15, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await g.up();
+    await tester.pump();
+    await tester.pump();
+
+    final sel = state.selection!;
+    expect(sel.isCollapsed, isTrue, reason: '拖单手柄只移光标');
+    expect(sel.extent.offset, greaterThan(before), reason: '光标右移');
+    expect(find.byKey(kCollapsedHandleKey), findsOneWidget,
+        reason: '拖完手柄仍在新光标处');
+  });
+
+  testWidgets('物理键盘移光标 = collapsed 手柄收起', (tester) async {
+    final (_, state) = await pumpMobile(tester);
+    final para = tester.getRect(find.textContaining('hello').first);
+    await tester.tapAt(Offset(para.left + 20, para.center.dy));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(kCollapsedHandleKey), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.pump();
+
+    expect(state.selection!.isCollapsed, isTrue);
+    expect(find.byKey(kCollapsedHandleKey), findsNothing,
+        reason: '键盘操作收触摸选区 UI');
+  });
+
+  testWidgets('拖 collapsed 手柄到视口底缘 = 边缘自动滚', (tester) async {
+    final (scroll, state) = await pumpMobile(tester);
+    final para = tester.getRect(find.textContaining('second').first);
+    await tester.tapAt(Offset(para.left + 8, para.center.dy));
+    await tester.pump();
+    await tester.pump();
+
+    final handle = tester.getCenter(find.byKey(kCollapsedHandleKey));
+    final g = await tester.startGesture(handle, kind: PointerDeviceKind.touch);
+    // 拖到视口底缘(600 高视口,进入 56px 边缘带)后按住不动
+    final view = tester.view.physicalSize / tester.view.devicePixelRatio;
+    await g.moveTo(Offset(handle.dx, view.height - 20));
+    await tester.pump(const Duration(milliseconds: 16));
+    final offsetAtEdge = scroll.offset;
+    // 按住:ticker 每帧滚
+    for (var i = 0; i < 12; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(scroll.offset, greaterThan(offsetAtEdge),
+        reason: '贴边持续自动滚动');
+    await g.up();
+    await tester.pump();
+    final settled = scroll.offset;
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(scroll.offset, settled, reason: '松手即停');
+    expect(state.selection!.isCollapsed, isTrue);
   });
 }
