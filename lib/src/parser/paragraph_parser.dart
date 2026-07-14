@@ -543,6 +543,26 @@ class ParagraphParser {
               // 注意:div.lightbox-wrapper 在块级 switch 之前已被截获
               // 走 pendingInlines 流(不会到达这里),目的是让连续多张
               // lightbox 图合并到同一 ParagraphNode,消除 1em+1em 段间距。
+              case 'div' || 'center':
+                // 纯展示 skip 元素(div.meta / div.lb-spacer):UI 占位,
+                // 既不拆壳也不兜底,直接丢弃(与 default 的 skip 行为一致)。
+                if (_isSkipElement(tag, node)) break;
+                // 通用容器 div / <center>(含块级子;仅 inline 内容的形态已被
+                // 上方 _alignedInlineParagraph 截获):透明拆壳递归内部节点。
+                // 语义 div(math/poll/grid/video/spoiler…)已被前面特判接住,
+                // 走到这里的 div 只是布局容器,若掉 default 纯文本兜底会丢图/
+                // 丢结构 —— 典型:手写 <div align="center"> 包上传图,cooked 的
+                // <p><div class="lightbox-wrapper"> 非法嵌套被 html 解析修正
+                // (p 提前闭合)后,wrapper 成 div 的直接块级子。
+                // 容器带对齐时下放到无自身对齐的段落/标题(近似 text-align 继承)。
+                final containerAlign =
+                    tag == 'center' ? TextAlign.center : _readTextAlign(node);
+                final unwrapped = _parseBlocks(
+                    node.nodes, nextId, nextImageIndex,
+                    depth: depth);
+                out.addAll(containerAlign == null
+                    ? unwrapped
+                    : unwrapped.map((b) => _inheritAlign(b, containerAlign)));
               default:
                 // 未识别块级:fallback 为 paragraph,只取纯 textContent,
                 // 不识别内部 inline tag(因为我们还不知道该块的语义 ——
@@ -717,6 +737,25 @@ class ParagraphParser {
         final t = c.localName?.toLowerCase() ?? '';
         return t != 'br' && !_isInlineTag(t);
       });
+
+  /// 容器(div[align] / center)拆壳时把容器对齐下放到子块:仅填充**无自身
+  /// 对齐**的段落/标题(子块显式 align/style 优先,近似 CSS text-align 继承)。
+  /// 其余块类型(图组/表格/引用…)不受 text-align 影响,原样返回。
+  BlockNode _inheritAlign(BlockNode node, TextAlign align) {
+    if (node is ParagraphNode && node.textAlign == null) {
+      return ParagraphNode(
+          id: node.id, inlines: node.inlines, textAlign: align);
+    }
+    if (node is HeadingNode && node.textAlign == null) {
+      return HeadingNode(
+        id: node.id,
+        level: node.level,
+        inlines: node.inlines,
+        textAlign: align,
+      );
+    }
+    return node;
+  }
 
   /// `<p>` 是否「无可见内容」(空段落候选,可能渲染为空行 BlankLineNode)。
   ///
