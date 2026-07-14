@@ -405,16 +405,18 @@ void main() {
   });
 
   group('MentionRun', () {
-    testWidgets('产出 WidgetSpan chip,tap 触发 handler 带 username + href',
+    // 无状态 emoji 的 mention 走纯 TextSpan 路径(行内代码三件套同款):
+    // NBSP pad + `@username` + NBSP pad,点击走 recognizer,药丸底色由
+    // InlineCodeBackgroundPainter 按 mentionText 投影区间自绘(golden 覆盖)。
+    testWidgets('纯 TextSpan 路径:recognizer tap 触发 handler 带 username + href',
         (tester) async {
       String? tappedUser;
       String? tappedHref;
-      late BuildContext ctx;
+      late FlattenResult result;
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: Builder(builder: (c) {
-            ctx = c;
-            final result = flattener.flatten(
+            result = flattener.flatten(
               [const MentionRun(username: 'alice', href: '/u/alice')],
               baseStyle,
               context: c,
@@ -427,38 +429,42 @@ void main() {
           }),
         ),
       ));
-      // 找 chip 内的 GestureDetector,直接 tap
-      final gd = find.byType(GestureDetector);
-      expect(gd, findsWidgets);
-      await tester.tap(gd.first);
-      await tester.pump();
+      // 不再有 GestureDetector:recognizer 挂在 span 叶子上,并经
+      // FlattenResult.recognizers 暴露给调用方释放
+      expect(find.byType(GestureDetector), findsNothing);
+      expect(result.recognizers, hasLength(1));
+      final recognizer = result.recognizers.single;
+      expect(recognizer, isA<TapGestureRecognizer>());
+      (recognizer as TapGestureRecognizer).onTap!();
       expect(tappedUser, 'alice');
       expect(tappedHref, '/u/alice');
-      // 用 ctx 以防 unused var 警告
-      expect(ctx.mounted, isTrue);
     });
 
-    testWidgets('chip 字色 = colorScheme.primary, 底色 = surfaceContainerHigh',
+    testWidgets('字色 = colorScheme.primary,字号 0.82em,NBSP 粘性内边距',
         (tester) async {
       late BuildContext ctx;
+      late FlattenResult result;
       await tester.pumpWidget(MaterialApp(
         home: Builder(builder: (c) {
           ctx = c;
-          return Text.rich(flattener.flatten(
+          result = flattener.flatten(
             [const MentionRun(username: 'alice', href: '/u/alice')],
             baseStyle,
             context: c,
-          ).span);
+          );
+          return Text.rich(result.span);
         }),
       ));
       final scheme = Theme.of(ctx).colorScheme;
-      // 找 chip 内的 Text 拿样式
-      final textWidget = tester.widget<Text>(
-        find.descendant(of: find.byType(Container), matching: find.byType(Text)),
-      );
-      expect(textWidget.data, '@alice');
-      expect(textWidget.style?.color, scheme.primary);
-      expect(textWidget.style?.fontSize, closeTo(14 * 0.82, 0.01));
+      final mention = result.span.children![0] as TextSpan;
+      final children = mention.children!;
+      expect(children, hasLength(3));
+      expect((children[0] as TextSpan).text, kInlineCodePadChar);
+      expect((children[2] as TextSpan).text, kInlineCodePadChar);
+      final body = children[1] as TextSpan;
+      expect(body.text, '@alice');
+      expect(body.style?.color, scheme.primary);
+      expect(body.style?.fontSize, closeTo(14 * 0.82, 0.01));
     });
 
     testWidgets('statusEmoji 渲染到 username 右侧', (tester) async {
@@ -492,12 +498,14 @@ void main() {
       expect(receivedSize, closeTo(14 * 0.82 * 1.2, 0.01));
     });
 
-    test('无 handler 时走 defaultMentionTapHandler(不抛)', () {
+    test('无 context 时纯结构输出(TextSpan 路径,无 recognizer)', () {
       final result = flattener.flatten(
         [const MentionRun(username: 'a', href: '/u/a')],
         baseStyle,
       );
-      expect(result.span.children![0], isA<WidgetSpan>());
+      final mention = result.span.children![0] as TextSpan;
+      expect((mention.children![1] as TextSpan).text, '@a');
+      expect(result.recognizers, isEmpty);
     });
   });
 }

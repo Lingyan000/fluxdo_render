@@ -168,12 +168,17 @@ class _SelectableTextBoxState extends State<SelectableTextBox> {
     // legacy overlay 的 ClipRect,防 padding 出血画到相邻块文字上,见
     // InlineCodeBackgroundPainter 顶部说明)。内容变化(重新 flatten 产生
     // 新 projection)会触发本 build 重跑,挂载条件随之重估。
-    if (widget.codeLanguage == null && widget.projectionGetter().hasInlineCode) {
+    // TextSpan 版 mention 的药丸底色同管线(mentionText 区间),条件并入。
+    final projection = widget.projectionGetter();
+    if (widget.codeLanguage == null &&
+        (projection.hasInlineCode || projection.hasSpanMention)) {
+      final scheme = Theme.of(context).colorScheme;
       keyedChild = CustomPaint(
         painter: InlineCodeBackgroundPainter(
           paragraphGetter: _findParagraph,
           projectionGetter: widget.projectionGetter,
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          color: scheme.surfaceContainerHighest,
+          mentionColor: scheme.surfaceContainerHigh,
         ),
         child: keyedChild,
       );

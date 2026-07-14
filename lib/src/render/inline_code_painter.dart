@@ -31,6 +31,7 @@ class InlineCodeBackgroundPainter extends CustomPainter {
     required this.paragraphGetter,
     required this.projectionGetter,
     required this.color,
+    required this.mentionColor,
   });
 
   /// 取本块 child 子树里的 RenderParagraph(虚拟化安全,实时找)。
@@ -42,6 +43,10 @@ class InlineCodeBackgroundPainter extends CustomPainter {
   /// 灰底色(主项目主题 `colorScheme.surfaceContainerHighest`)。
   final Color color;
 
+  /// TextSpan 版 mention 的药丸底色(`colorScheme.surfaceContainerHigh`,
+  /// 对齐 WidgetSpan 版 Container 的装饰)。
+  final Color mentionColor;
+
   // 与 legacy InlineCodePainter 完全一致:hPadding 3.5 / vPadding 1.5(对称)/
   // radius 3。不要私自加大 —— 之前顶部加到 3.0,出血伸进上一行文字底下,
   // 真机观感就是"背景溢出到别的文字下面"。
@@ -52,6 +57,13 @@ class InlineCodeBackgroundPainter extends CustomPainter {
   static const double _hPad = 3.5;
   static const double _vPad = 1.5;
 
+  /// mention 药丸参数(对齐 WidgetSpan 版 Container 装饰):radius 10,
+  /// 水平内边距上限 6(实际按相邻 mentionPad 的 NBSP 实测宽 clamp,
+  /// 同 inline code 的出血策略);垂直方向用整行高盒(见 paint 内注释),
+  /// 不再额外加 pad。
+  static const double _mentionRadius = 10.0;
+  static const double _mentionHPad = 6.0;
+
   /// 矩形几何缓存:同一 (paragraph, projection, 段落尺寸) 下 boxes 不变。
   /// 选区拖动等场景每帧连带重绘本 painter(CustomPaint 非 repaint 边界),
   /// 缓存后免去每帧 N 次 getBoxesForSelection。painter 随 rebuild 重建时
@@ -60,19 +72,21 @@ class InlineCodeBackgroundPainter extends CustomPainter {
   RenderTextProjection? _cacheProjection;
   Size? _cacheSize;
   List<RRect>? _cacheRRects;
+  List<RRect>? _cacheMentionRRects;
 
   @override
   void paint(Canvas canvas, Size size) {
     final projection = projectionGetter();
-    // 快路径:无 inline code 区间 → 不取 paragraph,零成本。
+    // 快路径:无 inline code / span mention 区间 → 不取 paragraph,零成本。
     var hasCode = false;
+    var hasMention = false;
     for (final e in projection.entries) {
-      if (e.kind == ProjectionKind.inlineCode && e.renderLen > 0) {
-        hasCode = true;
-        break;
-      }
+      if (e.renderLen == 0) continue;
+      if (e.kind == ProjectionKind.inlineCode) hasCode = true;
+      if (e.kind == ProjectionKind.mentionText) hasMention = true;
+      if (hasCode && hasMention) break;
     }
-    if (!hasCode) return;
+    if (!hasCode && !hasMention) return;
     final paragraph = paragraphGetter();
     if (paragraph == null) return;
 
@@ -85,15 +99,23 @@ class InlineCodeBackgroundPainter extends CustomPainter {
     final paint = Paint()
       ..style = PaintingStyle.fill
       ..color = color;
+    final mentionPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = mentionColor;
 
     // 缓存命中:同段落实例 + 同投影表 + 布局尺寸未变 → 矩形必同,直接画。
     // (相同 span 在相同宽度下换行确定,relayout 而几何变了必伴随尺寸或
     //  投影/段落身份变化。)
     final cached = _cacheRRects;
+    final cachedMention = _cacheMentionRRects;
     if (cached != null &&
+        cachedMention != null &&
         identical(_cacheParagraph, paragraph) &&
         identical(_cacheProjection, projection) &&
         _cacheSize == paragraph.size) {
+      for (final rrect in cachedMention) {
+        canvas.drawRRect(rrect, mentionPaint);
+      }
       for (final rrect in cached) {
         canvas.drawRRect(rrect, paint);
       }
@@ -101,52 +123,62 @@ class InlineCodeBackgroundPainter extends CustomPainter {
     }
 
     final rrects = <RRect>[];
+    final mentionRRects = <RRect>[];
     final entries = projection.entries;
     for (var idx = 0; idx < entries.length; idx++) {
       final e = entries[idx];
-      if (e.kind != ProjectionKind.inlineCode || e.renderLen == 0) continue;
+      final isCode = e.kind == ProjectionKind.inlineCode;
+      final isMention = e.kind == ProjectionKind.mentionText;
+      if ((!isCode && !isMention) || e.renderLen == 0) continue;
 
-      // 水平出血上限 = 相邻 codePad(NBSP 粘性内边距,flattener 恒在 code 两侧
+      final padKind =
+          isCode ? ProjectionKind.codePad : ProjectionKind.mentionPad;
+      final hPad = isCode ? _hPad : _mentionHPad;
+
+      // 水平出血上限 = 相邻 pad(NBSP 粘性内边距,flattener 恒在两侧
       // 各注入一个)的**实测宽度**。NBSP 宽度随字体/字号浮动(≈0.25em):默认
-      // 14px 时 ≈4.9px 兜得住 3.5,但正文字号调小后可能 < 3.5 —— 写死 _hPad
+      // 14px 时 ≈4.9px 兜得住 3.5,但正文字号调小后可能 < 上限 —— 写死
       // 会超出 pad 压到邻字边缘。取 min 后出血从构造上不可能触及邻字;
-      // 无 pad 条目(理论不发生,防御)退回 _hPad 保持旧观感。
-      final leftPad = idx > 0 && entries[idx - 1].kind == ProjectionKind.codePad
+      // 无 pad 条目(理论不发生,防御)退回上限保持旧观感。
+      final leftPad = idx > 0 && entries[idx - 1].kind == padKind
           ? _entryWidth(paragraph, entries[idx - 1])
-          : _hPad;
-      final rightPad = idx + 1 < entries.length &&
-              entries[idx + 1].kind == ProjectionKind.codePad
+          : hPad;
+      final rightPad =
+          idx + 1 < entries.length && entries[idx + 1].kind == padKind
           ? _entryWidth(paragraph, entries[idx + 1])
-          : _hPad;
-      final leftBleed = leftPad < _hPad ? leftPad : _hPad;
-      final rightBleed = rightPad < _hPad ? rightPad : _hPad;
+          : hPad;
+      final leftBleed = leftPad < hPad ? leftPad : hPad;
+      final rightBleed = rightPad < hPad ? rightPad : hPad;
 
-      // 用 BoxHeightStyle.tight(legacy 扫描同款默认值):贴合**代码字形自身**的
-      // 行高(inline code 是 0.85em 小字),而非段落整行高(baseStyle 1.5,会比
-      // 代码高一大截显得过高)。背景 hug 住代码文字 → 对齐 legacy / 浏览器观感。
+      // code 用 BoxHeightStyle.tight(legacy 扫描同款默认值):贴合**代码
+      // 字形自身**的行高(0.85em 小字),而非段落整行高 —— 对齐 legacy /
+      // 浏览器观感。mention 药丸相反:WidgetSpan 版 Container 高度锁整行
+      // (em*1.5),用整行高盒(BoxHeightStyle.max)填满整行。
       final boxes = paragraph.getBoxesForSelection(
         TextSelection(baseOffset: e.renderStart, extentOffset: e.renderEnd),
-        boxHeightStyle: BoxHeightStyle.tight,
+        boxHeightStyle: isCode ? BoxHeightStyle.tight : BoxHeightStyle.max,
       );
       if (boxes.isEmpty) continue;
       final rows = mergeSelectionBoxesByLine(boxes);
+      final radius = isCode ? _radius : _mentionRadius;
+      final vPad = isCode ? _vPad : 0.0;
       for (var i = 0; i < rows.length; i++) {
         final row = rows[i];
         final isFirst = i == 0;
         final isLast = i == rows.length - 1;
-        // pad 只存在于 code 整体的首尾(NBSP 与相邻 code 字符间不可断行,
+        // pad 只存在于区间整体的首尾(NBSP 与相邻字符间不可断行,
         // 恒同行):首行左缘贴左 pad、末行右缘贴右 pad → 按各自 pad clamp;
-        // 跨行折行处的边缘在行首/行尾,旁边没有文字,保持 _hPad。
+        // 跨行折行处的边缘在行首/行尾,旁边没有文字,保持上限出血。
         final merged = Rect.fromLTRB(
-          row.left - (isFirst ? leftBleed : _hPad),
-          row.top - _vPad,
-          row.right + (isLast ? rightBleed : _hPad),
-          row.bottom + _vPad,
+          row.left - (isFirst ? leftBleed : hPad),
+          row.top - vPad,
+          row.right + (isLast ? rightBleed : hPad),
+          row.bottom + vPad,
         );
         // 首行圆左角、末行圆右角(单行 = 四角全圆);中间行直角 → 跨行连成一条。
-        final lr = isFirst ? const Radius.circular(_radius) : Radius.zero;
-        final rr = isLast ? const Radius.circular(_radius) : Radius.zero;
-        rrects.add(RRect.fromRectAndCorners(
+        final lr = isFirst ? Radius.circular(radius) : Radius.zero;
+        final rr = isLast ? Radius.circular(radius) : Radius.zero;
+        (isCode ? rrects : mentionRRects).add(RRect.fromRectAndCorners(
           merged,
           topLeft: lr,
           bottomLeft: lr,
@@ -155,6 +187,9 @@ class InlineCodeBackgroundPainter extends CustomPainter {
         ));
       }
     }
+    for (final rrect in mentionRRects) {
+      canvas.drawRRect(rrect, mentionPaint);
+    }
     for (final rrect in rrects) {
       canvas.drawRRect(rrect, paint);
     }
@@ -162,6 +197,7 @@ class InlineCodeBackgroundPainter extends CustomPainter {
     _cacheProjection = projection;
     _cacheSize = paragraph.size;
     _cacheRRects = rrects;
+    _cacheMentionRRects = mentionRRects;
   }
 
   /// 条目渲染区间的实测总宽(codePad 是单个 NBSP,恒单 box)。

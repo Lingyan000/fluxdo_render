@@ -26,7 +26,16 @@ enum ProjectionKind {
   /// 渲染占 1 字符、逻辑投影恒为空串(不属于内容,复制/引用不带出)。
   codePad,
   emoji,
+
+  /// WidgetSpan 版 mention(带状态 emoji 时仍走此路径):原子占位。
   mention,
+
+  /// 纯 TextSpan 版 mention 的文本体(`@username`,renderLen == 逻辑长,
+  /// 可按字符切):行内代码同款三件套,药丸底色由 painter 按本区间自绘。
+  mentionText,
+
+  /// mentionText 两侧的 NBSP 粘性内边距,语义同 [codePad]。
+  mentionPad,
   image,
   spoiler,
   footnote,
@@ -63,6 +72,7 @@ class ProjectionEntry {
   /// 占位类(￼,原子,不可按字符切)。
   bool get isAtomic => kind != ProjectionKind.text &&
       kind != ProjectionKind.inlineCode &&
+      kind != ProjectionKind.mentionText &&
       kind != ProjectionKind.lineBreak;
 
   @override
@@ -88,6 +98,10 @@ class RenderTextProjection {
   /// 与其每次重录制的空跑 paint。entries 量级为段内 run 数,any 短路。
   bool get hasInlineCode =>
       entries.any((e) => e.kind == ProjectionKind.inlineCode);
+
+  /// 本段是否含 TextSpan 版 mention 区间(药丸底色由 painter 自绘)。
+  bool get hasSpanMention =>
+      entries.any((e) => e.kind == ProjectionKind.mentionText);
 
   static final RenderTextProjection empty = RenderTextProjection(const []);
 

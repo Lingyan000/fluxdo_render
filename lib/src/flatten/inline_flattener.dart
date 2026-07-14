@@ -305,13 +305,21 @@ class InlineFlattener {
           context,
           inheritedRecognizer: inheritedRecognizer,
         ),
-      MentionRun() => _buildMentionSpan(
-          node,
-          emojiBuilder,
-          mentionHandler,
-          emojiBaseSize,
-          context,
-        ),
+      MentionRun() => node.statusEmoji == null
+          ? _buildMentionTextSpan(
+              node,
+              mentionHandler,
+              emojiBaseSize,
+              context,
+              recognizers,
+            )
+          : _buildMentionSpan(
+              node,
+              emojiBuilder,
+              mentionHandler,
+              emojiBaseSize,
+              context,
+            ),
       ImageRun() => _buildImageSpan(
           node,
           imageBuilder,
@@ -664,8 +672,48 @@ class InlineFlattener {
   ///
   /// 用 WidgetSpan 而非 TextSpan 因为是个有内部 padding/border 的整体
   /// chip,不参与文字 baseline 对齐(legacy 同样走 InlineCustomWidget)。
-  WidgetSpan _buildMentionSpan(
+  /// 无状态 emoji 的 mention:纯 TextSpan 路径(行内代码三件套同款)。
+  ///
+  /// WidgetSpan 版([_buildMentionSpan])每个 mention 是 5 层子树
+  /// (Builder→GestureDetector→Container→Row→Text)+ RenderParagraph
+  /// 占位布局,@密集帖一帖几十上百节点只为 mention。本路径降为
+  /// NBSP 粘性内边距 + `@username` 文本 span:药丸底色由
+  /// InlineCodeBackgroundPainter 按 mentionText 投影区间自绘,点击走
+  /// recognizer(链接同款,经 [FlattenResult.recognizers] 释放)。
+  /// 带状态 emoji 的 mention 需嵌图,保留 WidgetSpan 路径。
+  TextSpan _buildMentionTextSpan(
     MentionRun mention,
+    MentionTapHandler mentionHandler,
+    double emojiBaseSize,
+    BuildContext? context,
+    List<GestureRecognizer> recognizers,
+  ) {
+    final scheme = context == null ? null : Theme.of(context).colorScheme;
+    final recognizer = context == null
+        ? null
+        : (TapGestureRecognizer()
+            ..onTap = () =>
+                mentionHandler(context, mention.username, mention.href));
+    if (recognizer != null) recognizers.add(recognizer);
+    return TextSpan(
+      // recognizer 不从父 span 传播,pad 与文本叶子都得挂(整个药丸可点)
+      children: [
+        TextSpan(text: kInlineCodePadChar, recognizer: recognizer),
+        TextSpan(
+          text: '@${mention.username}',
+          recognizer: recognizer,
+          style: TextStyle(
+            color: scheme?.primary,
+            // 与 WidgetSpan 版一致:小一号(0.82em)
+            fontSize: emojiBaseSize * 0.82,
+          ),
+        ),
+        TextSpan(text: kInlineCodePadChar, recognizer: recognizer),
+      ],
+    );
+  }
+
+  WidgetSpan _buildMentionSpan(    MentionRun mention,
     EmojiImageBuilder emojiBuilder,
     MentionTapHandler mentionHandler,
     double emojiBaseSize,

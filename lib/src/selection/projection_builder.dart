@@ -91,8 +91,17 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
           walk(children);
         case EmojiRun(:final name):
           addPlaceholder(name.isEmpty ? '' : ':$name:', ProjectionKind.emoji);
-        case MentionRun(:final username):
-          addPlaceholder('@$username', ProjectionKind.mention);
+        case MentionRun(:final username, :final statusEmoji):
+          if (statusEmoji == null) {
+            // 与 flattener _buildMentionTextSpan 同构:NBSP + @user + NBSP
+            // (行内代码三件套同款;药丸底色由 painter 按 mentionText
+            // 区间自绘)。带状态 emoji 的仍走 WidgetSpan 原子路径。
+            addPlaceholder('', ProjectionKind.mentionPad);
+            addText('@$username', ProjectionKind.mentionText);
+            addPlaceholder('', ProjectionKind.mentionPad);
+          } else {
+            addPlaceholder('@$username', ProjectionKind.mention);
+          }
         case ImageRun(:final alt):
           addPlaceholder(alt, ProjectionKind.image);
         case SpoilerRun(:final children):
