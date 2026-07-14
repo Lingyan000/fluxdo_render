@@ -604,24 +604,60 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// 返回 false = 无光标可起步(未聚焦/岛上无文本光标)。
   bool _floatingStart({Offset initialOffset = Offset.zero, bool extend = false}) {
     var sel = widget.state.selection;
+    // 可视区(键盘裁剪后;无滚动宿主退编辑器根矩形)
+    var vp = _visibleViewportRect();
+    if (vp == null) {
+      final rootBox = _rootKey.currentContext?.findRenderObject();
+      if (rootBox is RenderBox && rootBox.attached && rootBox.hasSize) {
+        vp = rootBox.localToGlobal(Offset.zero) & rootBox.size;
+      }
+    }
+
+    // 视口中心命中一个文档位并落光标(虚拟指针"随时可拖"的起步锚:
+    // 无光标、或光标在屏外时,都从看得见的地方开始 —— 否则幽灵生成
+    // 在视口外,Update 钳回边缘还会触发边缘自动滚狂滚)。
+    bool anchorAtViewportCenter() {
+      final v = vp;
+      if (v == null || v.isEmpty) return false;
+      final docPos = _hitTester.positionAt(
+        v.center,
+        hitTestRoot: _rootKey.currentContext?.findRenderObject(),
+      );
+      if (docPos == null) return false;
+      final pos = _toEditorPosition(docPos);
+      if (pos == null) return false;
+      _caretAffinity = docPos.affinity;
+      widget.state.updateSelection(EditorSelection.collapsed(pos));
+      return true;
+    }
+
     if (sel == null) {
-      // 无光标(未聚焦过/失焦清空):落到文档末尾起步 —— 虚拟指针
-      // 应随时可用,不要求先点一下编辑区(聚焦落点同语义)。
-      final last = widget.state.blocks.last;
-      widget.state.updateSelection(EditorSelection.collapsed(
-        EditorPosition(blockId: last.id, offset: last.selectionLength),
-      ));
+      if (!anchorAtViewportCenter()) return false;
       sel = widget.state.selection;
       if (sel == null) return false;
     }
     if (!extend && !sel.isCollapsed) return false;
-    final docPos =
-        _toDocumentPosition(sel.extent, affinity: _caretAffinity);
-    final rect = docPos == null
+    var docPos = _toDocumentPosition(sel.extent, affinity: _caretAffinity);
+    var rect = docPos == null
         ? null
         : _hitTester.editingCaretRectAt(docPos,
             lineHeight: _caretLineHeight);
     if (rect == null) return false;
+    // 光标在视口外(如上次编辑位已滚走):改从视口中心起步
+    if (!extend && vp != null && !vp.isEmpty && !vp.contains(rect.center)) {
+      if (anchorAtViewportCenter()) {
+        sel = widget.state.selection;
+        docPos = sel == null
+            ? null
+            : _toDocumentPosition(sel.extent, affinity: _caretAffinity);
+        final r2 = docPos == null
+            ? null
+            : _hitTester.editingCaretRectAt(docPos,
+                lineHeight: _caretLineHeight);
+        if (r2 != null) rect = r2;
+      }
+    }
+    if (sel == null) return false;
     _floatingCursor = true;
     _floatingExtendBase = extend ? sel.base : null;
     _floatingBase = rect.center;
@@ -1100,8 +1136,11 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   Rect? _computeLocalCaretRect() {
     final sel = widget.state.selection;
     // hasPrimaryFocus:焦点在表格 cell 等子输入框时编辑器光标必须消失
-    // (否则与 TextField 自己的光标形成双光标)。
-    if (sel == null || !sel.isCollapsed || !_focusNode.hasPrimaryFocus) {
+    // (否则与 TextField 自己的光标形成双光标)。浮动/虚拟指针进行中
+    // 例外 —— 失焦也要能看到吸附残影(工具栏滑钮随时可拖)。
+    if (sel == null ||
+        !sel.isCollapsed ||
+        (!_focusNode.hasPrimaryFocus && !_floatingCursor)) {
       return null;
     }
     final docPos = _toDocumentPosition(sel.extent, affinity: _caretAffinity);
