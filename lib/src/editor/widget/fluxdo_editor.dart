@@ -603,8 +603,17 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// (base 固定,幽灵驱动 extent;IME 路径恒 false)。
   /// 返回 false = 无光标可起步(未聚焦/岛上无文本光标)。
   bool _floatingStart({Offset initialOffset = Offset.zero, bool extend = false}) {
-    final sel = widget.state.selection;
-    if (sel == null) return false;
+    var sel = widget.state.selection;
+    if (sel == null) {
+      // 无光标(未聚焦过/失焦清空):落到文档末尾起步 —— 虚拟指针
+      // 应随时可用,不要求先点一下编辑区(聚焦落点同语义)。
+      final last = widget.state.blocks.last;
+      widget.state.updateSelection(EditorSelection.collapsed(
+        EditorPosition(blockId: last.id, offset: last.selectionLength),
+      ));
+      sel = widget.state.selection;
+      if (sel == null) return false;
+    }
     if (!extend && !sel.isCollapsed) return false;
     final docPos =
         _toDocumentPosition(sel.extent, affinity: _caretAffinity);
@@ -663,6 +672,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     _floatingExtendBase = null;
     _stopAutoScroll();
     _removeFloatingGhost();
+    // 拖完把焦点还给编辑器:落点即编辑位,实光标立即可见(失焦态
+    // 光标不渲染),键盘按平台惯例自然弹出。
+    if (!_focusNode.hasPrimaryFocus) _focusNode.requestFocus();
     _ime.syncFromState(show: false);
     setState(() {}); // 实光标恢复主题色
   }
