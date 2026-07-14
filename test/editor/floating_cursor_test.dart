@@ -215,7 +215,7 @@ void main() {
     expect(state.selection!.isCollapsed, isFalse, reason: '选区保留');
   });
 
-  testWidgets('无光标时 start 返回 false 不炸', (tester) async {
+  testWidgets('无光标时 start 自动落文末起步(随时可用)', (tester) async {
     final vp = FluxdoEditorVirtualPointer();
     final state = EditorState.fromTexts(['abc']);
     addTearDown(state.dispose);
@@ -225,10 +225,16 @@ void main() {
       ),
     ));
     await tester.pump();
-    if (state.selection == null) {
-      expect(vp.start(), isFalse);
-    }
-    vp.moveBy(const Offset(10, 0)); // no-op 不炸
+    expect(state.selection, isNull, reason: '未聚焦未点击,无光标前置');
+
+    expect(vp.start(), isTrue, reason: '自动落文末起步');
+    final sel = state.selection!;
+    expect(sel.isCollapsed, isTrue);
+    expect(sel.extent.offset, 3, reason: '落在文末');
+    vp.moveBy(const Offset(-40, 0));
+    await tester.pump();
     vp.end();
+    await tester.pump();
+    expect(find.byKey(kFloatingCursorGhostKey), findsNothing);
   });
 }
