@@ -24,10 +24,15 @@ void main() {
     });
 
     test('validator 通过', () {
-      final root = Directory(
-        Directory.current.path.endsWith('packages/fluxdo_render')
-            ? 'test/fixtures'
-            : 'packages/fluxdo_render/test/fixtures',
+      // existsSync 探测代替 cwd 字符串判断(Windows 的 cwd 是反斜杠,
+      // endsWith('packages/fluxdo_render') 永远 false → 选错路径)
+      final root = [
+        Directory('test/fixtures'),
+        Directory('packages/fluxdo_render/test/fixtures'),
+      ].firstWhere(
+        (d) => d.existsSync(),
+        orElse: () =>
+            throw const FileSystemException('找不到 test/fixtures 目录'),
       );
       final report = validateFixtures(root);
       expect(

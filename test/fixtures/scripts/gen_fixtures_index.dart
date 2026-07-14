@@ -20,11 +20,14 @@ void main() {
 
   final entries = <Map<String, dynamic>>[];
   for (final entity in root.listSync(recursive: true)) {
-    if (entity is! File || !entity.path.endsWith('.html')) continue;
-    if (entity.path.contains('/_meta/')) continue;
-    if (entity.path.contains('/scripts/')) continue;
+    // 统一正斜杠(Windows 的 listSync 产反斜杠:过滤、relPath、排序都靠它,
+    // 否则产物 relativePath 混入反斜杠,跨平台重新生成来回全量 diff)
+    final path = entity.path.replaceAll(r'\', '/');
+    if (entity is! File || !path.endsWith('.html')) continue;
+    if (path.contains('/_meta/')) continue;
+    if (path.contains('/scripts/')) continue;
 
-    final relPath = entity.path.substring(root.path.length + 1);
+    final relPath = path.substring(root.path.length + 1);
     final html = entity.readAsStringSync();
     final yamlPath = entity.path.replaceFirst(RegExp(r'\.html$'), '.yaml');
     final yamlContent =

@@ -15,7 +15,8 @@ void main() {
     final dirNames = <String>{};
     for (final entity in fixturesRoot.listSync()) {
       if (entity is! Directory) continue;
-      final name = entity.path.split('/').last;
+      // Windows 的 listSync 产反斜杠路径,按两种分隔符切
+      final name = entity.path.split(RegExp(r'[/\\]')).last;
       // 跳过 _meta / scripts / _edge_cases 等特殊目录(下划线开头)
       if (name.startsWith('_')) continue;
       // 跳过非节点子目录(如 scripts)
@@ -37,7 +38,7 @@ void main() {
     final dirNames = fixturesRoot
         .listSync()
         .whereType<Directory>()
-        .map((d) => d.path.split('/').last)
+        .map((d) => d.path.split(RegExp(r'[/\\]')).last)
         .toSet();
 
     final missing = NodeKind.values

@@ -21,6 +21,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+
 Future<void> main(List<String> args) async {
   final opts = _parseArgs(args);
   if (opts == null) {
@@ -156,15 +158,9 @@ String _inferPrimaryNode(String relPath, String cooked) {
   return 'paragraph';
 }
 
-String _sha256OfFile(File f) {
-  // 不引 crypto 包,自己实现简易 sha256 太长 —— 用 shasum 命令
-  final result = Process.runSync('shasum', ['-a', '256', f.path]);
-  if (result.exitCode != 0) {
-    throw 'shasum 失败: ${result.stderr}';
-  }
-  final out = result.stdout as String;
-  return out.split(RegExp(r'\s+')).first;
-}
+String _sha256OfFile(File f) =>
+    // package:crypto 纯 Dart 实现,跨平台(shasum 命令 Windows 上没有)
+    sha256.convert(f.readAsBytesSync()).toString();
 
 // ─── PII 启发式检查 ─────────────────────────────────────────────────────
 

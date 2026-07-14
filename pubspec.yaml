@@ -22,6 +22,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   # fixture 元数据(test/fixtures/*.yaml)校验脚本依赖
   yaml: ^3.1.2
+  # fixture sha256 校验(validator / fetch 脚本),替代 shasum 命令保 Windows 可用
+  crypto: ^3.0.7
 
 flutter:
   shaders:

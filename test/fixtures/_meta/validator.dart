@@ -4,6 +4,7 @@
 
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:yaml/yaml.dart';
 
 const validNodeTypes = {
@@ -33,13 +34,16 @@ ValidateReport validateFixtures(Directory root, {bool fixSha = false}) {
   final errors = <String>[];
   var checked = 0;
 
+  // 统一正斜杠再做字符串判断/切分(Windows 的 listSync 产反斜杠路径)
+  final rootPath = root.path.replaceAll(r'\', '/');
   for (final entity in root.listSync(recursive: true)) {
-    if (entity is! File || !entity.path.endsWith('.html')) continue;
-    if (entity.path.contains('/_meta/')) continue;
-    if (entity.path.contains('/scripts/')) continue;
+    final path = entity.path.replaceAll(r'\', '/');
+    if (entity is! File || !path.endsWith('.html')) continue;
+    if (path.contains('/_meta/')) continue;
+    if (path.contains('/scripts/')) continue;
 
     checked++;
-    final relPath = entity.path.substring(root.path.length + 1);
+    final relPath = path.substring(rootPath.length + 1);
     final dir = relPath.split('/').first;
 
     final yamlPath = entity.path.replaceFirst(RegExp(r'\.html$'), '.yaml');
@@ -104,10 +108,6 @@ ValidateReport validateFixtures(Directory root, {bool fixSha = false}) {
   return ValidateReport(checked: checked, errors: errors);
 }
 
-String _sha256OfFile(File f) {
-  final result = Process.runSync('shasum', ['-a', '256', f.path]);
-  if (result.exitCode != 0) {
-    throw 'shasum 失败: ${result.stderr}';
-  }
-  return (result.stdout as String).split(RegExp(r'\s+')).first;
-}
+String _sha256OfFile(File f) =>
+    // package:crypto 纯 Dart 实现,跨平台(shasum 命令 Windows 上没有)
+    sha256.convert(f.readAsBytesSync()).toString();

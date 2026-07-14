@@ -34,9 +34,11 @@ List<Fixture> loadAll() {
   final root = _findFixturesDir();
   final result = <Fixture>[];
   for (final entity in root.listSync(recursive: true)) {
-    if (entity is! File || !entity.path.endsWith('.html')) continue;
-    if (entity.path.contains('/_meta/')) continue;
-    if (entity.path.contains('/scripts/')) continue;
+    // 统一正斜杠(Windows 的 listSync 产反斜杠,否则过滤失效)
+    final path = entity.path.replaceAll(r'\', '/');
+    if (entity is! File || !path.endsWith('.html')) continue;
+    if (path.contains('/_meta/')) continue;
+    if (path.contains('/scripts/')) continue;
     result.add(_load(entity, root));
   }
   return result;
@@ -57,9 +59,12 @@ List<Fixture> loadByNodeType(String nodeType) {
 }
 
 Fixture _load(File f, Directory root) {
+  // relativePath 统一正斜杠:Fixture.name / nodeType 按 '/' 切,跨平台一致
+  final path = f.path.replaceAll(r'\', '/');
+  final rootPath = root.path.replaceAll(r'\', '/');
   return Fixture(
     path: f.absolute.path,
-    relativePath: f.path.substring(root.path.length + 1),
+    relativePath: path.substring(rootPath.length + 1),
     html: f.readAsStringSync(),
   );
 }
