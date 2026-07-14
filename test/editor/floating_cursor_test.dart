@@ -151,4 +151,84 @@ void main() {
     }
     expect(scroll.offset, settled, reason: 'End 即停');
   });
+
+  testWidgets('虚拟指针:start/moveBy 二维漂移吸附,end 收幽灵', (tester) async {
+    final vp = FluxdoEditorVirtualPointer();
+    final state = EditorState.fromTexts(
+        ['first line of text here', 'second line target words']);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: FluxdoEditor(
+            state: state, autofocus: true, virtualPointer: vp),
+      ),
+    ));
+    await tester.pump();
+    final para = tester.getRect(find.textContaining('first').first);
+    await tester.tapAt(Offset(para.left + 4, para.center.dy));
+    await tester.pump();
+    await tester.pump();
+    final startBlock = state.selection!.extent.blockId;
+
+    expect(vp.start(), isTrue);
+    await tester.pump();
+    expect(find.byKey(kFloatingCursorGhostKey), findsOneWidget);
+    // 向右下漂(跨到第二段)
+    vp.moveBy(const Offset(60, 0));
+    vp.moveBy(Offset(0, para.height + 8));
+    await tester.pump();
+    final sel = state.selection!;
+    expect(sel.isCollapsed, isTrue);
+    expect(sel.extent.blockId, isNot(startBlock), reason: '跨段吸附');
+    vp.end();
+    await tester.pump();
+    expect(find.byKey(kFloatingCursorGhostKey), findsNothing);
+    expect(vp.isActive, isFalse);
+  });
+
+  testWidgets('虚拟指针扩选:base 固定,extent 随指针', (tester) async {
+    final vp = FluxdoEditorVirtualPointer();
+    final state = EditorState.fromTexts(['hello world foo bar']);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: FluxdoEditor(
+            state: state, autofocus: true, virtualPointer: vp),
+      ),
+    ));
+    await tester.pump();
+    final para = tester.getRect(find.textContaining('hello').first);
+    await tester.tapAt(Offset(para.left + 4, para.center.dy));
+    await tester.pump();
+    await tester.pump();
+    final base = state.selection!.base;
+
+    expect(vp.start(extend: true), isTrue);
+    vp.moveBy(const Offset(80, 0));
+    await tester.pump();
+    final sel = state.selection!;
+    expect(sel.isCollapsed, isFalse, reason: '扩出范围选区');
+    expect(sel.base, base, reason: 'base 固定');
+    expect(sel.extent.offset, greaterThan(base.offset));
+    vp.end();
+    await tester.pump();
+    expect(state.selection!.isCollapsed, isFalse, reason: '选区保留');
+  });
+
+  testWidgets('无光标时 start 返回 false 不炸', (tester) async {
+    final vp = FluxdoEditorVirtualPointer();
+    final state = EditorState.fromTexts(['abc']);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: FluxdoEditor(state: state, virtualPointer: vp),
+      ),
+    ));
+    await tester.pump();
+    if (state.selection == null) {
+      expect(vp.start(), isFalse);
+    }
+    vp.moveBy(const Offset(10, 0)); // no-op 不炸
+    vp.end();
+  });
 }

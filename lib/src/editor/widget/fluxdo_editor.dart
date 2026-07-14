@@ -94,6 +94,41 @@ class ImageAtomSelection {
 /// 浮动幽灵光标定位用(widget test;iOS 长按空格 trackpad 模式)。
 const Key kFloatingCursorGhostKey = ValueKey('editor-floating-cursor-ghost');
 
+/// 编程式虚拟指针:宿主"手势光标"的二维形态 —— 复用 iOS 浮动光标链
+/// (幽灵光标跟手 + 实光标命中吸附 + 贴边自动滚)。宿主滑钮 pan 手势
+/// 驱动:按下 [start] → 拖动 [moveBy] 累计位移 → 松手 [end]。
+///
+/// 经 [FluxdoEditor.virtualPointer] 绑定;编辑器未挂载/无光标时
+/// [start] 返回 false(宿主应忽略本次拖动)。
+class FluxdoEditorVirtualPointer {
+  _FluxdoEditorState? _state;
+  Offset _acc = Offset.zero;
+  bool _active = false;
+
+  bool get isActive => _active;
+
+  /// 从当前光标处起漂。[extend] = 扩选(选区 base 固定,指针驱动 extent)。
+  bool start({bool extend = false}) {
+    final s = _state;
+    if (s == null || !s.mounted) return false;
+    _acc = Offset.zero;
+    _active = s._floatingStart(extend: extend);
+    return _active;
+  }
+
+  void moveBy(Offset delta) {
+    if (!_active) return;
+    _acc += delta;
+    _state?._floatingUpdate(_acc);
+  }
+
+  void end() {
+    if (!_active) return;
+    _active = false;
+    _state?._floatingEnd();
+  }
+}
+
 class FluxdoEditor extends StatefulWidget {
   const FluxdoEditor({
     super.key,
@@ -115,6 +150,7 @@ class FluxdoEditor extends StatefulWidget {
     this.onGridImageOpenRequest,
     this.onCaretRectChanged,
     this.keyEventInterceptor,
+    this.virtualPointer,
   });
 
   final EditorState state;
@@ -186,6 +222,9 @@ class FluxdoEditor extends StatefulWidget {
   /// 斜杠菜单/mention 面板到光标位置。
   final ValueChanged<Rect?>? onCaretRectChanged;
 
+  /// 虚拟指针控制器(宿主手势光标驱动浮动光标链);null 不启用。
+  final FluxdoEditorVirtualPointer? virtualPointer;
+
   /// 按键拦截器:编辑器处理按键**之前**先问它(返回 true = 已消费,
   /// 编辑器不再处理)。宿主的浮层(斜杠菜单/mention)激活时借此接管
   /// 上下键/回车/Esc —— 否则方向键被编辑器拿去移光标,菜单无法导航。
@@ -225,6 +264,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     _ime.onHorizontalRuleRequest = _insertHorizontalRule;
     // iOS 浮动光标(长按空格 trackpad 模式)
     _ime.onFloatingCursor = _onFloatingCursor;
+    widget.virtualPointer?._state = this;
     _islandFactory = widget.nodeFactory ?? NodeFactory();
     widget.state.addListener(_onStateChanged);
     _focusNode.addListener(_onFocusChanged);
@@ -251,6 +291,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   @override
   void dispose() {
+    if (widget.virtualPointer?._state == this) {
+      widget.virtualPointer!._active = false;
+      widget.virtualPointer!._state = null;
+    }
     _handles?.hide();
     _collapsedHandle?.hide();
     _contextBar?.hide();
@@ -540,66 +584,87 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   Offset _floatingPos = Offset.zero;
   OverlayEntry? _floatingGhost;
 
+  /// 扩选模式的固定端(虚拟指针 extend;null = collapsed 移动)。
+  EditorPosition? _floatingExtendBase;
+
   void _onFloatingCursor(RawFloatingCursorPoint point) {
     if (!mounted) return;
     switch (point.state) {
       case FloatingCursorDragState.Start:
-        final sel = widget.state.selection;
-        if (sel == null || !sel.isCollapsed) return;
-        final docPos =
-            _toDocumentPosition(sel.extent, affinity: _caretAffinity);
-        final rect = docPos == null
-            ? null
-            : _hitTester.editingCaretRectAt(docPos,
-                lineHeight: _caretLineHeight);
-        if (rect == null) return;
-        _floatingCursor = true;
-        _floatingBase = rect.center;
-        _floatingPos = rect.center + (point.offset ?? Offset.zero);
-        widget.state.sealHistory();
-        _collapsedHandle?.hide();
-        _contextBar?.hide();
-        _showFloatingGhost();
-        setState(() {}); // 实光标切灰色残影态
-
+        _floatingStart(initialOffset: point.offset ?? Offset.zero);
       case FloatingCursorDragState.Update:
-        final base = _floatingBase;
-        if (!_floatingCursor || base == null) return;
-        var pos = base + (point.offset ?? Offset.zero);
-        // 钳到可视视口内(编辑区上缘/键盘上缘;半行余量让幽灵整条可见)。
-        // 无滚动宿主(demo/测试)退回编辑器根矩形。
-        var vp = _visibleViewportRect();
-        if (vp == null) {
-          final rootBox = _rootKey.currentContext?.findRenderObject();
-          if (rootBox is RenderBox && rootBox.attached && rootBox.hasSize) {
-            vp = rootBox.localToGlobal(Offset.zero) & rootBox.size;
-          }
-        }
-        if (vp != null && !vp.isEmpty) {
-          final half = _caretLineHeight / 2;
-          // x 留幽灵条半宽(1.25),整条不出界
-          pos = Offset(
-            pos.dx.clamp(vp.left + 1.25, vp.right - 1.25),
-            pos.dy.clamp(vp.top + half, vp.bottom - half),
-          );
-        }
-        _floatingPos = pos;
-        _floatingGhost?.markNeedsBuild();
-        // 实光标就近吸附(EditableText 的灰色残影等价物:吸附位即落点)
-        _applyFloatingHit(pos);
-        // 贴视口上下缘 → 边缘自动滚(键盘态可视区小,长文档必需;
-        // tick 每帧滚动后按幽灵位置重命中,吸附点随内容继续走)
-        _updateAutoScroll(pos);
-
+        _floatingUpdate(point.offset ?? Offset.zero);
       case FloatingCursorDragState.End:
-        if (!_floatingCursor) return;
-        _floatingCursor = false;
-        _floatingBase = null;
-        _stopAutoScroll();
-        _removeFloatingGhost();
-        _ime.syncFromState(show: false);
-        setState(() {}); // 实光标恢复主题色
+        _floatingEnd();
     }
+  }
+
+  /// 浮动/虚拟指针起步(基准 = 当前光标中心)。[extend] = 扩选模式
+  /// (base 固定,幽灵驱动 extent;IME 路径恒 false)。
+  /// 返回 false = 无光标可起步(未聚焦/岛上无文本光标)。
+  bool _floatingStart({Offset initialOffset = Offset.zero, bool extend = false}) {
+    final sel = widget.state.selection;
+    if (sel == null) return false;
+    if (!extend && !sel.isCollapsed) return false;
+    final docPos =
+        _toDocumentPosition(sel.extent, affinity: _caretAffinity);
+    final rect = docPos == null
+        ? null
+        : _hitTester.editingCaretRectAt(docPos,
+            lineHeight: _caretLineHeight);
+    if (rect == null) return false;
+    _floatingCursor = true;
+    _floatingExtendBase = extend ? sel.base : null;
+    _floatingBase = rect.center;
+    _floatingPos = rect.center + initialOffset;
+    widget.state.sealHistory();
+    _collapsedHandle?.hide();
+    _contextBar?.hide();
+    _showFloatingGhost();
+    setState(() {}); // 实光标切灰色残影态
+    return true;
+  }
+
+  /// 浮动位置更新([accumulated] = 相对起步点的累计位移)。
+  void _floatingUpdate(Offset accumulated) {
+    final base = _floatingBase;
+    if (!_floatingCursor || base == null) return;
+    var pos = base + accumulated;
+    // 钳到可视视口内(编辑区上缘/键盘上缘;半行余量让幽灵整条可见)。
+    // 无滚动宿主(demo/测试)退回编辑器根矩形。
+    var vp = _visibleViewportRect();
+    if (vp == null) {
+      final rootBox = _rootKey.currentContext?.findRenderObject();
+      if (rootBox is RenderBox && rootBox.attached && rootBox.hasSize) {
+        vp = rootBox.localToGlobal(Offset.zero) & rootBox.size;
+      }
+    }
+    if (vp != null && !vp.isEmpty) {
+      final half = _caretLineHeight / 2;
+      // x 留幽灵条半宽(1.25),整条不出界
+      pos = Offset(
+        pos.dx.clamp(vp.left + 1.25, vp.right - 1.25),
+        pos.dy.clamp(vp.top + half, vp.bottom - half),
+      );
+    }
+    _floatingPos = pos;
+    _floatingGhost?.markNeedsBuild();
+    // 实光标就近吸附(EditableText 的灰色残影等价物:吸附位即落点)
+    _applyFloatingHit(pos);
+    // 贴视口上下缘 → 边缘自动滚(键盘态可视区小,长文档必需;
+    // tick 每帧滚动后按幽灵位置重命中,吸附点随内容继续走)
+    _updateAutoScroll(pos);
+  }
+
+  void _floatingEnd() {
+    if (!_floatingCursor) return;
+    _floatingCursor = false;
+    _floatingBase = null;
+    _floatingExtendBase = null;
+    _stopAutoScroll();
+    _removeFloatingGhost();
+    _ime.syncFromState(show: false);
+    setState(() {}); // 实光标恢复主题色
   }
 
   /// 浮动点 → 实光标吸附(Update 与自动滚 tick 共用;无半行补偿 ——
@@ -614,7 +679,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     if (editorPos != null && editorPos != widget.state.selection?.extent) {
       _caretAffinity = docPos.affinity;
       _verticalGoalX = null;
-      widget.state.updateSelection(EditorSelection.collapsed(editorPos));
+      final extendBase = _floatingExtendBase;
+      widget.state.updateSelection(extendBase == null
+          ? EditorSelection.collapsed(editorPos)
+          : EditorSelection(base: extendBase, extent: editorPos));
     }
   }
 
