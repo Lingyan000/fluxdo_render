@@ -94,6 +94,28 @@ class ImageAtomSelection {
 /// 浮动幽灵光标定位用(widget test;iOS 长按空格 trackpad 模式)。
 const Key kFloatingCursorGhostKey = ValueKey('editor-floating-cursor-ghost');
 
+/// 岛整选上下文(宿主 onebox 工具条等锚定用;帧后回报,滚动跟随)。
+@immutable
+class IslandSelection {
+  const IslandSelection({
+    required this.island,
+    required this.globalRect,
+  });
+
+  final IslandBlock island;
+  final Rect globalRect;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is IslandSelection &&
+          island == other.island &&
+          globalRect == other.globalRect;
+
+  @override
+  int get hashCode => Object.hash(island, globalRect);
+}
+
 /// collapsed 光标落在链接内的上下文(宿主链接工具条锚定/编辑用)。
 ///
 /// [rangeGlobal] = 链接文本区间的全局包围矩形(帧后计算,跟随滚动
@@ -191,6 +213,7 @@ class FluxdoEditor extends StatefulWidget {
     this.onGridImageOpenRequest,
     this.onCaretRectChanged,
     this.onLinkCaret,
+    this.onIslandSelected,
     this.keyEventInterceptor,
     this.virtualPointer,
   });
@@ -269,6 +292,11 @@ class FluxdoEditor extends StatefulWidget {
   /// 锚定用 —— 官方 link-toolbar 的 getMarkRange 检测同语义。
   final ValueChanged<LinkCaretInfo?>? onLinkCaret;
 
+  /// 岛整选态变化(帧后回报,含全局矩形跟随滚动;null = 取消)。宿主
+  /// 按 island.node 类型出对应工具条(官方 onebox-toolbar 的
+  /// NodeSelection 检测同语义)。
+  final ValueChanged<IslandSelection?>? onIslandSelected;
+
   /// 虚拟指针控制器(宿主手势光标驱动浮动光标链);null 不启用。
   final FluxdoEditorVirtualPointer? virtualPointer;
 
@@ -291,6 +319,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       widget.focusNode ?? FocusNode(debugLabel: 'FluxdoEditor');
   bool get _ownsFocusNode => widget.focusNode == null;
   final GlobalKey _rootKey = GlobalKey();
+
+  /// 岛容器 key(整选矩形上抛用;按块 id 稳定)。
+  final Map<String, GlobalKey> _islandKeys = {};
 
   /// 编辑器局部坐标系的光标矩形 + 配对修订号(帧后由 hit_tester 计算)。
   ///
@@ -465,6 +496,15 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     if (imgSel != _lastImageAtomSel) {
       _lastImageAtomSel = imgSel;
       widget.onImageAtomSelectionChanged?.call(imgSel);
+    }
+
+    // 岛整选态上抛(onebox 工具条等;变化才通知,rect 变化跟随滚动)
+    if (widget.onIslandSelected != null) {
+      final islSel = _computeIslandSelection();
+      if (islSel != _lastIslandSel) {
+        _lastIslandSel = islSel;
+        widget.onIslandSelected!(islSel);
+      }
     }
 
     // grid 子选中失效检查:岛没了/图删了/主选区**后续**移动(基线对比)
@@ -1130,6 +1170,26 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   void _stopAutoScroll() {
     _autoScrollStep = 0;
     _autoScrollTicker?.stop();
+  }
+
+  IslandSelection? _lastIslandSel;
+
+  /// 当前恰好整选的单岛(选区 = 岛 0..1)→ 岛块 + 全局矩形;其余 null。
+  IslandSelection? _computeIslandSelection() {
+    final norm = widget.state.normalizedSelection();
+    if (norm == null || !_focusNode.hasPrimaryFocus) return null;
+    final (from, to) = norm;
+    if (from.blockId != to.blockId) return null;
+    if (from.offset != 0 || to.offset != 1) return null;
+    final idx = widget.state.indexOfBlock(from.blockId);
+    if (idx < 0) return null;
+    final block = widget.state.blocks[idx];
+    if (block is! IslandBlock) return null;
+    final box = _islandKeys[block.id]?.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    final tl = box.localToGlobal(Offset.zero);
+    if (!tl.dx.isFinite || !tl.dy.isFinite) return null;
+    return IslandSelection(island: block, globalRect: tl & box.size);
   }
 
   /// 岛是否处于「整选」态(选区恰覆盖该岛 0..1)。
@@ -2025,7 +2085,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             ),
           // 孤岛:NodeFactory 渲染,tap 整选,双击请求编辑,选中态描边
           final IslandBlock ib => EditorIsland(
-              key: ValueKey(ib.id),
+              key: _islandKeys.putIfAbsent(ib.id, GlobalKey.new),
               node: ib.node,
               nodeFactory: _islandFactory,
               selected: _isIslandSelected(ib.id),
