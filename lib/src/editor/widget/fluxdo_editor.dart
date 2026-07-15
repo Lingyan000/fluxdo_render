@@ -342,6 +342,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     _ime.onHorizontalRuleRequest = _insertHorizontalRule;
     // iOS 浮动光标(长按空格 trackpad 模式)
     _ime.onFloatingCursor = _onFloatingCursor;
+    // macOS selector 快捷键(自管 IME 激活时 Cmd+A/C/V/X 走 selector)
+    _ime.onSelector = _onImeSelector;
     widget.virtualPointer?._state = this;
     _islandFactory = widget.nodeFactory ?? NodeFactory();
     widget.state.addListener(_onStateChanged);
@@ -1383,6 +1385,26 @@ class _FluxdoEditorState extends State<FluxdoEditor>
         _hitTester.editingCaretRectAt(to, lineHeight: _caretLineHeight);
     if (a == null || b == null) return null;
     return a.expandToInclude(b);
+  }
+
+  /// macOS AppKit selector 快捷键 → 编辑器命令(键事件路径的镜像;
+  /// 两条路径幂等,重复触发无害:selectAll 幂等、剪贴板由 ticket 防重)。
+  bool _onImeSelector(String name) {
+    switch (name) {
+      case 'selectAll:':
+        widget.state.selectAll();
+        return true;
+      case 'copy:':
+        _clipboardCopy();
+        return true;
+      case 'cut:':
+        _clipboardCut();
+        return true;
+      case 'paste:':
+        _clipboardPaste();
+        return true;
+    }
+    return false;
   }
 
   // -----------------------------------------------------------------

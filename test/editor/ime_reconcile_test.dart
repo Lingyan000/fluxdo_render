@@ -162,6 +162,21 @@ void main() {
       expect(state.selection!.extent.offset, 8);
     });
 
+    test('非回显的全选形状选区 = 菜单 Select All,升格全文档全选', () {
+      final (state, ime) = makeAttached(paragraphs: ['abcde', 'fgh'], caret: 2);
+      // 平台主动发全段选择(0..len;非 setEditingState 回显 —— 指纹
+      // 缓冲里没有这个形状)
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}abcde',
+        selection: const TextSelection(baseOffset: 1, extentOffset: 6),
+        composing: TextRange.empty,
+      ));
+      final sel = state.selection!;
+      expect(sel.isCollapsed, false);
+      expect(sel.base.blockId, state.blocks.first.id);
+      expect(sel.extent.blockId, state.blocks.last.id, reason: '跨段全选');
+    });
+
     test('composing 活跃时的光标通知仍被采纳(候选窗交互)', () {
       final (state, ime) = makeAttached();
       ime.updateEditingValue(TextEditingValue(

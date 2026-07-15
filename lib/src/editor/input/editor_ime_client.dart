@@ -56,6 +56,11 @@ class EditorImeClient with TextInputClient {
   /// 几何(基准光标矩形/命中/幽灵绘制)全在视图层。
   void Function(RawFloatingCursorPoint point)? onFloatingCursor;
 
+  /// macOS AppKit selector 快捷键(自管 IME 连接激活时,Cmd+A/C/V/X
+  /// 可能以 selector 形式到达而非键事件 —— 只接 deleteBackward: 会把
+  /// 全选/复制/粘贴静默吞掉)。返回 true = 已处理。
+  bool Function(String selectorName)? onSelector;
+
   TextInputConnection? _connection;
 
   /// 当前 attach 的段落 id(IME 窗口)。
@@ -63,6 +68,22 @@ class EditorImeClient with TextInputClient {
 
   /// 上次喂给平台的值(**pad 后**坐标;diff 基准)。
   TextEditingValue _lastSent = TextEditingValue.empty;
+
+  /// 最近发出的值指纹(text+selection;容量 8)。macOS 引擎会把
+  /// setEditingState 滞后回显成 updateEditingValue —— 回显必然命中
+  /// 本缓冲;**未命中的纯选区通知 = 平台主动行为**(菜单栏 Edit >
+  /// Select All 直接操作引擎 NSTextView 后发回的新选区),必须采纳,
+  /// 否则 macOS Cmd+A 被菜单拦截后全选永远无效。
+  final List<(String, int, int)> _recentSent = [];
+
+  void _rememberSent(TextEditingValue v) {
+    _recentSent.add(
+        (v.text, v.selection.baseOffset, v.selection.extentOffset));
+    if (_recentSent.length > 8) _recentSent.removeAt(0);
+  }
+
+  bool _isRecentEcho(TextEditingValue v) => _recentSent.contains(
+      (v.text, v.selection.baseOffset, v.selection.extentOffset));
 
   /// 正在处理平台回调(updateEditingValue/performAction/...)。
   ///
@@ -140,6 +161,7 @@ class EditorImeClient with TextInputClient {
       _attachedBlockId = sel.extent.blockId;
       _connection!.setEditingState(value);
       _lastSent = value;
+      _rememberSent(value);
       if (show) _connection!.show();
       return;
     }
@@ -153,6 +175,7 @@ class EditorImeClient with TextInputClient {
           '${force ? " (force)" : ""}${blockChanged ? " (blockChanged)" : ""}');
       _connection!.setEditingState(value);
       _lastSent = value;
+      _rememberSent(value);
     }
     if (show) _connection!.show();
   }
@@ -162,6 +185,7 @@ class EditorImeClient with TextInputClient {
     _connection = null;
     _attachedBlockId = null;
     _lastSent = TextEditingValue.empty;
+    _recentSent.clear();
   }
 
   /// 喂平台光标/composing 几何(IME 候选窗定位)。
@@ -318,12 +342,14 @@ class EditorImeClient with TextInputClient {
     }
 
     if (diff == null) {
+      final isEcho = _isRecentEcho(rawValue);
       _lastSent = rawValue;
-      // 文本没变 = 平台侧的纯光标/composing 通知。**只在 composing 活跃时
-      // 采纳**(候选窗交互需要);无 composing 时一律忽略 —— macOS 引擎会把
-      // setEditingState 原样/滞后回显成 updateEditingValue,拖选/快速输入时
-      // 按回显移动选区会把拖选折叠、把光标搬到陈旧位置(表现:无法选中
-      // 文字、输入落点漂移)。无 composing 时选区归键盘/手势路径独占。
+      // 文本没变 = 平台侧的纯光标/composing 通知。composing 活跃时采纳
+      // (候选窗交互);其余**回显忽略**(macOS 引擎滞后回显 setEditingState,
+      // 拖选/快速输入时按回显动选区会折叠拖选/搬光标 —— 回显必命中
+      // _recentSent 指纹);**非回显 = 平台主动选区变化**,采纳:macOS
+      // 菜单栏 Edit > Select All(Cmd+A 被 NSMenu 拦截,直接操作引擎
+      // NSTextView 后发回全选选区,不走键事件也不走 performSelector)。
       if (composing.isValid && !composing.isCollapsed) {
         state.imeReplace(
           blockId,
@@ -338,6 +364,17 @@ class EditorImeClient with TextInputClient {
         // composing 刚结束的收尾通知(无文本变化):清标记 + 封历史口。
         state.updateComposing(TextRange.empty);
         state.sealHistory();
+      } else if (!isEcho && value.selection.isValid) {
+        // 只认**全选形状**(0..len):菜单 Edit 唯一主动发的选区就是
+        // Select All;其余非回显纯选区通知维持忽略(回显可能带轻微
+        // 变形的陈旧光标,全盘采纳会重蹈"拖选被折叠"覆辙)。
+        final lo = value.selection.baseOffset;
+        final hi = value.selection.extentOffset;
+        final len = sanitizedText.length;
+        if (len > 0 && ((lo == 0 && hi == len) || (lo == len && hi == 0))) {
+          _log('adopt platform selectAll (menu)');
+          state.selectAll();
+        }
       }
       return;
     }
@@ -501,8 +538,10 @@ class EditorImeClient with TextInputClient {
   @override
   void performSelector(String selectorName) {
     // macOS AppKit selector 路径(appflowy delta_input_service.dart L212 有
-    // 同款):部分按键(方向/删除)在 IME 链路里以 selector 形式到达。
-    // M1 的按键处理走 Focus.onKeyEvent,此处仅兜底 deleteBackward。
+    // 同款):部分按键(方向/删除/编辑命令)在 IME 链路里以 selector
+    // 形式到达。先给视图层(onSelector:全选/剪贴板等需要视图层能力),
+    // 再兜底 deleteBackward。
+    if (onSelector?.call(selectorName) ?? false) return;
     if (selectorName == 'deleteBackward:') {
       _applyingPlatformUpdate = true;
       try {
