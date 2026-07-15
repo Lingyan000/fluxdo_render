@@ -88,4 +88,18 @@ void main() {
     await tester.pump();
     expect(events.last, isNull);
   });
+
+  testWidgets('行内链接(前后有文字)同样上抛(工具条不区分行内/独占)',
+      (tester) async {
+    final state = await pump(tester);
+    // pump 的 fixture 本就是行内:前缀 + 链接 + 后缀
+    final tb = state.blocks.first as TextBlock;
+    expect(tb.content.text, '前缀 链接文字 后缀', reason: '行内形态确认');
+    state.updateSelection(EditorSelection.collapsed(
+      const EditorPosition(blockId: 'e_0', offset: 4),
+    ));
+    await tester.pump();
+    await tester.pump();
+    expect(events.whereType<LinkCaretInfo>().last.href, 'https://x.test/a');
+  });
 }
