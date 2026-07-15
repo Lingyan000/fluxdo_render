@@ -609,13 +609,44 @@ class _FluxdoEditorState extends State<FluxdoEditor>
         lineHeight: _caretLineHeight,
       );
       if (caret != null) {
-        (_magnifier ??= SelectionMagnifier(context)).show(
-          gestureGlobal: dragGlobal,
-          caretRect: caret,
-        );
+        _showEditorMagnifier(
+            gestureGlobal: dragGlobal, caret: caret, docPos: docPos);
       }
     }
     _updateAutoScroll(dragGlobal);
+  }
+
+
+  /// 放大镜四字段喂给(SDK MagnifierInfo 口径,SelectionHandles 同款):
+  /// fieldBounds = 编辑器根;lineBoundaries = caret 行横向扩到段落宽。
+  void _showEditorMagnifier({
+    required Offset gestureGlobal,
+    required Rect caret,
+    DocumentPosition? docPos,
+  }) {
+    Rect fieldBounds = caret;
+    final rootBox = _rootKey.currentContext?.findRenderObject();
+    if (rootBox is RenderBox && rootBox.attached && rootBox.hasSize) {
+      final tl = rootBox.localToGlobal(Offset.zero);
+      if (tl.dx.isFinite && tl.dy.isFinite) fieldBounds = tl & rootBox.size;
+    }
+    Rect lineBoundaries = Rect.fromLTRB(
+        fieldBounds.left, caret.top, fieldBounds.right, caret.bottom);
+    final paragraph =
+        docPos == null ? null : _controller.registry.byId(docPos.blockId)?.paragraph;
+    if (paragraph != null && paragraph.attached && paragraph.hasSize) {
+      final tl = paragraph.localToGlobal(Offset.zero);
+      if (tl.dx.isFinite && tl.dy.isFinite) {
+        lineBoundaries = Rect.fromLTRB(
+            tl.dx, caret.top, tl.dx + paragraph.size.width, caret.bottom);
+      }
+    }
+    (_magnifier ??= SelectionMagnifier(context)).show(
+      gestureGlobal: gestureGlobal,
+      caretRect: caret,
+      currentLineBoundaries: lineBoundaries,
+      fieldBounds: fieldBounds,
+    );
   }
 
   /// 手柄(双/单)拖动结束的统一收尾。
@@ -1648,10 +1679,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       lineHeight: _caretLineHeight,
     );
     if (caret != null) {
-      (_magnifier ??= SelectionMagnifier(context)).show(
-        gestureGlobal: details.globalPosition,
-        caretRect: caret,
-      );
+      _showEditorMagnifier(
+          gestureGlobal: details.globalPosition, caret: caret, docPos: docPos);
     }
   }
 
