@@ -639,6 +639,22 @@ class EditableTextContent {
     };
   }
 
+  /// [offset] 光标处覆盖的 link mark 完整区间(链接工具条定位/原位
+  /// 编辑用)。返回 (start, end, href);无 → null。
+  /// 探测口径与 [linkHrefAt] 一致:光标"贴着链接尾"也算在内(probe =
+  /// offset-1,与官方 getMarkRange 的 inclusive 语义对齐)。
+  (int, int, String?)? linkRangeAt(int offset) {
+    assert(offset >= 0 && offset <= text.length);
+    if (text.isEmpty) return null;
+    final probe = offset > 0 ? offset - 1 : 0;
+    for (final m in marks) {
+      if (m.kind == MarkKind.link && m.start <= probe && probe < m.end) {
+        return (m.start, m.end, m.attr);
+      }
+    }
+    return null;
+  }
+
   /// [offset] 光标处覆盖的 link href(工具栏"编辑链接"预填用);无 → null。
   String? linkHrefAt(int offset) {
     assert(offset >= 0 && offset <= text.length);

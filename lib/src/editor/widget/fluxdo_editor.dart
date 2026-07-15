@@ -94,6 +94,47 @@ class ImageAtomSelection {
 /// 浮动幽灵光标定位用(widget test;iOS 长按空格 trackpad 模式)。
 const Key kFloatingCursorGhostKey = ValueKey('editor-floating-cursor-ghost');
 
+/// collapsed 光标落在链接内的上下文(宿主链接工具条锚定/编辑用)。
+///
+/// [rangeGlobal] = 链接文本区间的全局包围矩形(帧后计算,跟随滚动
+/// 刷新);[start]/[end] = 块内编辑偏移(原位替换用)。
+@immutable
+class LinkCaretInfo {
+  const LinkCaretInfo({
+    required this.blockId,
+    required this.start,
+    required this.end,
+    required this.href,
+    required this.text,
+    required this.rangeGlobal,
+  });
+
+  final String blockId;
+  final int start;
+  final int end;
+  final String? href;
+
+  /// 链接区间纯文本(编辑对话框预填;含原子哨兵时由宿主自行取舍)。
+  final String text;
+
+  final Rect rangeGlobal;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LinkCaretInfo &&
+          blockId == other.blockId &&
+          start == other.start &&
+          end == other.end &&
+          href == other.href &&
+          text == other.text &&
+          rangeGlobal == other.rangeGlobal;
+
+  @override
+  int get hashCode =>
+      Object.hash(blockId, start, end, href, text, rangeGlobal);
+}
+
 /// 编程式虚拟指针:宿主"手势光标"的二维形态 —— 复用 iOS 浮动光标链
 /// (幽灵光标跟手 + 实光标命中吸附 + 贴边自动滚)。宿主滑钮 pan 手势
 /// 驱动:按下 [start] → 拖动 [moveBy] 累计位移 → 松手 [end]。
@@ -149,6 +190,7 @@ class FluxdoEditor extends StatefulWidget {
     this.onGridImageSelectionChanged,
     this.onGridImageOpenRequest,
     this.onCaretRectChanged,
+    this.onLinkCaret,
     this.keyEventInterceptor,
     this.virtualPointer,
   });
@@ -221,6 +263,11 @@ class FluxdoEditor extends StatefulWidget {
   /// 光标全局矩形变化(帧后回报;null = 光标不可见)。宿主用于锚定
   /// 斜杠菜单/mention 面板到光标位置。
   final ValueChanged<Rect?>? onCaretRectChanged;
+
+  /// collapsed 光标进入/离开链接(帧后回报;null = 不在链接内/失焦/
+  /// range 选区)。宿主链接工具条(编辑/复制/取消链接/预览/访问)
+  /// 锚定用 —— 官方 link-toolbar 的 getMarkRange 检测同语义。
+  final ValueChanged<LinkCaretInfo?>? onLinkCaret;
 
   /// 虚拟指针控制器(宿主手势光标驱动浮动光标链);null 不启用。
   final FluxdoEditorVirtualPointer? virtualPointer;
@@ -407,8 +454,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
           rootBox.localToGlobal(newCaret.topLeft) & newCaret.size;
       widget.onCaretRectChanged?.call(caretGlobal);
       _ensureCaretVisible(caretGlobal);
+      _notifyLinkCaret();
     } else if (newCaret == null) {
       widget.onCaretRectChanged?.call(null);
+      _notifyLinkCaret();
     }
 
     // 图片原子选中态上抛(变化才通知;rect 变化也算 —— 浮层跟随)
@@ -1188,6 +1237,61 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     if (rootBox is! RenderBox || !rootBox.attached) return null;
     final topLeft = rootBox.globalToLocal(globalRect.topLeft);
     return topLeft & globalRect.size;
+  }
+
+  LinkCaretInfo? _lastLinkCaret;
+
+  /// collapsed 光标 ↔ 链接 mark 的进出检测(帧后;变化才通知)。
+  /// 手势进行中(长按/拖手柄/浮动)不更新 —— end 后帧收敛时补。
+  void _notifyLinkCaret() {
+    final cb = widget.onLinkCaret;
+    if (cb == null) return;
+    LinkCaretInfo? info;
+    final sel = widget.state.selection;
+    if (sel != null &&
+        sel.isCollapsed &&
+        _focusNode.hasPrimaryFocus &&
+        !_longPressing &&
+        !_handleDragging &&
+        !_floatingCursor) {
+      final block = widget.state.textBlockById(sel.extent.blockId);
+      final range = block?.content.linkRangeAt(sel.extent.offset);
+      if (block != null && range != null) {
+        final (start, end, href) = range;
+        final rect = _linkRangeGlobalRect(sel.extent.blockId, start, end);
+        if (rect != null) {
+          info = LinkCaretInfo(
+            blockId: sel.extent.blockId,
+            start: start,
+            end: end,
+            href: href,
+            text: block.content.text.substring(start, end),
+            rangeGlobal: rect,
+          );
+        }
+      }
+    }
+    if (info != _lastLinkCaret) {
+      _lastLinkCaret = info;
+      cb(info);
+    }
+  }
+
+  /// 链接区间(编辑偏移)的全局包围矩形:首尾光标矩形并集(单行即
+  /// 精确;跨软换行取包围盒,工具条锚定够用)。
+  Rect? _linkRangeGlobalRect(String blockId, int start, int end) {
+    final from = _toDocumentPosition(
+        EditorPosition(blockId: blockId, offset: start));
+    final to = _toDocumentPosition(
+        EditorPosition(blockId: blockId, offset: end),
+        affinity: TextAffinity.upstream);
+    if (from == null || to == null) return null;
+    final a =
+        _hitTester.editingCaretRectAt(from, lineHeight: _caretLineHeight);
+    final b =
+        _hitTester.editingCaretRectAt(to, lineHeight: _caretLineHeight);
+    if (a == null || b == null) return null;
+    return a.expandToInclude(b);
   }
 
   // -----------------------------------------------------------------
