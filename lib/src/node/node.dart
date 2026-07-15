@@ -393,6 +393,7 @@ class QuoteCardNode extends BlockNode {
     this.children = const [],
     this.full = false,
     this.displayName,
+    this.oneboxUrl,
   });
 
   /// `data-username`,主项目用它构造用户卡跳转(同 MentionRun.username)。
@@ -406,6 +407,12 @@ class QuoteCardNode extends BlockNode {
   /// `data-display-name`(raw 里 `[quote="张三, …, username:sam"]` 的
   /// 显示名形态)。null = raw 第一段就是 username。序列化写回用。
   final String? displayName;
+
+  /// 非 null = 本卡是**站内链接 onebox 的展开物**(编辑器预览 cook 的
+  /// `data-fluxdo-onebox-url` 标记):raw 是裸 URL 而非 [quote] 块,
+  /// 序列化必须写回该 URL —— 固化成引用块即毁帖(语义从"跟随原帖的
+  /// onebox"变成"静态引用")。服务端 cooked 无此标记,恒 null。
+  final String? oneboxUrl;
 
   /// `img.avatar` 的 src(原始 URL,parser 不重写)。
   /// 缺失时 null,渲染走首字母 chip fallback。
@@ -461,6 +468,7 @@ class QuoteCardNode extends BlockNode {
           categoryHref == other.categoryHref &&
           full == other.full &&
           displayName == other.displayName &&
+          oneboxUrl == other.oneboxUrl &&
           listEquals(children, other.children);
 
   @override
@@ -478,6 +486,7 @@ class QuoteCardNode extends BlockNode {
         categoryHref,
         full,
         displayName,
+        oneboxUrl,
         Object.hashAll(children),
       );
 

@@ -930,6 +930,7 @@ class ParagraphParser {
       full: full,
       displayName:
           (displayName == null || displayName.isEmpty) ? null : displayName,
+      oneboxUrl: asideEl.attributes['data-fluxdo-onebox-url'],
     );
   }
 

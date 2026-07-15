@@ -191,6 +191,14 @@ List<EditorBlock> blockNodesToDoc(
           addIsland(node);
         }
       case QuoteCardNode(:final children):
+        // onebox 展开物(编辑器预览 cook 的 data-fluxdo-onebox-url
+        // 标记):raw 是裸 URL,不容器化 —— 岛化保只读 + 序列化走
+        // oneboxUrl 裸 URL 规则(容器化会把它当真引用卡写 [quote] 块,
+        // 毁帖:静态引用不跟随原帖)。官方里 onebox 同样是原子节点。
+        if (node.oneboxUrl != null && node.oneboxUrl!.isNotEmpty) {
+          addIsland(node);
+          return;
+        }
         if (blocksEditable(children)) {
           final frame = [
             ...containers,

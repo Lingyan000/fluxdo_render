@@ -458,6 +458,11 @@ String serializeIslandNode(BlockNode node) {
           .join('\n\n');
       return inner.split('\n').map((l) => l.isEmpty ? '>' : '> $l').join('\n');
     case QuoteCardNode():
+      // onebox 展开物(编辑器预览 cook 标记):raw 是裸 URL,写回
+      // [quote] 块即毁帖(静态引用不跟随原帖)
+      if (node.oneboxUrl != null && node.oneboxUrl!.isNotEmpty) {
+        return node.oneboxUrl!;
+      }
       return _serializeQuoteCard(node);
     case SpoilerBlockNode(:final children):
       final inner = children
