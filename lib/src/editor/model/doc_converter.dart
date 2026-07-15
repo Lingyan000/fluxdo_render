@@ -44,6 +44,7 @@ bool isEditableInline(InlineNode n) => switch (n) {
       InlineCodeRun() => true,
       SpoilerRun(:final children) => children.every(isEditableInline),
       LinkRun(
+        :final href,
         :final children,
         :final isAttachment,
         :final hashtagRef,
@@ -51,8 +52,12 @@ bool isEditableInline(InlineNode n) => switch (n) {
       ) =>
         !isAttachment &&
             hashtagRef == null &&
-            !isOneboxLink &&
-            children.every(isEditableInline),
+            // onebox 系链接(裸 URL 的 linkify 产物)可编辑:flatten 时
+            // 文本替换为 href(官方 linkify 语义 —— 编辑器里显示 URL
+            // 本身),序列化 text==href 走裸 URL 规则,往返无损
+            (isOneboxLink
+                ? href.isNotEmpty
+                : children.every(isEditableInline)),
       StyledRun(:final kind, :final children) => switch (kind) {
           InlineStyleKind.underline ||
           InlineStyleKind.lineThrough =>

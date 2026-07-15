@@ -206,9 +206,17 @@ class EditableTextContent {
         case SpoilerRun(:final children):
           _flattenInto(children, buf, marks, atoms,
               [...activeKinds, (MarkKind.spoilerInline, null)]);
-        case LinkRun(:final href, :final children):
-          _flattenInto(children, buf, marks, atoms,
-              [...activeKinds, (MarkKind.link, href)]);
+        case LinkRun(:final href, :final children, :final isOneboxLink):
+          if (isOneboxLink) {
+            // 裸 URL 的 linkify 链接:编辑器显示 URL 本身(锚文本可能
+            // 是 cook 种子取回的页面标题,但 raw 是裸 URL —— 显示 href
+            // 才能让序列化的 text==attr 裸 URL 规则保住往返)
+            _appendText(buf, marks,
+                [...activeKinds, (MarkKind.link, href)], sanitizeText(href));
+          } else {
+            _flattenInto(children, buf, marks, atoms,
+                [...activeKinds, (MarkKind.link, href)]);
+          }
         // ---- 原子(一等公民):哨兵占位 + 身份入表 ----
         case EmojiRun():
           atoms[buf.length] = node;

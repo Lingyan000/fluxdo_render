@@ -255,6 +255,20 @@ String _inlineToMarkdown(EditableTextContent content) {
 
   final htmlEmphasis = _hasCrossingMarks(content.marks);
 
+  // 裸链接区间:link mark 覆盖的文本恰等于 href(linkify/onebox 系
+  // 链接导入后的形态)→ 不发射 [text](url) 包装,直接吐 URL 本身
+  // (raw 保持裸 URL,cook 才会走 onebox/linkify —— `[url](url)` 写法
+  // 会固化成普通链接,毁 onebox 语义)。区间内文本不转义(URL 里的
+  // `_` 等被转义即断链)。
+  final bareLinks = <MarkSpan>{
+    for (final m in content.marks)
+      if (m.kind == MarkKind.link &&
+          m.attr != null &&
+          m.attr!.isNotEmpty &&
+          text.substring(m.start, m.end) == m.attr)
+        m,
+  };
+
   // 边界事件表:offset → 该处闭合/开启的 mark 区间
   final opens = <int, List<MarkSpan>>{};
   final closes = <int, List<MarkSpan>>{};
@@ -275,11 +289,15 @@ String _inlineToMarkdown(EditableTextContent content) {
     final reopen = <MarkSpan>[];
     while (pending.isNotEmpty && active.isNotEmpty) {
       final top = active.removeLast();
-      buf.write(_closeTag(top, htmlEmphasis: htmlEmphasis));
+      if (!bareLinks.contains(top)) {
+        buf.write(_closeTag(top, htmlEmphasis: htmlEmphasis));
+      }
       if (!pending.remove(top)) reopen.add(top);
     }
     for (final m in reopen.reversed) {
-      buf.write(_openTag(m, htmlEmphasis: htmlEmphasis));
+      if (!bareLinks.contains(m)) {
+        buf.write(_openTag(m, htmlEmphasis: htmlEmphasis));
+      }
       active.add(m);
     }
   }
@@ -292,7 +310,9 @@ String _inlineToMarkdown(EditableTextContent content) {
       ..sort((a, b) =>
           _markOrder.indexOf(a.kind).compareTo(_markOrder.indexOf(b.kind)));
     for (final m in sorted) {
-      buf.write(_openTag(m, htmlEmphasis: htmlEmphasis));
+      if (!bareLinks.contains(m)) {
+        buf.write(_openTag(m, htmlEmphasis: htmlEmphasis));
+      }
       active.add(m);
     }
   }
@@ -325,7 +345,8 @@ String _inlineToMarkdown(EditableTextContent content) {
       // 硬换行:行尾双空格
       buf.write('  \n');
     } else {
-      buf.write(inCode ? ch : _escapeInline(ch, i, text));
+      final inBareLink = active.any(bareLinks.contains);
+      buf.write(inCode || inBareLink ? ch : _escapeInline(ch, i, text));
     }
   }
   // 收尾:未闭合的全部闭合(理论 marks 都有 end,防御)
