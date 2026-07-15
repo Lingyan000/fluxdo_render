@@ -871,6 +871,14 @@ class EditorState extends ChangeNotifier {
   }
 
   /// 在 [index] 块前/后插入空段并聚焦(岛回车路径共用)。
+  /// 在岛前/后插入空段并落光标(岛选中态「加段」把手;splitBlock 的
+  /// 岛路径同语义,公开给视图层直调)。
+  void insertParagraphNearIsland(String islandId, {required bool after}) {
+    final i = indexOfBlock(islandId);
+    if (i < 0 || _blocks[i] is! IslandBlock) return;
+    _insertParagraphNear(i, after: after);
+  }
+
   void _insertParagraphNear(int index, {required bool after}) {
     if (index < 0) return;
     sealHistory();

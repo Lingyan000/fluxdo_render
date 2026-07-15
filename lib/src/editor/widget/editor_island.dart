@@ -36,6 +36,7 @@ class EditorIsland extends StatefulWidget {
     required this.selected,
     required this.onTapSelect,
     this.onEditRequest,
+    this.onInsertParagraph,
     this.contentOverride,
   });
 
@@ -50,6 +51,11 @@ class EditorIsland extends StatefulWidget {
 
   /// 双击 → 请求编辑本岛(宿主弹源码对话框;null = 岛不可编辑)。
   final VoidCallback? onEditRequest;
+
+  /// 选中态上下缘「加段」把手(gapcursor 的移动端等价物:首块是岛/
+  /// 岛在文档尾时,没有可点的间隙落光标 —— 桌面还能靠选中回车,
+  /// 移动端软键盘够不着该链)。[before] = 在岛前建段。null 不显示。
+  final void Function({required bool before})? onInsertParagraph;
 
   /// 岛内容替换(grid 岛的可交互瓦片视图 EditorImageGrid 由编辑器注入;
   /// null 用默认 NodeFactory.build + AbsorbPointer 只读渲染)。
@@ -99,6 +105,35 @@ class _EditorIslandState extends State<EditorIsland> {
         child: content,
       ),
     );
+
+    // 选中态:上下缘悬挂「加段」把手(挂块边界外,根 Stack Clip.none
+    // 承接 —— 表格选择柄同款悬挂惯例)
+    if (widget.selected && widget.onInsertParagraph != null) {
+      // 半悬挂(-12 + 高 28 → 中心在界内):Stack 命中只认自身 bounds,
+      // 全悬挂画得出来点不到(根 Stack Clip.none 只救绘制不救命中)
+      Widget handle({required bool before}) => Positioned(
+            top: before ? -12 : null,
+            bottom: before ? null : -12,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: _InsertParagraphHandle(
+                key: ValueKey(before
+                    ? 'island-insert-before'
+                    : 'island-insert-after'),
+                onTap: () => widget.onInsertParagraph!(before: before),
+              ),
+            ),
+          );
+      content = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          content,
+          handle(before: true),
+          handle(before: false),
+        ],
+      );
+    }
 
     // (grid 岛工具条已内聚进 EditorImageGrid —— 官方 composer 布局:
     // [网格|轮播] 容器右上、[移除网格] 容器右下、瓦片工具条叠图上。)
@@ -203,6 +238,42 @@ class _ScalePill extends StatelessWidget {
               color: active ? scheme.onPrimary : scheme.onSurfaceVariant,
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 岛选中态的「加段」小把手(28px 圆钮,+ 图标;触控余量靠 padding)。
+class _InsertParagraphHandle extends StatelessWidget {
+  const _InsertParagraphHandle({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Container(
+          width: 28,
+          height: 20,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: scheme.primary,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 4,
+                offset: Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Icon(Icons.add_rounded, size: 15, color: scheme.onPrimary),
         ),
       ),
     );

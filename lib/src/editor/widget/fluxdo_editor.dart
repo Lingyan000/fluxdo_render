@@ -2101,6 +2101,14 @@ class _FluxdoEditorState extends State<FluxdoEditor>
               onEditRequest: widget.onIslandEditRequest == null
                   ? null
                   : () => widget.onIslandEditRequest!(ib),
+              // 选中态上下缘「加段」把手:岛前/后建空段落光标(首块是
+              // 岛/岛在尾时移动端唯一的加段途径;状态层已有同语义命令)
+              onInsertParagraph: ({required bool before}) {
+                final idx = widget.state.indexOfBlock(ib.id);
+                if (idx < 0) return;
+                widget.state.insertParagraphNearIsland(ib.id, after: !before);
+                _ime.syncFromState();
+              },
               // grid 岛内容换官方 composer 内聚交互视图:模式切换/移除
               // 网格/瓦片删除/移出/alt 全内聚(纯结构命令,宿主只管
               // 查看器);瓦片单击子选中
