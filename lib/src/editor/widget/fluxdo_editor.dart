@@ -387,6 +387,16 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     _controller.removeListener(_onSelectionControllerChanged);
     _ime.detach();
     _focusNode.removeListener(_onFocusChanged);
+    // Focus(onKeyEvent:) 会把处理器写进 FocusNode 对象本身;外部共享
+    // 节点在本编辑器亡后仍存活 —— 不清的话宿主把同一节点交给 TextField
+    // (双模切换),每个按键先过本编辑器的亡灵处理器:Cmd+A 命中
+    // keyA 分支对已 dispose 的 state 空操作后 handled 吞键 = 切到源码
+    // 后全选/快捷键全废。
+    // == 而非 identical:方法 tearoff 每次取都是新闭包对象(identical
+    // 恒 false),同对象同方法的 tearoff 相等性走 ==
+    if (_focusNode.onKeyEvent == _editorOnKeyEvent) {
+      _focusNode.onKeyEvent = null;
+    }
     if (_ownsFocusNode) _focusNode.dispose();
     _controller.dispose();
     super.dispose();
@@ -1981,6 +1991,40 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   // build
   // -----------------------------------------------------------------
 
+  /// 编辑器键盘处理器。命名方法而非闭包:dispose 时需 identical 比对
+  /// 后从共享 FocusNode 上摘除(见 dispose 注释)。
+  KeyEventResult _editorOnKeyEvent(FocusNode node, KeyEvent event) {
+    // 焦点在子树内其他可聚焦组件(表格 cell TextField / 壳内输入)
+    // 时**完全让路**:此时 primaryFocus 是那个组件,事件只是沿焦点
+    // 链冒泡经过本编辑器 —— 拦截会把退格/方向键/回车吞掉,cell
+    // 变成"只能覆盖不能编辑"。
+    if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
+    // 宿主浮层(斜杠菜单/mention)激活时优先:上下/回车/Esc 归它
+    if (widget.keyEventInterceptor?.call(event) ?? false) {
+      return KeyEventResult.handled;
+    }
+    // 非上下键的任何按键动作都终结 goal column 记忆
+    if (event is KeyDownEvent &&
+        event.logicalKey != LogicalKeyboardKey.arrowUp &&
+        event.logicalKey != LogicalKeyboardKey.arrowDown) {
+      _verticalGoalX = null;
+    }
+    // 键盘操作后光标回 downstream(点击行末的 upstream 只对那次点击有效)
+    if (event is KeyDownEvent) {
+      _caretAffinity = TextAffinity.downstream;
+      _touchSelection = false; // 物理键盘操作 → 收触摸选区 UI
+    }
+    return handleEditorKeyEvent(
+      widget.state,
+      event,
+      onEdited: () => _ime.syncFromState(show: false),
+      onMoveVertical: _moveCaretVertical,
+      onClipboardCopy: _clipboardCopy,
+      onClipboardCut: _clipboardCut,
+      onClipboardPaste: _clipboardPaste,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
@@ -2213,37 +2257,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     return Focus(
       focusNode: _focusNode,
       autofocus: widget.autofocus,
-      onKeyEvent: (node, event) {
-        // 焦点在子树内其他可聚焦组件(表格 cell TextField / 壳内输入)
-        // 时**完全让路**:此时 primaryFocus 是那个组件,事件只是沿焦点
-        // 链冒泡经过本编辑器 —— 拦截会把退格/方向键/回车吞掉,cell
-        // 变成"只能覆盖不能编辑"。
-        if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
-        // 宿主浮层(斜杠菜单/mention)激活时优先:上下/回车/Esc 归它
-        if (widget.keyEventInterceptor?.call(event) ?? false) {
-          return KeyEventResult.handled;
-        }
-        // 非上下键的任何按键动作都终结 goal column 记忆
-        if (event is KeyDownEvent &&
-            event.logicalKey != LogicalKeyboardKey.arrowUp &&
-            event.logicalKey != LogicalKeyboardKey.arrowDown) {
-          _verticalGoalX = null;
-        }
-        // 键盘操作后光标回 downstream(点击行末的 upstream 只对那次点击有效)
-        if (event is KeyDownEvent) {
-          _caretAffinity = TextAffinity.downstream;
-          _touchSelection = false; // 物理键盘操作 → 收触摸选区 UI
-        }
-        return handleEditorKeyEvent(
-          state,
-          event,
-          onEdited: () => _ime.syncFromState(show: false),
-          onMoveVertical: _moveCaretVertical,
-          onClipboardCopy: _clipboardCopy,
-          onClipboardCut: _clipboardCut,
-          onClipboardPaste: _clipboardPaste,
-        );
-      },
+      onKeyEvent: _editorOnKeyEvent,
       child: MouseRegion(
         cursor: SystemMouseCursors.text,
         // RawGestureDetector 按输入设备分流(阅读端 selection_gesture_layer
