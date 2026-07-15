@@ -88,8 +88,10 @@ KeyEventResult handleEditorKeyEvent(
     case LogicalKeyboardKey.delete:
       state.deleteForward();
       onEdited();
-    case LogicalKeyboardKey.enter:
-    case LogicalKeyboardKey.numpadEnter:
+    // primary+Enter 不吃:落到底部返回 ignored('\n' < 0x20 不触发
+    // skipRemainingHandlers),冒泡给宿主的提交快捷键(Cmd/Ctrl+Enter 发送)。
+    case LogicalKeyboardKey.enter when !primary:
+    case LogicalKeyboardKey.numpadEnter when !primary:
       state.sealHistory();
       state.splitBlock();
       onEdited();
@@ -121,6 +123,34 @@ KeyEventResult handleEditorKeyEvent(
       onEdited();
     case LogicalKeyboardKey.keyX when primary && shift:
       state.toggleMark(MarkKind.lineThrough);
+      onEdited();
+    // 块级格式(对齐 Discourse composer toolbar 键位):
+    // Cmd/Ctrl+Shift+7/8/9 列表与引用、Cmd/Ctrl+Alt+0..4 段落/标题。
+    // 注:键位清单同步维护于宿主 composer_shortcuts.dart(帮助浮层/
+    // tooltip 事实源),改动需两处同步。
+    case LogicalKeyboardKey.digit7 when primary && shift:
+      state.toggleList(ordered: true);
+      onEdited();
+    case LogicalKeyboardKey.digit8 when primary && shift:
+      state.toggleList(ordered: false);
+      onEdited();
+    case LogicalKeyboardKey.digit9 when primary && shift:
+      state.toggleQuote();
+      onEdited();
+    case LogicalKeyboardKey.digit0 when primary && pressed.isAltPressed:
+      state.setHeading(null);
+      onEdited();
+    case LogicalKeyboardKey.digit1 when primary && pressed.isAltPressed:
+      state.setHeading(1);
+      onEdited();
+    case LogicalKeyboardKey.digit2 when primary && pressed.isAltPressed:
+      state.setHeading(2);
+      onEdited();
+    case LogicalKeyboardKey.digit3 when primary && pressed.isAltPressed:
+      state.setHeading(3);
+      onEdited();
+    case LogicalKeyboardKey.digit4 when primary && pressed.isAltPressed:
+      state.setHeading(4);
       onEdited();
     // ---- 剪贴板 ----
     case LogicalKeyboardKey.keyC when primary:
