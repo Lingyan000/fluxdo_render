@@ -175,6 +175,34 @@ void main() {
   // collapsed 单手柄(光标拖柄)
   // -----------------------------------------------------------------
 
+  testWidgets('长按空白(collapsed)= 出「粘贴 | 全选」动作条', (tester) async {
+    final (_, state) = await pumpMobile(tester, paragraphs: ['']);
+    final g = await tester.startGesture(
+      tester.getCenter(find.byType(FluxdoEditor)),
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await g.up();
+    await tester.pump();
+    await tester.pump(); // _afterFrame → 动作条
+
+    expect(state.selection!.isCollapsed, isTrue, reason: '空白落光标无选区');
+    expect(find.byType(TextSelectionToolbarTextButton), findsWidgets,
+        reason: 'collapsed 也出动作条(粘贴入口)');
+  });
+
+  testWidgets('普通触摸落光标 = 不出动作条(仅长按空白才出)',
+      (tester) async {
+    final (_, state) = await pumpMobile(tester);
+    final para = tester.getRect(find.textContaining('hello').first);
+    await tester.tapAt(Offset(para.left + 20, para.center.dy));
+    await tester.pump();
+    await tester.pump();
+    expect(state.selection!.isCollapsed, isTrue);
+    expect(find.byType(TextSelectionToolbarTextButton), findsNothing,
+        reason: '普通点击不弹粘贴条');
+  });
+
   testWidgets('触摸落光标 = collapsed 手柄出现;鼠标点击不出', (tester) async {
     final (_, state) = await pumpMobile(tester);
     final para = tester.getRect(find.textContaining('hello').first);

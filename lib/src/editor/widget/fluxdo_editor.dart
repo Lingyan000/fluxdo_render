@@ -324,7 +324,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     if (kDebugMode) _editFrameWatch = Stopwatch()..start();
     // 打字/退格(IME 平台增量应用中)→ 收触摸选区 UI(系统同款:输入
     // 即隐手柄;实际显隐由帧后 _syncHandlesAndContextBar 收敛)。
-    if (_ime.isApplyingPlatformUpdate) _touchSelection = false;
+    if (_ime.isApplyingPlatformUpdate) {
+      _touchSelection = false;
+      _wantCollapsedBar = false;
+    }
     // 外部变更(undo/redo 按钮、程序化改文档)→ IME 的 diff 基准已过期,
     // 必须重喂;IME 自身回调引发的通知、以及拖选/长按扩选/手柄拖动进行
     // 中(高频选区变化,end 时统一喂)除外。
@@ -506,11 +509,17 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     if (showCollapsed) {
       final caretGlobal =
           rootBox.localToGlobal(caretLocal.topLeft) & caretLocal.size;
+      // 长按落光标那次:配「粘贴 | 全选」动作条(拖手柄中不显示)
+      if (_wantCollapsedBar && !_handleDragging) {
+        _showCollapsedContextBar(caretGlobal);
+      }
       (_collapsedHandle ??= CollapsedHandleController(
         context: context,
         tapRegionGroupId: _controller,
         onDragStart: () {
           _handleDragging = true; // IME 三门复用(拖动高频变化 end 时统一喂)
+          _wantCollapsedBar = false;
+          _contextBar?.hide();
           widget.state.sealHistory();
         },
         onDragMove: _onCollapsedHandleDragMoved,
@@ -824,9 +833,36 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     );
   }
 
+  /// collapsed 光标(无选区)的动作条:仅「粘贴 | 全选」,锚光标矩形。
+  void _showCollapsedContextBar(Rect caretGlobal) {
+    (_contextBar ??= EditorContextBar(
+      context: context,
+      tapRegionGroupId: _controller,
+    )).show(
+      selectionBounds: caretGlobal,
+      items: [
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: () {
+            _clipboardPaste();
+            _dismissTouchSelection();
+          },
+        ),
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.selectAll,
+          onPressed: () {
+            widget.state.selectAll();
+            _wantCollapsedBar = false;
+          },
+        ),
+      ],
+    );
+  }
+
   /// 动作执行后收触摸选区 UI(复制后折叠选区 = 移动惯例)。
   void _dismissTouchSelection() {
     _touchSelection = false;
+    _wantCollapsedBar = false;
     _contextBar?.hide();
     _handles?.hide();
     _collapsedHandle?.hide();
@@ -1335,6 +1371,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     // 兜底到最近文本块),岛的 onTap 又不会跟着 fire(长按不是 tap),
     // 光标就错停邻段。单击岛此前没暴露只是因为岛 onTap 随后覆盖了中间态。
     if (_hitsIslandRegion(details.globalPosition)) return;
+    _wantCollapsedBar = false; // 新 tap:收 collapsed 粘贴条
     final hit = _hitAtGlobal(details.globalPosition);
     _focusNode.requestFocus();
     if (hit == null) return;
@@ -1444,6 +1481,11 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// 长按进行中(选区高频变化不逐帧重喂 IME,end 统一 sync)。
   bool _longPressing = false;
 
+  /// 本次 collapsed 光标是否该配动作条(仅"长按空白落光标"那次 true;
+  /// 普通点击/打字/移动光标一概 false —— 否则每次点击都弹粘贴条)。
+  /// 移动端惯例:长按无选中处 → 出「粘贴 | 全选」。
+  bool _wantCollapsedBar = false;
+
   /// 最近一次选区变化来自触摸(长按/双击/拖手柄)→ 手柄显示依据。
   bool _touchSelection = false;
 
@@ -1516,6 +1558,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
     _longPressing = false;
     _magnifier?.hide();
+    // 长按落在空白/空段(collapsed)→ 松手配「粘贴 | 全选」动作条
+    // (长按选词是 range,走 showRange 分支,与此无关)
+    final sel = widget.state.selection;
+    _wantCollapsedBar = sel != null && sel.isCollapsed;
     _ime.syncFromState(show: false);
     // end 无状态变化不触发 _onStateChanged → 帧后手动收敛一次
     // (动作条在 _longPressing 期间被压着,此刻弹出)
