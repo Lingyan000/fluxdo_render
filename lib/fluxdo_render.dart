@@ -37,6 +37,7 @@ export 'src/render/chat_transcript_handler.dart';
 export 'src/render/poll_handler.dart';
 export 'src/render/quote_avatar_handler.dart';
 export 'src/render/svg_handler.dart';
+export 'src/selection/selection_coordinator.dart' show SelectionCoordinator;
 export 'src/selection/selection_data.dart';
 export 'src/selection/selection_scope.dart' show SelectionScope;
 export 'src/widget/fluxdo_render.dart';

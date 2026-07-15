@@ -1,15 +1,14 @@
-/// 选区放大镜 —— 拖拽手柄/选区时显示放大预览,看清手指下的字。
+/// 选区放大镜 —— 拖拽手柄时显示放大预览,看清手指下的字。
 ///
-/// 用 Flutter SDK 的 [RawMagnifier](不引入 TextMagnifier 那套系统选区耦合):
-/// RawMagnifier 用 BackdropFilter 矩阵变换放大「它下方已绘制的内容」,放在
-/// 顶层 Overlay 即放大整页。关键(已查 SDK magnifier.dart):
-///   focalPointOffset = 焦点全局坐标 - 镜子全局中心(相对镜子自身中心,非全局)。
-///
-/// 定位对齐 SDK TextMagnifier(material/magnifier.dart)/ CupertinoTextMagnifier:
-/// - **焦点指文字,不指手指**:X 跟手势、Y 锁 caretRect.center.dy(被拖端所在
-///   行的行中心)。手指在手柄上、低于文本一整行,若焦点跟手指,镜里放大的是
-///   手指/手柄而非要选的字。
-/// - 镜子放在行上方 [_kVerticalFocalPointShift],夹屏内;夹移后焦点补偿回行中心。
+/// 直接用 Flutter SDK 的 **`TextMagnifier.adaptiveMagnifierConfiguration`**
+/// (对齐 SelectionOverlay.showMagnifier,text_selection.dart:1151-1181):
+/// - Android → Material [TextMagnifier](77.37×37.9,scale 1.25,圆角 40,
+///   跨行 70ms 跳变动画,X 夹在当前行内);
+/// - iOS → [CupertinoTextMagnifier](80×47.5,椭圆 60/50,主题色边 2.0,
+///   下拖阻力 + 超阈值自动隐藏,150ms in/out 动画);
+/// - 桌面 → builder 返回 null,不显示。
+/// 视觉与跟随动画全部由 SDK 组件自管,本类只负责喂 [MagnifierInfo] 四字段
+/// 并管理 [MagnifierController] 的 show/hide。
 library;
 
 import 'package:flutter/material.dart';
@@ -19,85 +18,57 @@ class SelectionMagnifier {
 
   final BuildContext context;
 
-  OverlayEntry? _entry;
-  Offset? _gesture; // 手势全局坐标(定镜子 X)
-  Rect? _caretRect; // 被拖端 caret 全局矩形(定焦点/镜子 Y = 行中心)
+  final MagnifierController _controller = MagnifierController();
 
-  bool get isShowing => _entry != null;
+  /// 平台放大镜自己监听它重定位(TextMagnifier/CupertinoTextMagnifier 内部
+  /// addListener),show 后每帧只需更新 value,零重插。
+  final ValueNotifier<MagnifierInfo> _info =
+      ValueNotifier<MagnifierInfo>(MagnifierInfo.empty);
 
-  /// 显示/更新放大镜。[gestureGlobal] 手势全局坐标(镜子跟它水平移动);
-  /// [caretRect] 被拖端点的 caret 全局矩形(焦点锁定其行中心,对齐 SDK
-  /// MagnifierInfo.caretRect)。
-  void show({required Offset gestureGlobal, required Rect caretRect}) {
-    _gesture = gestureGlobal;
-    _caretRect = caretRect;
-    if (_entry != null) {
-      _entry!.markNeedsBuild();
-      return;
-    }
-    final overlay = Overlay.maybeOf(context);
-    if (overlay == null) return;
-    _entry = OverlayEntry(builder: _build);
-    overlay.insert(_entry!);
+  bool get isShowing => _controller.overlayEntry != null;
+
+  /// 显示/更新放大镜。
+  ///
+  /// - [gestureGlobal]:拖拽点全局坐标(镜子 X 跟它;iOS 下拖过远自动隐藏)。
+  /// - [caretRect]:被拖端点的 caret 全局矩形(焦点锁其**行中心**,对齐 SDK
+  ///   MagnifierInfo.caretRect —— 焦点指文字,不指手指)。
+  /// - [currentLineBoundaries]:被拖端所在行的全局矩形(Material 镜子 X 夹在
+  ///   行首尾之间)。
+  /// - [fieldBounds]:内容区全局矩形(Material 焦点 X 不出内容区)。
+  /// - [below]:插到该 OverlayEntry 之下(Android 传托柄 entry → 镜内不映
+  ///   托柄,对齐 shouldDisplayHandlesInMagnifier=false;iOS 传 null)。
+  void show({
+    required Offset gestureGlobal,
+    required Rect caretRect,
+    required Rect currentLineBoundaries,
+    required Rect fieldBounds,
+    OverlayEntry? below,
+  }) {
+    _info.value = MagnifierInfo(
+      globalGesturePosition: gestureGlobal,
+      caretRect: caretRect,
+      currentLineBoundaries: currentLineBoundaries,
+      fieldBounds: fieldBounds,
+    );
+    if (_controller.overlayEntry != null) return; // 已在 overlay,listener 自更
+
+    // 按平台构建;桌面返回 null → 不显示(对齐 SDK showMagnifier 的预构建判空)。
+    final magnifier = TextMagnifier.adaptiveMagnifierConfiguration
+        .magnifierBuilder(context, _controller, _info);
+    if (magnifier == null) return;
+
+    _controller.show(
+      context: context,
+      below: TextMagnifier
+              .adaptiveMagnifierConfiguration.shouldDisplayHandlesInMagnifier
+          ? null
+          : below,
+      builder: (_) => magnifier,
+    );
   }
 
   void hide() {
-    _entry?.remove();
-    _entry = null;
-    _gesture = null;
-    _caretRect = null;
-  }
-
-  /// 镜子中心相对焦点(行中心)的上移量(对齐 Material
-  /// kStandardVerticalFocalPointShift≈22 + 半镜高的观感,取手柄之上不遮挡)。
-  static const double _kVerticalFocalPointShift = 48;
-
-  Widget _build(BuildContext ctx) {
-    final gesture = _gesture;
-    final caret = _caretRect;
-    if (gesture == null || caret == null) return const SizedBox.shrink();
-
-    final isIOS = Theme.of(context).platform == TargetPlatform.iOS;
-    final size = isIOS ? const Size(80, 48) : const Size(88, 44);
-    const scale = 1.4;
-
-    // 焦点 = (手势 X, 行中心 Y) —— 镜里永远是被拖那一行的文字。
-    final focal = Offset(gesture.dx, caret.center.dy);
-
-    // 镜子中心放在**行**上方(不是手指上方),夹在屏内。
-    final screen = MediaQuery.of(ctx).size;
-    final centerX = focal.dx.clamp(size.width / 2, screen.width - size.width / 2);
-    final centerY = (focal.dy - _kVerticalFocalPointShift)
-        .clamp(size.height / 2, screen.height - size.height / 2);
-    final center = Offset(centerX, centerY);
-
-    return Positioned(
-      left: center.dx - size.width / 2,
-      top: center.dy - size.height / 2,
-      child: IgnorePointer(
-        child: RawMagnifier(
-          size: size,
-          magnificationScale: scale,
-          // 关键:相对镜子自身中心的偏移 = 焦点全局 - 镜子全局中心。
-          focalPointOffset: focal - center,
-          decoration: MagnifierDecoration(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(isIOS ? 40 : 12),
-              side: BorderSide(
-                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.4),
-                width: 0.5,
-              ),
-            ),
-            shadows: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 6,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    if (_controller.overlayEntry == null) return;
+    _controller.hide();
   }
 }

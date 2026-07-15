@@ -27,4 +27,12 @@ class SelectionCoordinator {
   void deactivate(SelectionController controller) {
     if (identical(_active, controller)) _active = null;
   }
+
+  /// 清掉当前活动选区(若有)。主项目在打开弹层/路由切换等场景兜底调用
+  /// (常规路径靠选区层自身的失焦监听,见 SelectionContentLayer)。
+  void clearActive() {
+    final active = _active;
+    _active = null;
+    active?.clear();
+  }
 }

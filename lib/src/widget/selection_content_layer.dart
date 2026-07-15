@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kTouchSlop;
+import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -67,8 +68,20 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     // 监听 controller:被全局协调器(其他帖起选)外部清空时,收掉本帖 toolbar
     // + 手柄;手柄拖动改选区时刷新手柄/toolbar 位置。
     widget.controller.addListener(_onControllerChanged);
+    // 失焦清选区(对齐 SDK SelectableRegion._handleFocusChanged :521-542):
+    // 弹框/路由 push 时其 FocusScope 抢焦 → 本层失焦 → 清选区收浮层,
+    // 根治「工具栏/托柄浮在弹框上面」。
+    _focusNode.addListener(_onFocusChanged);
     // 监听窗口/视口尺寸变化(见 didChangeMetrics)。
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  void _onFocusChanged() {
+    if (_focusNode.hasFocus) return;
+    // 仅前台失焦才清(对齐 SDK:app 切后台的失焦不清,回前台选区仍在)。
+    if (SchedulerBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      widget.controller.clear();
+    }
   }
 
   /// 窗口/视口尺寸变化(桌面拖窗口、分屏、旋转、键盘等):内容重排后,选区的
@@ -144,25 +157,67 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
 
     // 移动端(触摸选区)显示拖拽手柄;鼠标/触控板选区不显示。
     if (fromTouch) {
-      (_handles ??= SelectionHandlesController(
-        context: context,
-        controller: widget.controller,
-        // 拖手柄时隐藏 toolbar(不挡视线/放大镜),松手后按新选区重定位重显。
-        onDragStart: () => _toolbar?.hide(),
-        onDragEnd: _reshowToolbarForCurrentSelection,
-      )).show();
+      _ensureHandles().show();
     } else {
       _handles?.hide();
     }
   }
 
-  /// 构建 toolbar(复制 / 复制引用 / 引用)。两处显示共用,避免回调漂移。
-  /// 引用/复制引用回调未注入时(未登录等)对应按钮隐藏,仅保留「复制」。
+  /// 手柄控制器(懒建,两处共用:定选显示 / iOS 长按按下即显)。
+  SelectionHandlesController _ensureHandles() {
+    return _handles ??= SelectionHandlesController(
+      context: context,
+      controller: widget.controller,
+      // 拖手柄时隐藏 toolbar(不挡视线/放大镜),松手后按新选区重定位重显。
+      onDragStart: () => _toolbar?.hide(),
+      onDragEnd: _reshowToolbarForCurrentSelection,
+    );
+  }
+
+  /// iOS 长按/双击**按下**即显托柄(无 toolbar,对齐 SDK :1005-1009);
+  /// Android 仍在松手 [_onSelectionChanged] 时显示。
+  void _showHandlesEarly() {
+    if (widget.controller.selection == null) return;
+    _ensureHandles().show();
+  }
+
+  /// iOS 单击落在已有选区上 → toggle 工具栏显隐(对齐 SDK :938)。
+  void _toggleToolbar() {
+    if (_toolbar != null) {
+      _toolbar!.hide();
+      _toolbar = null;
+    } else {
+      _reshowToolbarForCurrentSelection();
+    }
+  }
+
+  /// toolbar「全选」:全选后移动端**保持** toolbar/手柄并按新选区重定位,
+  /// 桌面收起 toolbar(对齐 SDK contextMenuButtonItems onSelectAll :1723-1729)。
+  void _handleSelectAll() {
+    SelectionNavigator.selectAll(widget.controller);
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+      case TargetPlatform.fuchsia:
+        _reshowToolbarForCurrentSelection();
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+        _toolbar?.hide();
+        _toolbar = null;
+    }
+  }
+
+  /// 构建 toolbar(复制 / 全选 / 复制引用 / 引用 / ProcessText)。两处显示
+  /// 共用,避免回调漂移。引用/复制引用回调未注入时(未登录等)对应按钮隐藏。
   SelectionToolbar _buildToolbar() {
     return SelectionToolbar(
       context: context,
       // 与内容同 groupId:点 toolbar 不触发 onTapOutside 清除。
       tapRegionGroupId: widget.controller,
+      onSelectAll: _handleSelectAll,
+      // ProcessText 动作执行完毕 → 清选区(对齐 SDK 执行后收 toolbar)。
+      onProcessTextDone: () => widget.controller.clear(),
       onQuote: widget.onQuoteRequest == null
           ? null
           : (plainText) {
@@ -229,6 +284,7 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_onControllerChanged);
     _scrollPosition?.removeListener(_onScroll);
+    _focusNode.removeListener(_onFocusChanged);
     _focusNode.dispose();
     _toolbar?.hide();
     _handles?.hide();
@@ -278,6 +334,8 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
         child: SelectionGestureLayer(
           controller: widget.controller,
           onSelectionChanged: _onSelectionChanged,
+          onHandlesShowRequest: _showHandlesEarly,
+          onToolbarToggleRequest: _toggleToolbar,
           child: widget.child,
         ),
       ),

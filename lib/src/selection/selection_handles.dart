@@ -67,6 +67,10 @@ class SelectionHandlesController {
   /// 对齐 SDK 的 `- Offset(0, lineHeight / 2)` 补偿;跨行时随 extent 刷新。
   double _dragLineHeight = 0;
 
+  /// 被拖端点的当前文档位置(拖动中随命中刷新)。放大镜的 caret/行边界
+  /// 几何按它实时取。
+  DocumentPosition? _dragDocPosition;
+
   /// 上一帧成功计算的端点锚。拖动中几何瞬时不可得时兜底(见 [_build]),
   /// 防止把正在拖拽的手柄摘树。
   SelectionEndpoints? _lastBuiltAnchors;
@@ -207,6 +211,10 @@ class SelectionHandlesController {
     _fixedAnchor = ends == null
         ? null
         : (side == _DragSide.start ? ends.visualEnd : ends.visualStart);
+    // 被拖端的初始文档位置(放大镜 caret/行几何按它取)。
+    _dragDocPosition = ends == null
+        ? null
+        : (side == _DragSide.start ? ends.visualStart : ends.visualEnd);
     // 拖拽点初始化为**被拖端点的文本锚点**(非手指位置)——手指按在手柄图形上,
     // 在文本行下方一整行,直接用手指坐标 hit-test 会命中下一行(对齐 SDK
     // _handleSelectionEndHandleDragStart 用 selectionPoint.localPosition)。
@@ -260,6 +268,7 @@ class SelectionHandlesController {
     // DocumentSelection 自然反向,下次 build 的 orderedEndpoints 归一视觉序。
     final prevExtent = controller.selection?.extent;
     controller.selection = candidate;
+    _dragDocPosition = pos;
     // 跨到新位置才震动(不每帧震),对齐系统文本选区拖拽反馈。
     if (prevExtent != pos) HapticFeedback.selectionClick();
     // 跨行后行高可能变(标题↔正文),按新 extent 刷新补偿量。
@@ -270,22 +279,63 @@ class SelectionHandlesController {
     _entry?.markNeedsBuild();
   }
 
-  /// 放大镜:X 跟拖拽点、Y 锁**被拖端所在行**(焦点指文字,不指手指/手柄)。
-  /// 对齐 SDK TextMagnifier/CupertinoTextMagnifier:焦点 Y 永远取
-  /// caretRect.center.dy(行中心),不用手势 Y。
+  /// 放大镜:喂 SDK MagnifierInfo 四字段(对齐 SelectableRegion
+  /// _buildInfoForMagnifier):
+  /// - globalGesturePosition = 拖拽点(X 跟手;iOS 下拖过远自动隐藏);
+  /// - caretRect = 被拖端 caret 全局矩形(焦点锁**行中心**,指文字不指手指);
+  /// - currentLineBoundaries = 该行横向扩到被拖端所在段落全宽(Material 镜子
+  ///   X 夹在行内);
+  /// - fieldBounds = 本 chunk 内容区全局矩形(Material 焦点 X 不出内容区)。
   void _showMagnifierAtDragPosition({Rect? caretRect}) {
-    final rect = caretRect ??
-        Rect.fromCenter(
-          center: _dragPosition - Offset(0, _dragLineHeight / 2),
-          width: 0,
-          height: _dragLineHeight,
-        );
-    _magnifier.show(gestureGlobal: _dragPosition, caretRect: rect);
+    final caret = caretRect ??
+        ((_dragDocPosition != null
+                ? _hit.caretRectAt(_dragDocPosition!)
+                : null) ??
+            Rect.fromCenter(
+              center: _dragPosition - Offset(0, _dragLineHeight / 2),
+              width: 0,
+              height: _dragLineHeight,
+            ));
+
+    // 内容区全局矩形(SelectionContentLayer 的 RenderBox);取不到时退化为
+    // caret 所在行(放大镜仍可用,仅 X 夹边失去段落语义)。
+    Rect fieldBounds = caret;
+    final contentBox = context.findRenderObject();
+    if (contentBox is RenderBox && contentBox.attached && contentBox.hasSize) {
+      final tl = contentBox.localToGlobal(Offset.zero);
+      if (tl.dx.isFinite && tl.dy.isFinite) {
+        fieldBounds = tl & contentBox.size;
+      }
+    }
+
+    // 被拖端所在段落的全局横向范围 → 行边界。段落不可见时用内容区宽度。
+    Rect lineBoundaries =
+        Rect.fromLTRB(fieldBounds.left, caret.top, fieldBounds.right, caret.bottom);
+    final pos = _dragDocPosition;
+    final paragraph = pos == null ? null : controller.registry.byId(pos.blockId)?.paragraph;
+    if (paragraph != null && paragraph.attached && paragraph.hasSize) {
+      final tl = paragraph.localToGlobal(Offset.zero);
+      if (tl.dx.isFinite && tl.dy.isFinite) {
+        lineBoundaries = Rect.fromLTRB(
+            tl.dx, caret.top, tl.dx + paragraph.size.width, caret.bottom);
+      }
+    }
+
+    _magnifier.show(
+      gestureGlobal: _dragPosition,
+      caretRect: caret,
+      currentLineBoundaries: lineBoundaries,
+      fieldBounds: fieldBounds,
+      // Android 镜内不映托柄(shouldDisplayHandlesInMagnifier=false → 插到
+      // 托柄 entry 之下);iOS 相反,SelectionMagnifier 内部按配置忽略 below。
+      below: _entry,
+    );
   }
 
   void _onDragEnd() {
     _dragging = null;
     _fixedAnchor = null;
+    _dragDocPosition = null;
     _magnifier.hide();
     _entry?.markNeedsBuild();
     // 通知上层按新选区重新定位并显示 toolbar(拖动中被隐藏了)。
