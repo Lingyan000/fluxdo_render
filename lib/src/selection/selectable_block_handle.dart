@@ -5,6 +5,7 @@
 library;
 
 import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart' show ScrollableState;
 
 import 'projection.dart';
 import 'selection_geometry.dart';
@@ -25,6 +26,13 @@ abstract class SelectableBlockHandle {
   /// 由块自身注入其可视外框(如代码块的限高 SizedBox)→ globalRect 与之求交。
   /// null = 不裁剪(普通段落)。
   Rect? Function()? get clipBoundsGetter => null;
+
+  /// 可选的「内部滚动器链」getter:块自身到选区作用域(SelectionScope)之间的
+  /// 全部 Scrollable(代码块的横滚 + 限高纵滚、表格的横滚)。拖选/拖托柄到这些
+  /// 滚动器的视口边缘时,选区层驱动其边缘自动滚(对齐 SDK 每个 Scrollable 自带
+  /// _ScrollableSelectionContainerDelegate 自滚自轴)。null/空 = 无内部滚动
+  /// (普通段落)。实时取,不缓存(虚拟化安全)。
+  List<ScrollableState> Function()? get interiorScrollablesGetter => null;
 
   /// 块在全局坐标系的矩形(用于视觉序排序 + 命中)。null = 不可用。
   Rect? globalRect() {
@@ -49,9 +57,11 @@ class CallbackBlockHandle extends SelectableBlockHandle {
     required RenderParagraph? Function() paragraphGetter,
     required RenderTextProjection Function() projectionGetter,
     Rect? Function()? clipBoundsGetter,
+    List<ScrollableState> Function()? interiorScrollablesGetter,
   })  : _paragraphGetter = paragraphGetter,
         _projectionGetter = projectionGetter,
-        _clipBoundsGetter = clipBoundsGetter;
+        _clipBoundsGetter = clipBoundsGetter,
+        _interiorScrollablesGetter = interiorScrollablesGetter;
 
   @override
   final SelectableBlockId id;
@@ -59,6 +69,7 @@ class CallbackBlockHandle extends SelectableBlockHandle {
   final RenderParagraph? Function() _paragraphGetter;
   final RenderTextProjection Function() _projectionGetter;
   final Rect? Function()? _clipBoundsGetter;
+  final List<ScrollableState> Function()? _interiorScrollablesGetter;
 
   @override
   RenderParagraph? get paragraph => _paragraphGetter();
@@ -68,4 +79,8 @@ class CallbackBlockHandle extends SelectableBlockHandle {
 
   @override
   Rect? Function()? get clipBoundsGetter => _clipBoundsGetter;
+
+  @override
+  List<ScrollableState> Function()? get interiorScrollablesGetter =>
+      _interiorScrollablesGetter;
 }

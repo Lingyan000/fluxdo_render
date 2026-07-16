@@ -10,6 +10,7 @@ import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../selection/selection_auto_scroller.dart';
 import '../selection/selection_data.dart';
 import '../selection/selection_exporter.dart';
 import '../selection/selection_gesture_layer.dart';
@@ -58,6 +59,12 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
 
   /// 上次滚动像素值,用于算单帧 delta 给 toolbar 做滞后补偿(消滚动抖动)。
   double _lastScrollPixels = 0;
+
+  /// 托柄拖动的边缘自动滚(外层页面 + 拖拽点所在块的内部滚动器,如代码块
+  /// 横滚)。SDK 托柄拖出视口边缘会自动滚(每个 Scrollable 的
+  /// _ScrollableSelectionContainerDelegate 自滚自轴),这里同语义:滚动一步
+  /// 后 reapplyDrag 按钉住的拖拽点重新命中 → 选区跟着扩。
+  SelectionEdgeAutoScroller? _handleAutoScroller;
 
   SelectionExporter get _exporter =>
       SelectionExporter(widget.controller.registry);
@@ -134,12 +141,24 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     // 监听**祖先** Scrollable —— 不能用 NotificationListener(实测:祖先
     // Scrollable 的 ScrollNotification 不冒泡到后代,收不到)。改用
     // Scrollable.of(context).position(Listenable),滚动时直接 notify。
-    final pos = Scrollable.maybeOf(context)?.position;
+    final scrollable = Scrollable.maybeOf(context);
+    final pos = scrollable?.position;
     if (pos != _scrollPosition) {
       _scrollPosition?.removeListener(_onScroll);
       _scrollPosition = pos;
       _lastScrollPixels = pos?.pixels ?? 0;
       _scrollPosition?.addListener(_onScroll);
+    }
+    if (_handleAutoScroller == null ||
+        _handleAutoScroller!.outerScrollable != scrollable) {
+      _handleAutoScroller?.stop();
+      _handleAutoScroller = SelectionEdgeAutoScroller(
+        registry: widget.controller.registry,
+        outerScrollable: scrollable,
+        // 滚动一步后按钉住的拖拽点重新命中(外层滚动另有 _onScroll 跟随
+        // toolbar/手柄;内部滚动器滚动只能靠这里驱动扩选)。
+        onScrolled: () => _handles?.reapplyDrag(),
+      );
     }
   }
 
@@ -170,7 +189,12 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
       controller: widget.controller,
       // 拖手柄时隐藏 toolbar(不挡视线/放大镜),松手后按新选区重定位重显。
       onDragStart: () => _toolbar?.hide(),
-      onDragEnd: _reshowToolbarForCurrentSelection,
+      // 拖拽点移动:驱动边缘自动滚(页面纵滚 + 代码块横滚等内部滚动器)。
+      onDragMove: (global) => _handleAutoScroller?.update(global),
+      onDragEnd: () {
+        _handleAutoScroller?.stop();
+        _reshowToolbarForCurrentSelection();
+      },
     );
   }
 
@@ -284,6 +308,7 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_onControllerChanged);
     _scrollPosition?.removeListener(_onScroll);
+    _handleAutoScroller?.stop();
     _focusNode.removeListener(_onFocusChanged);
     _focusNode.dispose();
     _toolbar?.hide();

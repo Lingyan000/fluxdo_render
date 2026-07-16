@@ -28,6 +28,7 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter/widgets.dart';
 
 import 'hit_tester.dart';
+import 'selection_auto_scroller.dart';
 import 'selection_data.dart';
 import 'selection_exporter.dart';
 import 'selection_geometry.dart';
@@ -88,10 +89,12 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer>
   /// 祖先 Scrollable 的滚动位置(订阅它驱动滚轮扩选)。
   ScrollPosition? _scrollPosition;
 
-  /// 祖先 Scrollable + 边缘自动滚动器(拖到视口上/下边缘自动滚动)。
-  /// 移动端无滚轮,跨视口拖选全靠它;桌面拖到边缘也可(滚轮之外的另一路径)。
+  /// 祖先 Scrollable。
   ScrollableState? _scrollable;
-  EdgeDraggingAutoScroller? _autoScroller;
+
+  /// 统一边缘自动滚(外层页面 + 拖拽点所在块的内部滚动器,如代码块横滚)。
+  /// 移动端无滚轮,跨视口/横向溢出内容的拖选全靠它;桌面拖到边缘也可。
+  SelectionEdgeAutoScroller? _autoScroller;
 
   @override
   bool get wantKeepAlive => _isDragging;
@@ -107,7 +110,7 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer>
 
   /// 止拖:停保活(松手后,若无选区则本 chunk 可回收)+ 停自动滚动。
   void _endDrag() {
-    _autoScroller?.stopAutoScroll();
+    _autoScroller?.stop();
     if (_isDragging) {
       _isDragging = false;
       updateKeepAlive();
@@ -115,12 +118,10 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer>
     _lastDragGlobal = null;
   }
 
-  /// 拖拽中:指针靠近视口上/下边缘则自动滚动(配合 [_onScroll] 让 extent 跟随)。
-  /// height 60 → 距边缘约 30px 即触发(比 1px 命中边缘更跟手)。
+  /// 拖拽中:指针靠近「页面视口」或「所在块内部滚动器」(代码块横滚等)的
+  /// 边缘则自动滚动(配合 [_onScroll]/onScrolled 让 extent 跟随)。
   void _maybeAutoScroll(Offset global) {
-    _autoScroller?.startAutoScrollIfNecessary(
-      Rect.fromCenter(center: global, width: 1, height: 60),
-    );
+    _autoScroller?.update(global);
   }
 
   /// 滚动中(滚轮 / 自动滚动)且正在拖拽:鼠标钉在原位、内容在底下滚,用钉住的
@@ -148,17 +149,22 @@ class _SelectionGestureLayerState extends State<SelectionGestureLayer>
       _scrollPosition = pos;
       _scrollPosition?.addListener(_onScroll);
     }
-    if (scrollable != _scrollable) {
+    if (scrollable != _scrollable || _autoScroller == null) {
       _scrollable = scrollable;
-      _autoScroller = scrollable == null
-          ? null
-          : EdgeDraggingAutoScroller(scrollable, velocityScalar: 30);
+      _autoScroller?.stop();
+      _autoScroller = SelectionEdgeAutoScroller(
+        registry: widget.controller.registry,
+        outerScrollable: scrollable,
+        // 内部滚动器(代码块横滚)滚动一步后:其 position 不是 _scrollPosition,
+        // 不会触发 _onScroll,这里显式按钉住的指针 re-extend(滚动扩选)。
+        onScrolled: _onScroll,
+      );
     }
   }
 
   @override
   void dispose() {
-    _autoScroller?.stopAutoScroll();
+    _autoScroller?.stop();
     _scrollPosition?.removeListener(_onScroll);
     super.dispose();
   }

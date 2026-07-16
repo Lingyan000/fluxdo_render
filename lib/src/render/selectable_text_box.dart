@@ -121,6 +121,25 @@ class _SelectableTextBoxState extends State<SelectableTextBox> {
     return ro.localToGlobal(Offset.zero) & ro.size;
   }
 
+  /// 块自身 → SelectionScope 之间的全部祖先 Scrollable(实时走 Element 树,
+  /// 不缓存 —— 虚拟化安全)。代码块 = [横滚, 限高纵滚],表格 cell = [表格横滚],
+  /// 普通段落 = [](页面级滚动在 Scope 之上,不会被收进来)。拖选/拖托柄到
+  /// 其视口边缘时,选区层驱动它们边缘自动滚(SelectionEdgeAutoScroller),
+  /// 对齐 SDK 每个 Scrollable 自带 _ScrollableSelectionContainerDelegate
+  /// 自滚自轴的行为 —— 否则代码块横向溢出部分永远选不到。
+  List<ScrollableState> _interiorScrollables() {
+    if (!mounted) return const [];
+    final result = <ScrollableState>[];
+    context.visitAncestorElements((el) {
+      if (el.widget is SelectionScope) return false; // 作用域边界,到此为止
+      if (el is StatefulElement && el.state is ScrollableState) {
+        result.add(el.state as ScrollableState);
+      }
+      return true;
+    });
+    return result;
+  }
+
   void _register() {
     final controller = _controller;
     if (controller == null) return;
@@ -131,6 +150,7 @@ class _SelectableTextBoxState extends State<SelectableTextBox> {
       paragraphGetter: _findParagraph,
       projectionGetter: widget.projectionGetter,
       clipBoundsGetter: clipGetter,
+      interiorScrollablesGetter: _interiorScrollables,
     );
     controller.registry.register(_handle!);
     // 初始写逻辑块表(projection 在 build 持续刷新,回收后保留最后值)。
