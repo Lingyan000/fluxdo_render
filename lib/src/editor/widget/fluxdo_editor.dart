@@ -356,6 +356,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _ime.updateViewId(View.of(context).viewId);
     _bindScrollPosition();
     // 键盘 inset 变化(弹出/收起动画每帧):清 ensure key + 帧后重算,
     // 光标跟着键盘上沿浮起(MediaQuery 依赖由这次读取建立)。

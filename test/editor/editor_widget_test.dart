@@ -26,6 +26,17 @@ TextEditingValue? lastSetEditingState(WidgetTester tester) {
   return out;
 }
 
+Map<String, dynamic>? lastSetClientConfiguration(WidgetTester tester) {
+  Map<String, dynamic>? out;
+  for (final call in tester.testTextInput.log) {
+    if (call.method == 'TextInput.setClient') {
+      final arguments = call.arguments as List<dynamic>;
+      out = (arguments[1] as Map).cast<String, dynamic>();
+    }
+  }
+  return out;
+}
+
 class _Harness {
   _Harness(this.tester, this.state);
 
@@ -83,6 +94,22 @@ void main() {
     await tester.pump();
     return (_Harness(tester, state), state);
   }
+
+  testWidgets('TextInput client carries the owning Flutter view id',
+      (tester) async {
+    await pumpEditor(tester, paragraphs: ['']);
+
+    final editor = find.byType(FluxdoEditor);
+    await tester.tapAt(tester.getRect(editor).center);
+    await tester.pump();
+
+    final configuration = lastSetClientConfiguration(tester);
+    expect(configuration, isNotNull);
+    expect(
+      configuration!['viewId'],
+      View.of(tester.element(editor)).viewId,
+    );
+  });
 
   testWidgets('连续输入 60 字符(跨软换行)不丢字不乱序,光标随行', (tester) async {
     final (h, state) = await pumpEditor(tester, paragraphs: ['第一段', '']);

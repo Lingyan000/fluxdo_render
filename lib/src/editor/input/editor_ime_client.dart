@@ -48,6 +48,17 @@ class EditorImeClient with TextInputClient {
 
   final EditorState state;
 
+  int? _viewId;
+
+  void updateViewId(int viewId) {
+    if (_viewId == viewId) return;
+    _viewId = viewId;
+    if (attached) {
+      detach();
+      syncFromState(show: false);
+    }
+  }
+
   /// input rule `--- ` 命中时的分隔线插入请求(岛节点由视图层经 cook
   /// 链路产,状态层不造岛)。参数 = 触发块 id(标记文本已清空)。
   void Function(String blockId)? onHorizontalRuleRequest;
@@ -148,6 +159,7 @@ class EditorImeClient with TextInputClient {
       _connection = TextInput.attach(
         this,
         TextInputConfiguration(
+          viewId: _viewId,
           inputType: TextInputType.multiline,
           // 回车键语义:编辑器自己分段,不让平台插 '\n'
           inputAction: TextInputAction.newline,
