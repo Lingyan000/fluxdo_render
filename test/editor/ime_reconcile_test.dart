@@ -77,6 +77,33 @@ void main() {
       expect(state.selection!.extent.offset, 4);
     });
 
+    test('Windows 两阶段上屏后采用最终光标位置', () {
+      final (state, ime) = makeAttached(paragraphs: [''], caret: 0);
+
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}ni',
+        selection: const TextSelection.collapsed(offset: 3),
+        composing: const TextRange(start: 1, end: 3),
+      ));
+      // Windows TSF 可能先替换候选文本,但仍把选区留在 composing 起点。
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}你',
+        selection: const TextSelection.collapsed(offset: 1),
+        composing: const TextRange(start: 1, end: 2),
+      ));
+      expect(state.selection!.extent.offset, 0);
+
+      // 随后的纯状态通知才结束 composing 并给出最终光标。
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}你',
+        selection: const TextSelection.collapsed(offset: 2),
+        composing: TextRange.empty,
+      ));
+      expect((state.blocks.first as TextBlock).content.text, '你');
+      expect(state.hasComposing, false);
+      expect(state.selection!.extent.offset, 1);
+    });
+
     test('composing 中退格(ni → n)', () {
       final (state, ime) = makeAttached();
       ime.updateEditingValue(TextEditingValue(

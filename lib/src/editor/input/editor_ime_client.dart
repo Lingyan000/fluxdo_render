@@ -374,7 +374,15 @@ class EditorImeClient with TextInputClient {
         );
       } else if (state.hasComposing) {
         // composing 刚结束的收尾通知(无文本变化):清标记 + 封历史口。
-        state.updateComposing(TextRange.empty);
+        state.imeReplace(
+          blockId,
+          0,
+          0,
+          '',
+          caretOffset: value.selection.extentOffset
+              .clamp(0, sanitizedText.length),
+          composing: TextRange.empty,
+        );
         state.sealHistory();
       } else if (!isEcho && value.selection.isValid) {
         // 只认**全选形状**(0..len):菜单 Edit 唯一主动发的选区就是
