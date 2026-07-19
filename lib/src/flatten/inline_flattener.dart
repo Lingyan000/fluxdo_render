@@ -184,6 +184,15 @@ class InlineFlattener {
     GestureRecognizer? inheritedRecognizer,
   }) {
     return switch (node) {
+      EditingDelimiterRun(:final text, :final color) => TextSpan(
+          text: text,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.normal,
+            fontStyle: FontStyle.normal,
+          ),
+          recognizer: inheritedRecognizer,
+        ),
       TextRun(:final text) => TextSpan(
           text: insertSoftBreaks(text),
           recognizer: inheritedRecognizer,

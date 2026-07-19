@@ -3,7 +3,7 @@
 /// 对齐官方 ProseMirror composer 的 buildInputRules(core/inputrules.js):
 /// - **块级**(行首标记 + 空格触发):`# `→标题、`- `/`* `→无序列表、
 ///   `1. `→有序列表、`> `→引用层;
-/// - **行内**(收尾定界符触发):`**x**`→粗体、`*x*`→斜体、`` `x` ``→
+/// - **行内**(任一侧定界符补全触发):`**x**`→粗体、`*x*`→斜体、`` `x` ``→
 ///   行内代码、`~~x~~`→删除线;
 /// - **hr**(`---` + 空格):由 [InputRuleOutcome.hrRequest] 上抛,视图层
 ///   经 cook 链路插分隔线岛(状态层不造岛)。
@@ -37,7 +37,7 @@ enum InputRuleOutcome {
 /// 对 [blockId] 块在光标处尝试应用 input rules。
 ///
 /// [typedChar]:本次输入落地的最后一个字符(触发器判定用;IME 批量
-/// 上屏时为末字符)。只有 ' '(块级触发)与定界符尾字符(行内触发)
+/// 上屏时为末字符)。只有 ' '(块级触发)与定界符字符(行内触发)
 /// 才可能命中,其余字符 O(1) 直接返回。
 InputRuleOutcome tryApplyInputRules(
   EditorState state,
@@ -152,20 +152,20 @@ InputRuleOutcome _tryBlockRules(
 }
 
 // ---------------------------------------------------------------------
-// 行内规则(收尾定界符)
+// 行内规则(任一侧定界符补全)
 // ---------------------------------------------------------------------
 
 /// (正则, mark, 定界符长度)。按特异性排序:长定界符优先(`**` 先于 `*`)。
 /// 内容组不允许含定界字符本身(官方 [^*]+ 同款),且首尾非空格
 /// (`** x**` 不触发 —— CommonMark 语义)。
 final List<(RegExp, MarkKind, int)> _inlineRules = [
-  (RegExp(r'\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$'), MarkKind.strong, 2),
-  (RegExp(r'__([^_\s](?:[^_]*[^_\s])?)__$'), MarkKind.strong, 2),
-  (RegExp(r'~~([^~\s](?:[^~]*[^~\s])?)~~$'), MarkKind.lineThrough, 2),
-  (RegExp(r'`([^`]+)`$'), MarkKind.inlineCode, 1),
+  (RegExp(r'\*\*([^*\s](?:[^*]*[^*\s])?)\*\*'), MarkKind.strong, 2),
+  (RegExp(r'__([^_\s](?:[^_]*[^_\s])?)__'), MarkKind.strong, 2),
+  (RegExp(r'~~([^~\s](?:[^~]*[^~\s])?)~~'), MarkKind.lineThrough, 2),
+  (RegExp(r'`([^`]+)`'), MarkKind.inlineCode, 1),
   // 单 * 斜体:前面不能还是 *(否则和 ** 混淆)
-  (RegExp(r'(?<!\*)\*([^*\s](?:[^*]*[^*\s])?)\*$'), MarkKind.em, 1),
-  (RegExp(r'(?<!_)_([^_\s](?:[^_]*[^_\s])?)_$'), MarkKind.em, 1),
+  (RegExp(r'(?<!\*)\*([^*\s](?:[^*]*[^*\s])?)\*'), MarkKind.em, 1),
+  (RegExp(r'(?<!_)_([^_\s](?:[^_]*[^_\s])?)_'), MarkKind.em, 1),
 ];
 
 InputRuleOutcome _tryInlineRules(
@@ -173,31 +173,34 @@ InputRuleOutcome _tryInlineRules(
   TextBlock block,
   int caret,
 ) {
-  final before = block.content.text.substring(0, caret);
   // 光标处于 inlineCode mark 内:字面量区,不触发
   if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
     return InputRuleOutcome.none;
   }
 
   for (final (re, kind, delimLen) in _inlineRules) {
-    final m = re.firstMatch(before);
-    if (m == null) continue;
-    final contentText = m.group(1)!;
-    final matchStart = m.start + (m.group(0)!.length -
-        (contentText.length + delimLen * 2));
-    // 区间内含原子:FFFC 参与正则会当普通字符 —— 允许(emoji 可加粗),
-    // 但含 '\n' 不允许(跨软换行不成对)。
-    if (contentText.contains('\n')) continue;
+    for (final m in re.allMatches(block.content.text)) {
+      final closedAtCaret = m.end == caret;
+      final openedAtCaret = m.start + delimLen == caret;
+      if (!closedAtCaret && !openedAtCaret) continue;
 
-    state.sealHistory();
-    state.applyInlineInputRule(
-      block.id,
-      matchStart: matchStart,
-      delimLength: delimLen,
-      contentLength: contentText.length,
-      kind: kind,
-    );
-    return InputRuleOutcome.applied;
+      final contentText = m.group(1)!;
+      // 区间内含原子:FFFC 参与正则会当普通字符 —— 允许(emoji 可加粗),
+      // 但含 '\n' 不允许(跨软换行不成对)。
+      if (contentText.contains('\n')) continue;
+
+      state.sealHistory();
+      state.applyInlineInputRule(
+        block.id,
+        matchStart: m.start,
+        delimLength: delimLen,
+        contentLength: contentText.length,
+        kind: kind,
+        caretOffset:
+            openedAtCaret ? m.start : m.start + contentText.length,
+      );
+      return InputRuleOutcome.applied;
+    }
   }
   return InputRuleOutcome.none;
 }

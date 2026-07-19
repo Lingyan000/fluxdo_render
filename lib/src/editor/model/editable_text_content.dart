@@ -287,8 +287,14 @@ class EditableTextContent {
   List<InlineNode> toInlines({
     bool forEditing = false,
     Color? editingLinkColor,
+    Color? editingDelimiterColor,
+    int? revealMarkdownAt,
   }) {
     if (text.isEmpty) return const [];
+
+    final revealedMarks = forEditing && revealMarkdownAt != null
+        ? markdownMarksNear(revealMarkdownAt)
+        : const <MarkSpan>[];
 
     // 1. 收集切点
     final cuts = <int>{0, text.length};
@@ -304,13 +310,44 @@ class EditableTextContent {
       }
     }
     final points = cuts.toList()..sort();
+    final out = <InlineNode>[];
+
+    void appendDelimiters(int offset, {required bool opening}) {
+      final atOffset = <MarkSpan>[
+        for (final mark in revealedMarks)
+          if ((opening ? mark.start : mark.end) == offset) mark,
+      ];
+      atOffset.sort((a, b) {
+        if (opening) {
+          final byEnd = b.end.compareTo(a.end);
+          if (byEnd != 0) return byEnd;
+          return _markdownMarkOrder(a.kind).compareTo(
+            _markdownMarkOrder(b.kind),
+          );
+        }
+        final byStart = b.start.compareTo(a.start);
+        if (byStart != 0) return byStart;
+        return _markdownMarkOrder(b.kind).compareTo(
+          _markdownMarkOrder(a.kind),
+        );
+      });
+      for (final mark in atOffset) {
+        out.add(EditingDelimiterRun(
+          opening
+              ? _openingMarkdownDelimiter(mark)
+              : _closingMarkdownDelimiter(mark),
+          color: editingDelimiterColor,
+        ));
+      }
+    }
 
     // 2. 逐片段构建
-    final out = <InlineNode>[];
     for (var i = 0; i + 1 < points.length; i++) {
       final s = points[i];
       final e = points[i + 1];
       if (s >= e) continue;
+      appendDelimiters(s, opening: false);
+      appendDelimiters(s, opening: true);
       final piece = text.substring(s, e);
       if (piece == '\n') {
         out.add(const LineBreakRun());
@@ -340,8 +377,48 @@ class EditableTextContent {
       out.add(_wrapPiece(piece, kinds, href,
           forEditing: forEditing, editingLinkColor: editingLinkColor));
     }
+    appendDelimiters(text.length, opening: false);
     return out;
   }
+
+  /// Live Preview 中光标进入或贴着边界时需要展开的 Markdown mark。
+  List<MarkSpan> markdownMarksNear(int offset) {
+    final caret = offset.clamp(0, text.length);
+    return [
+      for (final mark in marks)
+        if (mark.start <= caret && caret <= mark.end) mark,
+    ];
+  }
+
+  static int _markdownMarkOrder(MarkKind kind) => switch (kind) {
+        MarkKind.spoilerInline => 0,
+        MarkKind.link => 1,
+        MarkKind.strong => 2,
+        MarkKind.em => 3,
+        MarkKind.underline => 4,
+        MarkKind.lineThrough => 5,
+        MarkKind.inlineCode => 6,
+      };
+
+  static String _openingMarkdownDelimiter(MarkSpan mark) => switch (mark.kind) {
+        MarkKind.strong => '**',
+        MarkKind.em => '*',
+        MarkKind.inlineCode => '`',
+        MarkKind.underline => '[u]',
+        MarkKind.lineThrough => '~~',
+        MarkKind.spoilerInline => '[spoiler]',
+        MarkKind.link => '[',
+      };
+
+  static String _closingMarkdownDelimiter(MarkSpan mark) => switch (mark.kind) {
+        MarkKind.strong => '**',
+        MarkKind.em => '*',
+        MarkKind.inlineCode => '`',
+        MarkKind.underline => '[/u]',
+        MarkKind.lineThrough => '~~',
+        MarkKind.spoilerInline => '[/spoiler]',
+        MarkKind.link => '](${mark.attr ?? ''})',
+      };
 
   static InlineNode _wrapAtom(
     InlineNode atom,

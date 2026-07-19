@@ -24,7 +24,7 @@ import '../../render/image_handler.dart' show ImageContentBuilder;
 import '../../render/list_item_layout.dart';
 import '../../render/selectable_text_box.dart';
 import '../../selection/projection.dart';
-import '../model/editable_text_content.dart' show MarkKind;
+import '../model/editable_text_content.dart' show MarkKind, MarkSpan;
 import '../model/editor_state.dart';
 
 class EditableParagraph extends StatefulWidget {
@@ -34,6 +34,7 @@ class EditableParagraph extends StatefulWidget {
     required this.documentOrder,
     required this.baseStyle,
     this.composing = TextRange.empty,
+    this.revealMarkdownAt,
     this.listMarkerOrdinal = 1,
     this.imageContentBuilder,
     this.emojiImageBuilder,
@@ -57,6 +58,9 @@ class EditableParagraph extends StatefulWidget {
 
   /// 本段的 IME composing 区间(编辑文本坐标);非本段/无 composing 传 empty。
   final TextRange composing;
+
+  /// Live Preview 展开位置(内容偏移);null 时只渲染格式、不显示定界符。
+  final int? revealMarkdownAt;
 
   /// 有序列表项显示序号(派生渲染态,FluxdoEditor 按连续 run 扫描计算)。
   final int listMarkerOrdinal;
@@ -84,6 +88,8 @@ class _EditableParagraphState extends State<EditableParagraph> {
       widget.block.content.toInlines(
         forEditing: true,
         editingLinkColor: _linkColor,
+        editingDelimiterColor: _syntaxColor,
+        revealMarkdownAt: widget.revealMarkdownAt,
       ),
       _effectiveStyle,
       // 行内图片原子(裸图):走宿主图片管线(upload 解析/解码上限),
@@ -107,13 +113,17 @@ class _EditableParagraphState extends State<EditableParagraph> {
   }
 
   Color? _linkColor;
+  Color? _syntaxColor;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final next = Theme.of(context).colorScheme.primary;
-    if (next != _linkColor) {
-      _linkColor = next;
+    final scheme = Theme.of(context).colorScheme;
+    final nextLink = scheme.primary;
+    final nextSyntax = scheme.outline;
+    if (nextLink != _linkColor || nextSyntax != _syntaxColor) {
+      _linkColor = nextLink;
+      _syntaxColor = nextSyntax;
       _disposeResult();
     }
   }
@@ -121,14 +131,22 @@ class _EditableParagraphState extends State<EditableParagraph> {
   @override
   void didUpdateWidget(covariant EditableParagraph oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final revealChanged = !listEquals(
+      _revealedMarks(oldWidget.block, oldWidget.revealMarkdownAt),
+      _revealedMarks(widget.block, widget.revealMarkdownAt),
+    );
     // kind/headingLevel 变了 → 有效样式变 → flatten 缓存失效
     if (oldWidget.block.content != widget.block.content ||
         oldWidget.block.kind != widget.block.kind ||
         oldWidget.block.headingLevel != widget.block.headingLevel ||
-        oldWidget.baseStyle != widget.baseStyle) {
+        oldWidget.baseStyle != widget.baseStyle ||
+        revealChanged) {
       _disposeResult();
     }
   }
+
+  static List<MarkSpan> _revealedMarks(TextBlock block, int? offset) =>
+      offset == null ? const [] : block.content.markdownMarksNear(offset);
 
   void _disposeResult() {
     final r = _result;
