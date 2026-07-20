@@ -463,6 +463,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       // 焦点离开编辑器正文(→ 子输入框如表格 cell,或 → 编辑器外):
       // 关编辑器 IME + 封历史口;光标随 hasPrimaryFocus 消失(见
       // _computeLocalCaretRect),否则与 cell TextField 双光标。
+      // 焦点离开编辑器(点「发送」/切到别处):先把显形的字面标记收回
+      // 结构,否则 `**粗**` 会原样被序列化提交。
+      widget.state.commitReveals();
       _ime.detach();
       widget.state.sealHistory();
     }

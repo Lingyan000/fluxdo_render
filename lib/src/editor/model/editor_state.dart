@@ -367,6 +367,18 @@ class EditorState extends ChangeNotifier {
     return out;
   }
 
+  /// 无条件折叠所有显形态(mark / 块级标记 / 原子),把字面标记收回
+  /// 成结构。
+  ///
+  /// 显形本来只在 navigateSelection(方向键/点击)里折叠,但离开显形区
+  /// 的路径远不止导航:回车切块、退格并块、焦点离开编辑器(点「发送」)
+  /// 走的都是别的链路 —— 不在这些地方收口,字面 `**` 会被当正文提交。
+  void commitReveals() {
+    if (_revealed != null) _collapseRevealed();
+    if (_revealedQuote != null) _collapseRevealedQuote();
+    if (_revealedAtom != null) _collapseRevealedAtom();
+  }
+
   /// 在光标处尝试展开 mark(input rules 用:命中后保持字面编辑态)。
   void revealMarkAtCaret() {
     if (_revealed != null) return;
@@ -1297,6 +1309,8 @@ class EditorState extends ChangeNotifier {
 
   /// 光标处回车分块(属性感知,语义表见计划)。
   void splitBlock() {
+    // 切块前先收口:光标要离开本块了,显形的字面标记必须先收回结构。
+    commitReveals();
     final sel = _selection;
     if (sel == null) return;
     // 岛整选态回车:不删岛,岛后建空段(Notion 等主流的"选中块回车")。
@@ -1412,6 +1426,8 @@ class EditorState extends ChangeNotifier {
   /// [blockId] 与上一块合并(块首退格;前块 kind 胜出)。
   /// 首块/前块是岛时无操作(岛路径由 backspace 处理)。
   void mergeWithPrevious(String blockId) {
+    // 并块同理:两块的文本要拼到一起,显形的字面标记先收回结构。
+    commitReveals();
     final i = indexOfBlock(blockId);
     if (i <= 0) return;
     final prev = _blocks[i - 1];
