@@ -334,22 +334,38 @@ class EditorImeClient with TextInputClient {
           text: state.textBlockById(blockId)?.content.text ?? '',
         );
 
-    // 平台可能插入 '\n'(部分 IME 的回车路径不走 performAction)——
-    // 编辑器语义是分段,拦下来转 splitParagraph。
-    if (value.text.contains('\n')) {
-      final cleaned = value.text.replaceAll('\n', '');
-      if (cleaned == prev.text) {
+    // '\n' 的语义要按**来源**区分:
+    // - **新插入**的 '\n' = 回车(部分 IME 的回车路径不走 performAction),
+    //   编辑器语义是分段,拦下来转 splitBlock;
+    // - **段内既有**的 '\n' = 本段软换行(cook 的 <br> 导入即是此形态,
+    //   序列化写行尾双空格),是正当内容,必须原样留着。
+    //
+    // 早先这里无条件 `replaceAll('\n', '')`,把两者一起洗了 —— 真机症状:
+    // 网页端带换行的草稿在 fluxdo 打开后,只要打一个字,整段换行全没,
+    // 几行并成一行。
+    //
+    // 注意**不能**在这里剥 FFFC:窗口文本里的 FFFC 是既有原子的合法哨兵,
+    // 整体剥除会被 diff 误判为"删除了原子"。幻造哨兵只可能出现在**新插入
+    // 段**里 → 对 diff.inserted 单独 sanitize(见下)。
+    var sanitizedText = value.text;
+    final rawDiff = diffWithCaret(
+      prev.text,
+      sanitizedText,
+      value.selection.extentOffset,
+    );
+    if (rawDiff != null && rawDiff.inserted.contains('\n')) {
+      final withoutBreaks = rawDiff.inserted.replaceAll('\n', '');
+      if (withoutBreaks.isEmpty && rawDiff.oldEnd == rawDiff.start) {
+        // 纯插入换行 = 回车 → 分段
         state.splitBlock();
         syncFromState(show: false);
         return;
       }
-      // 混合变更(罕见):先按纯文本处理,'\n' 剥掉。
+      // 混合变更:只剥**插入段内**的换行,既有换行不动。
+      sanitizedText = sanitizedText.substring(0, rawDiff.start) +
+          withoutBreaks +
+          sanitizedText.substring(rawDiff.start + rawDiff.inserted.length);
     }
-    // 剥 '\n'(编辑器语义是分段,不进文本)。注意**不能**在这里剥 FFFC:
-    // 窗口文本里的 FFFC 是既有原子的合法哨兵,整体剥除会被 diff 误判为
-    // "删除了原子"。幻造哨兵只可能出现在**新插入段**里 → 对 diff.inserted
-    // 单独 sanitize(见下)。
-    final sanitizedText = value.text.replaceAll('\n', '');
 
     // 三段式 diff(对比上次值,caret 锚定):公共前缀/后缀 → 中段即变更。
     final diff = diffWithCaret(
