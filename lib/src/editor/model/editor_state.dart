@@ -162,6 +162,25 @@ class _RevealedAtom {
   final String literal;
 }
 
+/// 当前显形的分割线跟踪信息。
+///
+/// 分割线是**岛**(只读块),不像行内 mark 有字面可编辑。显形 = 把岛
+/// 换成一个装着字面 `---` 的普通文本块,离开时若字面还是分割线就装
+/// 回岛 —— 与 [_RevealedBlockMarker] 同一套"摘属性/装回属性"的思路,
+/// 只是这里摘的是整个块的类型。
+@immutable
+class _RevealedRule {
+  const _RevealedRule({required this.blockId, required this.node});
+
+  final String blockId;
+
+  /// 岛节点原件(字面没被改过就原样装回,保住 id 等字段)。
+  final BlockNode node;
+}
+
+/// 字面分割线:三个及以上的 `-` / `*` / `_`,整行别无他物。
+final RegExp _ruleLiteralRe = RegExp(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$');
+
 String _markOpenTagStr(MarkKind kind) => switch (kind) {
       MarkKind.strong => '**',
       MarkKind.em => '*',
@@ -414,6 +433,7 @@ class EditorState extends ChangeNotifier {
     if (_revealed != null) _collapseRevealed();
     if (_revealedQuote != null) _collapseRevealedQuote();
     if (_revealedAtom != null) _collapseRevealedAtom();
+    if (_revealedRule != null) _collapseRevealedRule();
   }
 
   /// 在光标处尝试展开 mark(input rules 用:命中后保持字面编辑态)。
@@ -546,6 +566,79 @@ class EditorState extends ChangeNotifier {
     if (block == null) return false;
     if (!block.content.text.startsWith(r.prefix)) return false;
     return sel.extent.offset <= r.prefix.length;
+  }
+
+  // -----------------------------------------------------------------
+  // rule reveal: 方向键进分割线时显形成字面 `---`,可直接改
+  // -----------------------------------------------------------------
+
+  /// 当前显形的分割线。
+  _RevealedRule? _revealedRule;
+
+  /// 分割线岛当前是否处于显形(字面可编辑)态。
+  bool isRuleRevealed(String blockId) => _revealedRule?.blockId == blockId;
+
+  /// 把 [blockId] 处的分割线岛换成装着字面 `---` 的文本块,光标落到
+  /// [atEnd] 指定的一端(从左边进来落行首,从右边进来落行尾)。
+  ///
+  /// 返回 false = 那不是分割线岛,调用方按原来的整选逻辑处理。
+  bool _tryRevealRule(String blockId, {required bool atEnd}) {
+    final i = indexOfBlock(blockId);
+    if (i < 0) return false;
+    final block = _blocks[i];
+    if (block is! IslandBlock || block.node is! HorizontalRuleNode) {
+      return false;
+    }
+    const literal = '---';
+    final newBlocks = [..._blocks];
+    newBlocks[i] = TextBlock(
+      id: blockId,
+      content: EditableTextContent(text: literal),
+    );
+    _blocks = List.unmodifiable(newBlocks);
+    _docRevision++;
+    _revealedRule = _RevealedRule(blockId: blockId, node: block.node);
+    _selection = EditorSelection.collapsed(EditorPosition(
+      blockId: blockId,
+      offset: atEnd ? literal.length : 0,
+    ));
+    return true;
+  }
+
+  /// 折叠显形的分割线:字面还是分割线 → 装回岛(节点原件复用);字面
+  /// 被改成别的了 → 保留成普通文本块,不硬塞回去 —— 与块级标记折叠
+  /// 同一取舍:用户改了字面就是想改内容,不该被强行还原。
+  ///
+  /// 字面被删空时整块移除,否则会留下一个空段落。
+  void _collapseRevealedRule() {
+    final r = _revealedRule;
+    if (r == null) return;
+    _revealedRule = null;
+    final i = indexOfBlock(r.blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    final text = block.content.text;
+    final newBlocks = [..._blocks];
+    if (text.trim().isEmpty) {
+      if (_blocks.length == 1) return; // 唯一块,删了就没落脚点了
+      newBlocks.removeAt(i);
+    } else if (_ruleLiteralRe.hasMatch(text)) {
+      newBlocks[i] = IslandBlock(id: r.blockId, node: r.node);
+    } else {
+      return; // 已经不是分割线了,就让它当普通文本待着
+    }
+    _blocks = List.unmodifiable(newBlocks);
+    _docRevision++;
+  }
+
+  /// 光标是否还停在显形的分割线块里。
+  bool _isCursorInRevealedRuleRegion() {
+    final r = _revealedRule;
+    if (r == null) return false;
+    final sel = _selection;
+    if (sel == null) return false;
+    return sel.base.blockId == r.blockId && sel.extent.blockId == r.blockId;
   }
 
   // -----------------------------------------------------------------
@@ -862,6 +955,11 @@ class EditorState extends ChangeNotifier {
     }
     if (_revealedAtom == null && !atomCollapsed && _revealed == null) {
       _tryRevealAtom();
+    }
+    // rule reveal: 只折叠,不在这里展开 —— 分割线是岛,光标不会"路过"
+    // 它,只能由 moveCaretHorizontally 明确进入(见 _tryRevealRule)。
+    if (_revealedRule != null && !_isCursorInRevealedRuleRegion()) {
+      _collapseRevealedRule();
     }
     notifyListeners();
   }
@@ -1846,6 +1944,11 @@ class EditorState extends ChangeNotifier {
     required int delimLength,
     required int contentLength,
     required MarkKind kind,
+    /// 光标落在内容尾(默认,对应"刚打完闭定界符")还是内容首。
+    ///
+    /// 补打**开**定界符时光标本来就在内容首,甩到尾巴上等于替用户跳一次
+    /// 光标 —— 那不是他的意图。
+    bool caretAtEnd = true,
   }) {
     final i = indexOfBlock(blockId);
     if (i < 0) return;
@@ -1870,7 +1973,10 @@ class EditorState extends ChangeNotifier {
     _commit(
       newBlocks,
       EditorSelection.collapsed(
-        EditorPosition(blockId: blockId, offset: matchStart + contentLength),
+        EditorPosition(
+          blockId: blockId,
+          offset: caretAtEnd ? matchStart + contentLength : matchStart,
+        ),
       ),
       groupWithPrevious: false,
     );
@@ -2325,6 +2431,12 @@ class EditorState extends ChangeNotifier {
       } else if (i > 0) {
         final prev = _blocks[i - 1];
         if (prev is IslandBlock && !extend) {
+          // 分割线从右边进 → 显形成字面 `---`,光标落行尾(可直接退格
+          // 改格式);其余岛保持整选。
+          if (_tryRevealRule(prev.id, atEnd: true)) {
+            notifyListeners();
+            return;
+          }
           _selectIsland(prev.id);
           return;
         }
@@ -2345,6 +2457,11 @@ class EditorState extends ChangeNotifier {
       } else if (i + 1 < _blocks.length) {
         final nextBlock = _blocks[i + 1];
         if (nextBlock is IslandBlock && !extend) {
+          // 分割线从左边进 → 显形,光标落行首
+          if (_tryRevealRule(nextBlock.id, atEnd: false)) {
+            notifyListeners();
+            return;
+          }
           _selectIsland(nextBlock.id);
           return;
         }

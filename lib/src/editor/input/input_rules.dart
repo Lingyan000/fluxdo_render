@@ -63,7 +63,12 @@ InputRuleOutcome tryApplyInputRules(
     return _tryImageOrLinkRule(state, block, sel.extent.offset);
   }
   if (typedChar == '*' || typedChar == '`' || typedChar == '~' || typedChar == '_') {
-    return _tryInlineRules(state, block, sel.extent.offset);
+    final tail = _tryInlineRules(state, block, sel.extent.offset);
+    if (tail != InputRuleOutcome.none) return tail;
+    // 收尾定界符先打、开定界符后补的场景(`诚邀你测试~~` 打完再回行首
+    // 补 `~~`)：此时光标停在**开**定界符之后,上面的 `$` 锚定规则看的是
+    // 光标左边,永远命中不了。
+    return _tryOpenDelimRules(state, block, sel.extent.offset);
   }
   // 光标后紧跟闭定界符:先打好 `****` 再回中间填内容的场景(收尾定
   // 界符不是最后敲的,上面的 $ 锚定规则永远不会命中)—— 把光标后的
@@ -206,6 +211,66 @@ InputRuleOutcome _tryInlineRules(
       delimLength: delim.length,
       contentLength: contentText.length,
       kind: kind,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 补打**开**定界符触发:右边已经有配对的闭定界符。
+///
+/// `~~诚邀你测试~~` 这种"先打后半截、再回来补前半截"的写法,光标停在开
+/// 定界符之后,[_tryInlineRules] 的 `$` 锚定正则只看光标左边,一条都命中
+/// 不了 —— 表现为怎么打都不渲染。这里把光标**右边**到闭定界符的那段拼
+/// 回去,用同一批正则判定,规则集保持单一来源。
+///
+/// 闭定界符只在当前**行**内找(不跨软换行),跟其它规则同口径。
+InputRuleOutcome _tryOpenDelimRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (re, kind, delim) in _inlineRules) {
+    final open = caret - delim.length;
+    if (open < 0) continue;
+    // 光标左边恰好是一个完整的开定界符
+    if (!text.startsWith(delim, open)) continue;
+    // 再往左不能还是同类定界字符(`***x**` 归属不明,不触发)
+    if (open > 0 && text[open - 1] == delim[0]) continue;
+
+    final rest = text.substring(caret);
+    final nl = rest.indexOf('\n');
+    final line = nl < 0 ? rest : rest.substring(0, nl);
+    final closeAt = line.indexOf(delim);
+    if (closeAt <= 0) continue; // 没有闭定界符 / 内容为空
+    // 闭定界符后面不能还是同类定界字符
+    final afterClose = closeAt + delim.length;
+    if (afterClose < line.length && line[afterClose] == delim[0]) continue;
+
+    final candidate = delim + line.substring(0, afterClose);
+    final m = re.firstMatch(candidate);
+    // 必须整段命中,否则 `~~a~~b~~` 这种会切错边界
+    if (m == null || m.start != 0 || m.group(0)!.length != candidate.length) {
+      continue;
+    }
+    final contentText = m.group(1)!;
+    if (contentText.contains('\n')) continue;
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: open,
+      delimLength: delim.length,
+      contentLength: contentText.length,
+      kind: kind,
+      // 光标本来就在内容首,别甩到尾巴上
+      caretAtEnd: false,
     );
     return InputRuleOutcome.applied;
   }
