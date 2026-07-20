@@ -239,6 +239,21 @@ class EditorImeClient with TextInputClient {
     );
   }
 
+  /// CJK 上屏后补判 input rules(typedChar 取光标前一字符)。
+  void _tryRulesAfterCommit(String blockId) {
+    final blk = state.textBlockById(blockId);
+    final caret = state.selection?.extent.offset ?? 0;
+    if (blk == null || caret <= 0 || caret > blk.content.length) return;
+    final outcome = tryApplyInputRules(
+      state,
+      blockId,
+      typedChar: blk.content.text[caret - 1],
+    );
+    if (outcome == InputRuleOutcome.hrRequest) {
+      onHorizontalRuleRequest?.call(blockId);
+    }
+  }
+
   /// 剥 pad。返回 null 表示 pad 已被 IME 删掉(= 段首退格信号)。
   static TextEditingValue? _unformat(TextEditingValue v) {
     if (!v.text.startsWith(_padChar)) return null;
@@ -426,6 +441,15 @@ class EditorImeClient with TextInputClient {
           state.updateComposing(TextRange.empty);
         }
         state.sealHistory();
+        // 上屏收尾补判 input rules:本通知**没有文本变化**(走的就是
+        // diff==null 这条路),下面按 diff.inserted 触发的常规路径进不来。
+        //
+        // 真机失效顺序:先打 `**`,再打拼音,再打闭合 `**`,最后上屏 ——
+        // 敲 `*` 时拼音还在 composing 里,规则按约定跳过;上屏后没人再判
+        // 一次,`**编辑器**` 就永远停在字面星号(`~~x~~` 同理)。
+        //
+        // typedChar 取光标前一字符:上屏后它就是这段输入的收尾字符。
+        _tryRulesAfterCommit(blockId);
       } else if (!isEcho && value.selection.isValid) {
         // 只认**全选形状**(0..len):菜单 Edit 唯一主动发的选区就是
         // Select All;其余非回显纯选区通知维持忽略(回显可能带轻微
@@ -484,6 +508,9 @@ class EditorImeClient with TextInputClient {
       if (outcome == InputRuleOutcome.hrRequest) {
         onHorizontalRuleRequest?.call(blockId);
       }
+    } else if (!composingActive && wasComposing) {
+      // 上屏同时还带了文本变化(部分 IME 会把最后一个字符和上屏合并发)
+      _tryRulesAfterCommit(blockId);
     }
 
     // reconcile:若应用后文档与 IME 认知不一致(编辑器改写了内容,

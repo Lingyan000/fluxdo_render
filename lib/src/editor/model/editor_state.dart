@@ -367,6 +367,24 @@ class EditorState extends ChangeNotifier {
     return out;
   }
 
+  /// 待自动进入编辑态的岛块 id(插入代码块/公式后把光标送进去 ——
+  /// 否则用户打完 ``` 回车,光标停在岛外面,还得再点一下)。
+  /// 由岛组件消费一次即清空。
+  String? _pendingIslandEdit;
+
+  /// 请求 [blockId] 岛插入后自动进入编辑态。
+  void requestIslandEdit(String blockId) {
+    _pendingIslandEdit = blockId;
+    notifyListeners();
+  }
+
+  /// 岛组件取用编辑请求(取到即清,不重复触发)。
+  bool consumeIslandEditRequest(String blockId) {
+    if (_pendingIslandEdit != blockId) return false;
+    _pendingIslandEdit = null;
+    return true;
+  }
+
   /// 无条件折叠所有显形态(mark / 块级标记 / 原子),把字面标记收回
   /// 成结构。
   ///

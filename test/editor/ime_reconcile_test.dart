@@ -18,6 +18,7 @@ import 'package:fluxdo_render/src/node/inline_node.dart';
 final pad = EditorImeClient.padCharForTesting;
 
 void main() {
+  _cjkCommitRuleTests();
   _softBreakTests();
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -499,6 +500,87 @@ void _softBreakTests() {
       ));
       expect(state.blocks.length, 2, reason: '回车 → 分段');
       expect(textOf(state), t, reason: '既有软换行没被吃');
+    });
+  });
+}
+
+/// CJK 上屏收尾补判 input rules(真机日志固化)。
+///
+/// 失效顺序:先打 `**`,再打拼音,再打闭合 `**`,最后才上屏 —— 敲 `*` 时
+/// 拼音还在 composing 里,规则按约定跳过;上屏通知的 diff.inserted 是空的,
+/// 普通路径也进不来,于是 `**编辑器**` 永远停在字面星号。
+void _cjkCommitRuleTests() {
+  final pad = EditorImeClient.padCharForTesting;
+
+  group('CJK 上屏后补判 input rules', () {
+    (EditorState, EditorImeClient) attach(String text, int caret) {
+      final state = EditorState(blocks: [
+        TextBlock(id: 'b0', content: EditableTextContent(text: text)),
+      ]);
+      state.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: 'b0', offset: caret)));
+      final ime = EditorImeClient(state: state);
+      ime.debugAttachToBlock(
+        'b0',
+        EditorImeClient.debugFormat(TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: caret),
+        )),
+      );
+      return (state, ime);
+    }
+
+    TextBlock blk(EditorState s) => s.blocks.first as TextBlock;
+
+    test('**拼音** 上屏 → 加粗(真机日志回放)', () {
+      // lastSent = "**bian'ji'qi**"(拼音在 composing 里,闭合 ** 已敲)
+      const typing = "新版fluxdo**bian'ji'qi**";
+      final (state, ime) = attach(typing, typing.length);
+      // 上屏:拼音段替换成「编辑器」,composing 仍标着新文本
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad新版fluxdo**编辑器**',
+        selection: const TextSelection.collapsed(offset: 15),
+        composing: const TextRange(start: 15, end: 18),
+      ));
+      // 收尾:composing 清空 —— 补判在这一刻发生
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad新版fluxdo**编辑器**',
+        selection: const TextSelection.collapsed(offset: 18),
+      ));
+      expect(blk(state).content.text, '新版fluxdo编辑器');
+      expect(blk(state).content.marks.single.kind, MarkKind.strong);
+    });
+
+    test('~~拼音~~ 上屏 → 删除线', () {
+      const typing = "~~huan'wo~~";
+      final (state, ime) = attach(typing, typing.length);
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad~~换我~~',
+        selection: const TextSelection.collapsed(offset: 5),
+        composing: const TextRange(start: 3, end: 5),
+      ));
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad~~换我~~',
+        selection: const TextSelection.collapsed(offset: 7),
+      ));
+      expect(blk(state).content.text, '换我');
+      expect(blk(state).content.marks.single.kind, MarkKind.lineThrough);
+    });
+
+    test('上屏后不成对 → 不误触发', () {
+      const typing = "**bian'ji";
+      final (state, ime) = attach(typing, typing.length);
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad**编辑',
+        selection: const TextSelection.collapsed(offset: 3),
+        composing: const TextRange(start: 3, end: 5),
+      ));
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad**编辑',
+        selection: const TextSelection.collapsed(offset: 5),
+      ));
+      expect(blk(state).content.text, '**编辑', reason: '没有闭合定界符');
+      expect(blk(state).content.marks, isEmpty);
     });
   });
 }

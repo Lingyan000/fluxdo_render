@@ -2158,6 +2158,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             onChanged: (code, lang) =>
                 widget.onCodeBlockEdited!(block, code, lang),
             selected: _isIslandSelected(block.id),
+            autoEdit: widget.state.consumeIslandEditRequest(block.id),
             highlightBuilder: _islandFactory.codeBlockHighlighter,
             onSelectRequest: () {
               _focusNode.requestFocus();
