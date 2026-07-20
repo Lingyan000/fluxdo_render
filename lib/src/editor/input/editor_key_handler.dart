@@ -50,7 +50,9 @@ KeyEventResult handleEditorKeyEvent(
 
   final isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final pressed = HardwareKeyboard.instance;
-  final primary = isMac ? pressed.isMetaPressed : pressed.isControlPressed;
+  _trackModifierDown(event, isMac: isMac);
+  final primary = (isMac ? pressed.isMetaPressed : pressed.isControlPressed) ||
+      _isSyntheticModifiedKey(event);
   final shift = pressed.isShiftPressed;
 
   // 跨段选区 + 可打印字符:IME 窗口只覆盖单段,平台模型里没有这个跨段
@@ -199,4 +201,39 @@ KeyEventResult handleEditorKeyEvent(
     return KeyEventResult.skipRemainingHandlers;
   }
   return KeyEventResult.ignored;
+}
+
+// ---------------------------------------------------------------------
+// 合成按键的修饰键补偿(Windows 剪贴板历史 Win+V)
+// ---------------------------------------------------------------------
+//
+// Win+V 面板选中条目后,系统用 SendInput 模拟 Ctrl+V。真机日志实测:
+// 注入的 `V` 消息**自身不带 Ctrl 修饰位**,Flutter 据此合成了一次 Ctrl
+// 抬起 —— 处理 `V` 时 isControlPressed 已经是 false。于是既不算粘贴、
+// 也不算打字(character 为 null,系统认为 Ctrl 按着没产生字符),表现
+// 为「Win+V 完全没反应」。对照组手按 Ctrl+V 时 V 事件 ctrl=true。
+//
+// 判据取两个条件的合取,避免误伤:
+// - character == null:裸敲 `v` 一定带 character('v'),为 null 说明确
+//   实有修饰键压制了字符 —— 中文输入法下拼音 `v` 也带 character,不命中;
+// - 主修饰键刚按下过(_modifierWindow 内):Win+V 的注入序列里 Ctrl 按下
+//   紧挨着 V,而普通打字前不会有这个前缀。
+const Duration _modifierWindow = Duration(milliseconds: 250);
+DateTime? _lastModifierDownAt;
+
+void _trackModifierDown(KeyEvent event, {required bool isMac}) {
+  if (event is! KeyDownEvent) return;
+  final k = event.logicalKey;
+  final isPrimaryModifier = isMac
+      ? (k == LogicalKeyboardKey.metaLeft || k == LogicalKeyboardKey.metaRight)
+      : (k == LogicalKeyboardKey.controlLeft ||
+          k == LogicalKeyboardKey.controlRight);
+  if (isPrimaryModifier) _lastModifierDownAt = DateTime.now();
+}
+
+bool _isSyntheticModifiedKey(KeyEvent event) {
+  if (event.character != null) return false;
+  final at = _lastModifierDownAt;
+  if (at == null) return false;
+  return DateTime.now().difference(at) <= _modifierWindow;
 }

@@ -48,6 +48,19 @@ class EditorImeClient with TextInputClient {
 
   final EditorState state;
 
+  int? _viewId;
+
+  /// Text input must be attached to the Flutter view that owns the editor.
+  /// Windows rejects `TextInput.setClient` when this is null.
+  void updateViewId(int viewId) {
+    if (_viewId == viewId) return;
+    _viewId = viewId;
+    if (attached) {
+      detach();
+      syncFromState(show: false);
+    }
+  }
+
   /// input rule `--- ` 命中时的分隔线插入请求(岛节点由视图层经 cook
   /// 链路产,状态层不造岛)。参数 = 触发块 id(标记文本已清空)。
   void Function(String blockId)? onHorizontalRuleRequest;
@@ -77,13 +90,15 @@ class EditorImeClient with TextInputClient {
   final List<(String, int, int)> _recentSent = [];
 
   void _rememberSent(TextEditingValue v) {
-    _recentSent.add(
-        (v.text, v.selection.baseOffset, v.selection.extentOffset));
+    _recentSent.add((v.text, v.selection.baseOffset, v.selection.extentOffset));
     if (_recentSent.length > 8) _recentSent.removeAt(0);
   }
 
-  bool _isRecentEcho(TextEditingValue v) => _recentSent.contains(
-      (v.text, v.selection.baseOffset, v.selection.extentOffset));
+  bool _isRecentEcho(TextEditingValue v) => _recentSent.contains((
+    v.text,
+    v.selection.baseOffset,
+    v.selection.extentOffset,
+  ));
 
   /// 正在处理平台回调(updateEditingValue/performAction/...)。
   ///
@@ -148,6 +163,7 @@ class EditorImeClient with TextInputClient {
       _connection = TextInput.attach(
         this,
         TextInputConfiguration(
+          viewId: _viewId,
           inputType: TextInputType.multiline,
           // 回车键语义:编辑器自己分段,不让平台插 '\n'
           inputAction: TextInputAction.newline,
@@ -170,9 +186,11 @@ class EditorImeClient with TextInputClient {
     final blockChanged = _attachedBlockId != sel.extent.blockId;
     if (force || blockChanged || value != _lastSent) {
       _attachedBlockId = sel.extent.blockId;
-      _log('send text="${value.text}" sel=${value.selection.baseOffset}'
-          '..${value.selection.extentOffset} comp=${value.composing}'
-          '${force ? " (force)" : ""}${blockChanged ? " (blockChanged)" : ""}');
+      _log(
+        'send text="${value.text}" sel=${value.selection.baseOffset}'
+        '..${value.selection.extentOffset} comp=${value.composing}'
+        '${force ? " (force)" : ""}${blockChanged ? " (blockChanged)" : ""}',
+      );
       _connection!.setEditingState(value);
       _lastSent = value;
       _rememberSent(value);
@@ -207,9 +225,8 @@ class EditorImeClient with TextInputClient {
   // -----------------------------------------------------------------
 
   static TextEditingValue _format(TextEditingValue v) {
-    TextRange shift(TextRange r) => !r.isValid
-        ? r
-        : TextRange(start: r.start + 1, end: r.end + 1);
+    TextRange shift(TextRange r) =>
+        !r.isValid ? r : TextRange(start: r.start + 1, end: r.end + 1);
     return TextEditingValue(
       text: _padChar + v.text,
       selection: v.selection.isValid
@@ -235,9 +252,14 @@ class EditorImeClient with TextInputClient {
       text: v.text.substring(1),
       selection: v.selection.isValid
           ? v.selection.copyWith(
-              baseOffset: (v.selection.baseOffset - 1).clamp(0, v.text.length - 1),
-              extentOffset:
-                  (v.selection.extentOffset - 1).clamp(0, v.text.length - 1),
+              baseOffset: (v.selection.baseOffset - 1).clamp(
+                0,
+                v.text.length - 1,
+              ),
+              extentOffset: (v.selection.extentOffset - 1).clamp(
+                0,
+                v.text.length - 1,
+              ),
             )
           : v.selection,
       composing: unshift(v.composing),
@@ -267,10 +289,12 @@ class EditorImeClient with TextInputClient {
   void _updateEditingValueImpl(TextEditingValue rawValue) {
     final blockId = _attachedBlockId;
     if (blockId == null) return;
-    _log('recv text="${rawValue.text}" sel=${rawValue.selection.baseOffset}'
-        '..${rawValue.selection.extentOffset} '
-        'comp=${rawValue.composing} | lastSent="${_lastSent.text}" '
-        'sel=${_lastSent.selection.baseOffset}..${_lastSent.selection.extentOffset}');
+    _log(
+      'recv text="${rawValue.text}" sel=${rawValue.selection.baseOffset}'
+      '..${rawValue.selection.extentOffset} '
+      'comp=${rawValue.composing} | lastSent="${_lastSent.text}" '
+      'sel=${_lastSent.selection.baseOffset}..${_lastSent.selection.extentOffset}',
+    );
 
     // 幽灵块防御(真机日志实锤的死循环):attach 的段落可能已被结构操作
     // (段首合并/undo 换快照)移出文档 —— 此时报文若被静默吞掉,_lastSent
@@ -304,8 +328,11 @@ class EditorImeClient with TextInputClient {
       return;
     }
 
-    final prev = _unformat(_lastSent) ??
-        TextEditingValue(text: state.textBlockById(blockId)?.content.text ?? '');
+    final prev =
+        _unformat(_lastSent) ??
+        TextEditingValue(
+          text: state.textBlockById(blockId)?.content.text ?? '',
+        );
 
     // 平台可能插入 '\n'(部分 IME 的回车路径不走 performAction)——
     // 编辑器语义是分段,拦下来转 splitParagraph。
@@ -356,13 +383,32 @@ class EditorImeClient with TextInputClient {
           0,
           0,
           '',
-          caretOffset: value.selection.extentOffset
-              .clamp(0, sanitizedText.length),
+          caretOffset: value.selection.extentOffset.clamp(
+            0,
+            sanitizedText.length,
+          ),
           composing: composing,
         );
       } else if (state.hasComposing) {
         // composing 刚结束的收尾通知(无文本变化):清标记 + 封历史口。
-        state.updateComposing(TextRange.empty);
+        // Windows(微软拼音)上屏是两步:先发「文本+composing(选区仍
+        // 滞后在拼音组首)」,再发本通知(composing 清空 + **最终光标**)。
+        // 收尾通知里的选区才是上屏后的真实光标,必须采纳 —— 否则光标
+        // 停在组首,表现为"打完字光标跳到文字前面"。
+        if (value.selection.isValid) {
+          state.imeReplace(
+            blockId,
+            0,
+            0,
+            '',
+            caretOffset: value.selection.extentOffset.clamp(
+              0,
+              sanitizedText.length,
+            ),
+          );
+        } else {
+          state.updateComposing(TextRange.empty);
+        }
         state.sealHistory();
       } else if (!isEcho && value.selection.isValid) {
         // 只认**全选形状**(0..len):菜单 Edit 唯一主动发的选区就是
@@ -392,8 +438,10 @@ class EditorImeClient with TextInputClient {
       diff.start,
       diff.oldEnd,
       cleanInserted,
-      caretOffset: (value.selection.extentOffset - phantomCount)
-          .clamp(0, sanitizedText.length - phantomCount),
+      caretOffset: (value.selection.extentOffset - phantomCount).clamp(
+        0,
+        sanitizedText.length - phantomCount,
+      ),
       composing: composing,
     );
 
@@ -453,8 +501,9 @@ class EditorImeClient with TextInputClient {
         final oldHead = oldText.substring(0, oldText.length - tail.length);
         final newHead = newText.substring(0, caret);
         var prefix = 0;
-        final minLen =
-            oldHead.length < newHead.length ? oldHead.length : newHead.length;
+        final minLen = oldHead.length < newHead.length
+            ? oldHead.length
+            : newHead.length;
         while (prefix < minLen && oldHead[prefix] == newHead[prefix]) {
           prefix++;
         }
@@ -468,8 +517,9 @@ class EditorImeClient with TextInputClient {
 
     // fallback:纯公共前缀/后缀。
     var prefix = 0;
-    final minLen =
-        oldText.length < newText.length ? oldText.length : newText.length;
+    final minLen = oldText.length < newText.length
+        ? oldText.length
+        : newText.length;
     while (prefix < minLen && oldText[prefix] == newText[prefix]) {
       prefix++;
     }
