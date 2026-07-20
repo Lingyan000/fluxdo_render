@@ -249,6 +249,23 @@ bool _hasCrossingMarks(List<MarkSpan> marks) {
   return false;
 }
 
+/// 锚文本是否就是这条链接的裸 URL 形态。
+///
+/// 精确相等之外还要**忽略 scheme 差异**:cook 给裸 URL linkify 时会自动
+/// 补 scheme(`dl.google.com` → href `http://dl.google.com`),锚文本却还是
+/// 没有 scheme 的原样。只认精确相等的话,这种链接会被写成
+/// `[dl.google.com](http://dl.google.com)` —— 用户写的裸 URL 被悄悄改写成
+/// markdown 链接语法(打开一次帖子就变形)。
+bool _isBareUrlText(String text, String href) {
+  if (text == href) return true;
+  for (final scheme in const ['https://', 'http://']) {
+    if (href.startsWith(scheme) && href.substring(scheme.length) == text) {
+      return true;
+    }
+  }
+  return false;
+}
+
 String _inlineToMarkdown(EditableTextContent content) {
   final text = content.text;
   if (text.isEmpty) return '';
@@ -265,7 +282,7 @@ String _inlineToMarkdown(EditableTextContent content) {
       if (m.kind == MarkKind.link &&
           m.attr != null &&
           m.attr!.isNotEmpty &&
-          text.substring(m.start, m.end) == m.attr)
+          _isBareUrlText(text.substring(m.start, m.end), m.attr!))
         m,
   };
 
