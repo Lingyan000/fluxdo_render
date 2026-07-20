@@ -42,12 +42,47 @@ import '../render/spoiler_effect.dart';
 import '../selection/projection.dart';
 import '../selection/projection_builder.dart';
 
+/// 挂载上下文宿主:flatten 产物与当前挂载点(State)之间的活 context 桥。
+///
+/// recognizer 的 onTap 闭包只捕获本对象(随 [FlattenResult] 走,可安全跨
+/// State 复用/进全局缓存),点击时经 [context] 现取挂载方登记的活 context
+/// —— 产物重挂载后不再持有已销毁 Element 的悬空引用(旧契约:闭包直接
+/// 捕获 flatten 时的 context,State 级缓存下恰好同生共死,全局缓存下必悬空)。
+///
+/// 支持多重挂载(同一产物同时挂正文与预览 sheet):attach 压栈,
+/// detach 只摘自己,[context] 取最近仍挂载的一个。
+class SpanMountContext {
+  final List<BuildContext> _contexts = [];
+
+  /// 最近挂载且仍在树上的 context;全部卸载时返回 null。
+  BuildContext? get context {
+    for (var i = _contexts.length - 1; i >= 0; i--) {
+      final c = _contexts[i];
+      if (c.mounted) return c;
+      _contexts.removeAt(i); // 顺手清死引用
+    }
+    return null;
+  }
+
+  /// 挂载方(承载 span 树的 widget)在 build 时登记自己的 context。
+  void attach(BuildContext context) {
+    _contexts.remove(context);
+    _contexts.add(context);
+  }
+
+  /// 挂载方 dispose 时注销(只摘自己,不影响其他挂载点)。
+  void detach(BuildContext context) {
+    _contexts.remove(context);
+  }
+}
+
 /// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers + 选区映射表。
 class FlattenResult {
   FlattenResult({
     required this.span,
     required this.recognizers,
     required this.projection,
+    required this.mount,
   });
 
   final TextSpan span;
@@ -59,6 +94,51 @@ class FlattenResult {
   /// 渲染偏移 ↔ 逻辑投影 映射表(自研选区复制/引用用)。
   /// 与 [span] 同源(同一份 inlines),渲染偏移坐标系一致。
   final RenderTextProjection projection;
+
+  /// 挂载上下文桥:recognizer 点击时经它取活 context(不捕获 flatten 时
+  /// 的 context)。承载 span 的 widget 须在 build 时 [SpanMountContext.attach]、
+  /// dispose 时 detach;未挂载时点击 no-op。
+  final SpanMountContext mount;
+}
+
+/// 单次 flatten 的参数包:handlers/尺寸/上下文 + recognizer 累计列表。
+/// 一次 flatten 一个实例,替代原先逐方法透传的 13 个位置参数。
+class _FlattenPass {
+  _FlattenPass({
+    required this.handler,
+    required this.emojiBuilder,
+    required this.mentionHandler,
+    required this.imageBuilder,
+    required this.footnoteHandler,
+    required this.localDateBuilder,
+    required this.mathInlineBuilder,
+    required this.onDownloadAttachment,
+    required this.emojiBaseSize,
+    required this.totalImagesInPost,
+    required this.context,
+    required this.mount,
+  });
+
+  final LinkActionHandler handler;
+  final EmojiImageBuilder emojiBuilder;
+  final MentionTapHandler mentionHandler;
+  final ImageContentBuilder imageBuilder;
+  final FootnoteTapHandler footnoteHandler;
+  final LocalDateBuilder? localDateBuilder;
+  final MathInlineBuilder? mathInlineBuilder;
+  final AttachmentDownloadHandler? onDownloadAttachment;
+  final double emojiBaseSize;
+  final int totalImagesInPost;
+
+  /// flatten 期间同步读主题色 + 判定"是否创建 recognizer"用;
+  /// **不进任何点击闭包**(那边走 [mount])。
+  final BuildContext? context;
+
+  /// 点击闭包经它现取挂载方活 context(见 [SpanMountContext])。
+  final SpanMountContext mount;
+
+  /// 本次 flatten 创建的 recognizer 累计表(随 FlattenResult 返回)。
+  final List<GestureRecognizer> recognizers = [];
 }
 
 class InlineFlattener {
@@ -76,7 +156,11 @@ class InlineFlattener {
   /// [defaultImageContentBuilder](Image.network 兜底)。
   /// [totalImagesInPost]:当前 post 内 ImageRun 总数,透传给 imageBuilder
   /// 用作 gallery viewer 的 totalCount(主项目 Hero / 大图浏览用)。
-  /// [context]:link/mention 点击 + emoji 字号探测时传给 handler 用。
+  /// [context]:仅两个用途 —— ① flatten 期间同步读主题色(link 主色 /
+  /// 行内代码字色 / mention 主色,共 3 处,产物带色所以调用方缓存 key 须含
+  /// ColorScheme);② 作"交互开关":null 时不创建 recognizer(纯 unit test
+  /// 场景)。**点击回调不捕获它**——tap 时经 [FlattenResult.mount] 现取
+  /// 挂载方登记的活 context,产物可安全跨挂载复用。
   FlattenResult flatten(
     List<InlineNode> inlines,
     TextStyle baseStyle, {
@@ -86,101 +170,50 @@ class InlineFlattener {
     ImageContentBuilder? imageContentBuilder,
     FootnoteTapHandler? footnoteTapHandler,
     LocalDateBuilder? localDateBuilder,
-
     MathInlineBuilder? mathInlineBuilder,
     AttachmentDownloadHandler? onDownloadAttachment,
     int totalImagesInPost = 0,
     BuildContext? context,
   }) {
-    final recognizers = <GestureRecognizer>[];
-    final children = <InlineSpan>[];
-    final handler = linkHandler ?? defaultLinkHandler;
-    final emojiBuilder = emojiImageBuilder ?? defaultEmojiImageBuilder;
-    final mentionHandler = mentionTapHandler ?? defaultMentionTapHandler;
-    final imageBuilder = imageContentBuilder ?? defaultImageContentBuilder;
-    final footnoteHandler = footnoteTapHandler ?? defaultFootnoteTapHandler;
-    final emojiBaseSize = baseStyle.fontSize ?? 14;
-    for (final node in inlines) {
-      children.add(_toSpan(
-        node,
-        handler,
-        emojiBuilder,
-        mentionHandler,
-        imageBuilder,
-        footnoteHandler,
-        localDateBuilder,
-
-        mathInlineBuilder,
-        onDownloadAttachment,
-        emojiBaseSize,
-        totalImagesInPost,
-        context,
-        recognizers,
-      ));
-    }
+    final pass = _FlattenPass(
+      handler: linkHandler ?? defaultLinkHandler,
+      emojiBuilder: emojiImageBuilder ?? defaultEmojiImageBuilder,
+      mentionHandler: mentionTapHandler ?? defaultMentionTapHandler,
+      imageBuilder: imageContentBuilder ?? defaultImageContentBuilder,
+      footnoteHandler: footnoteTapHandler ?? defaultFootnoteTapHandler,
+      localDateBuilder: localDateBuilder,
+      mathInlineBuilder: mathInlineBuilder,
+      onDownloadAttachment: onDownloadAttachment,
+      emojiBaseSize: baseStyle.fontSize ?? 14,
+      totalImagesInPost: totalImagesInPost,
+      context: context,
+      mount: SpanMountContext(),
+    );
+    final children = <InlineSpan>[
+      for (final node in inlines) _toSpan(node, pass),
+    ];
     return FlattenResult(
       span: TextSpan(style: baseStyle, children: children),
-      recognizers: recognizers,
+      recognizers: pass.recognizers,
       projection: buildInlineProjection(inlines),
+      mount: pass.mount,
     );
   }
 
   List<InlineSpan> _build(
     List<InlineNode> nodes,
-    LinkActionHandler handler,
-    EmojiImageBuilder emojiBuilder,
-    MentionTapHandler mentionHandler,
-    ImageContentBuilder imageBuilder,
-    FootnoteTapHandler footnoteHandler,
-    LocalDateBuilder? localDateBuilder,
-
-    MathInlineBuilder? mathInlineBuilder,
-    AttachmentDownloadHandler? onDownloadAttachment,
-    double emojiBaseSize,
-    int totalImagesInPost,
-    BuildContext? context,
-    List<GestureRecognizer> recognizers, {
+    _FlattenPass p, {
     GestureRecognizer? inheritedRecognizer,
   }) {
     return [
       for (final node in nodes)
-        _toSpan(
-          node,
-          handler,
-          emojiBuilder,
-          mentionHandler,
-          imageBuilder,
-          footnoteHandler,
-
-          localDateBuilder,
-
-
-          mathInlineBuilder,
-          onDownloadAttachment,
-          emojiBaseSize,
-          totalImagesInPost,
-          context,
-          recognizers,
-          inheritedRecognizer: inheritedRecognizer,
-        ),
+        _toSpan(node, p, inheritedRecognizer: inheritedRecognizer),
     ];
   }
 
   InlineSpan _toSpan(
     InlineNode node,
-    LinkActionHandler handler,
-    EmojiImageBuilder emojiBuilder,
-    MentionTapHandler mentionHandler,
-    ImageContentBuilder imageBuilder,
-    FootnoteTapHandler footnoteHandler,
-    LocalDateBuilder? localDateBuilder,
-
-    MathInlineBuilder? mathInlineBuilder,
-    AttachmentDownloadHandler? onDownloadAttachment,
-    double emojiBaseSize,
-    int totalImagesInPost,
-    BuildContext? context,
-    List<GestureRecognizer> recognizers, {
+    _FlattenPass p, {
     GestureRecognizer? inheritedRecognizer,
   }) {
     return switch (node) {
@@ -190,85 +223,26 @@ class InlineFlattener {
         ),
       EmRun(:final children) => TextSpan(
           style: const TextStyle(fontStyle: FontStyle.italic),
-          children: _build(
-            children,
-            handler,
-            emojiBuilder,
-            mentionHandler,
-            imageBuilder,
-            footnoteHandler,
-
-            localDateBuilder,
-
-
-            mathInlineBuilder,
-            onDownloadAttachment,
-            emojiBaseSize,
-            totalImagesInPost,
-            context,
-            recognizers,
-            inheritedRecognizer: inheritedRecognizer,
-          ),
+          children:
+              _build(children, p, inheritedRecognizer: inheritedRecognizer),
         ),
       StrongRun(:final children) => TextSpan(
           style: const TextStyle(fontWeight: FontWeight.bold),
-          children: _build(
-            children,
-            handler,
-            emojiBuilder,
-            mentionHandler,
-            imageBuilder,
-            footnoteHandler,
-
-            localDateBuilder,
-
-
-            mathInlineBuilder,
-            onDownloadAttachment,
-            emojiBaseSize,
-            totalImagesInPost,
-            context,
-            recognizers,
-            inheritedRecognizer: inheritedRecognizer,
-          ),
+          children:
+              _build(children, p, inheritedRecognizer: inheritedRecognizer),
         ),
       StyledRun(:final kind, :final children) => _buildStyledSpan(
           kind,
           children,
-          handler,
-          emojiBuilder,
-          mentionHandler,
-          imageBuilder,
-          footnoteHandler,
-          localDateBuilder,
-          mathInlineBuilder,
-          onDownloadAttachment,
-          emojiBaseSize,
-          totalImagesInPost,
-          context,
-          recognizers,
+          p,
           inheritedRecognizer: inheritedRecognizer,
         ),
       // 行内 CSS 着色:字色/背景色应用到 TextSpan(随文换行、可选区);color
       // 为 null 时不覆盖父级色(继承),background 为 null 时无底色。
       ColoredRun(:final color, :final background, :final children) => TextSpan(
           style: TextStyle(color: color, backgroundColor: background),
-          children: _build(
-            children,
-            handler,
-            emojiBuilder,
-            mentionHandler,
-            imageBuilder,
-            footnoteHandler,
-            localDateBuilder,
-            mathInlineBuilder,
-            onDownloadAttachment,
-            emojiBaseSize,
-            totalImagesInPost,
-            context,
-            recognizers,
-            inheritedRecognizer: inheritedRecognizer,
-          ),
+          children:
+              _build(children, p, inheritedRecognizer: inheritedRecognizer),
         ),
       LineBreakRun() => TextSpan(
           text: '\n',
@@ -278,120 +252,74 @@ class InlineFlattener {
           _buildLinkSpan(
             href,
             children,
-            handler,
-            emojiBuilder,
-            mentionHandler,
-            imageBuilder,
-            footnoteHandler,
-            localDateBuilder,
-            mathInlineBuilder,
-            onDownloadAttachment,
-            emojiBaseSize,
-            totalImagesInPost,
-            context,
-            recognizers,
+            p,
             isAttachment: isAttachment,
             filename: filename,
           ),
       InlineCodeRun(:final text) => _buildInlineCodeSpan(
           text,
-          context,
+          p.context,
           inheritedRecognizer: inheritedRecognizer,
         ),
       EmojiRun() => _buildEmojiSpan(
           node,
-          emojiBuilder,
-          emojiBaseSize,
-          context,
+          p.emojiBuilder,
+          p.emojiBaseSize,
           inheritedRecognizer: inheritedRecognizer,
         ),
       MentionRun() => node.statusEmoji == null
-          ? _buildMentionTextSpan(
-              node,
-              mentionHandler,
-              emojiBaseSize,
-              context,
-              recognizers,
-            )
-          : _buildMentionSpan(
-              node,
-              emojiBuilder,
-              mentionHandler,
-              emojiBaseSize,
-              context,
-            ),
+          ? _buildMentionTextSpan(node, p)
+          : _buildMentionSpan(node, p),
       ImageRun() => _buildImageSpan(
           node,
-          imageBuilder,
-          totalImagesInPost,
-          context,
+          p.imageBuilder,
+          p.totalImagesInPost,
         ),
-      SpoilerRun(:final children) => _buildSpoilerSpan(
-          children,
-          handler,
-          emojiBuilder,
-          mentionHandler,
-          imageBuilder,
-          footnoteHandler,
-
-          localDateBuilder,
-
-
-          mathInlineBuilder,
-          onDownloadAttachment,
-          emojiBaseSize,
-          totalImagesInPost,
-          context,
-          recognizers,
-        ),
+      SpoilerRun(:final children) => _buildSpoilerSpan(children, p),
       FootnoteRefRun() => _buildFootnoteRefSpan(
           node,
-          footnoteHandler,
-          context,
+          p.footnoteHandler,
+          p.context,
         ),
       LocalDateRun() => _buildLocalDateSpan(
           node,
-          localDateBuilder,
+          p.localDateBuilder,
         ),
       ClickCountRun() => _buildClickCountSpan(node),
-      MathInlineRun() => _buildMathInlineSpan(node, mathInlineBuilder),
+      MathInlineRun() => _buildMathInlineSpan(node, p.mathInlineBuilder),
     };
   }
 
   TextSpan _buildLinkSpan(
     String href,
     List<InlineNode> children,
-    LinkActionHandler handler,
-    EmojiImageBuilder emojiBuilder,
-    MentionTapHandler mentionHandler,
-    ImageContentBuilder imageBuilder,
-    FootnoteTapHandler footnoteHandler,
-    LocalDateBuilder? localDateBuilder,
-
-    MathInlineBuilder? mathInlineBuilder,
-    AttachmentDownloadHandler? onDownloadAttachment,
-    double emojiBaseSize,
-    int totalImagesInPost,
-    BuildContext? context,
-    List<GestureRecognizer> recognizers, {
+    _FlattenPass p, {
     bool isAttachment = false,
     String filename = '',
   }) {
-    final ctx = context;
+    final ctx = p.context;
+    final mount = p.mount;
+    final handler = p.handler;
+    final onDownloadAttachment = p.onDownloadAttachment;
     // 附件:优先走主项目注入的附件下载回调(带 filename);未注入则降级到
     // 普通 link handler(主项目 launchContentLink 内部按 /uploads/ 路径仍能
     // 识别附件并下载/外开)。普通链接:走 link handler。
+    //
+    // onTap 闭包只捕获 mount(不捕获 flatten 时的 ctx):点击时现取挂载方
+    // 登记的活 context,产物跨挂载复用不悬空;未挂载时 no-op。
     final recognizer = ctx == null
         ? null
         : (TapGestureRecognizer()
           ..onTap = () {
+            final live = mount.context;
+            if (live == null) return;
             if (isAttachment && onDownloadAttachment != null) {
-              onDownloadAttachment(ctx, href, filename);
+              onDownloadAttachment(live, href, filename);
             } else {
-              handler(ctx, href);
+              handler(live, href);
             }
           });
-    if (recognizer != null) recognizers.add(recognizer);
+    if (recognizer != null) p.recognizers.add(recognizer);
 
     // 样式对齐 legacy(DiscourseHtmlContentWidget customStylesBuilder):
     //   `{color: theme.colorScheme.primary, text-decoration: none}`
@@ -402,50 +330,34 @@ class InlineFlattener {
     // hit test 只对 span 本身的 `text` 字段生效。所以 link 子树里的
     // 所有叶子 span(TextRun / InlineCodeRun / LineBreakRun)都得把
     // 同一个 recognizer 挂上,才能在任意位置 tap 都触发 onTap。
-    final linkChildren = _build(
-      children,
-      handler,
-      emojiBuilder,
-      mentionHandler,
-      imageBuilder,
-      footnoteHandler,
-
-      localDateBuilder,
-
-
-      mathInlineBuilder,
-      onDownloadAttachment,
-      emojiBaseSize,
-      totalImagesInPost,
-      context,
-      recognizers,
-      inheritedRecognizer: recognizer,
-    );
+    final linkChildren = _build(children, p, inheritedRecognizer: recognizer);
 
     // 附件:在文件名前加一个下载图标(WidgetSpan)。图标本体用
     // GestureDetector 兜底点击(WidgetSpan 不吃 TextSpan.recognizer):
-    // 优先 onDownloadAttachment,否则降级 handler。
+    // 优先 onDownloadAttachment,否则降级 handler。图标用自己的活
+    // iconCtx(Theme/onTap 都不依赖 flatten context)。
     if (isAttachment) {
+      final interactive = ctx != null;
       final iconSpan = WidgetSpan(
         alignment: PlaceholderAlignment.middle,
         child: Builder(
           builder: (iconCtx) {
             final color = Theme.of(iconCtx).colorScheme.primary;
             final size = (DefaultTextStyle.of(iconCtx).style.fontSize ??
-                    emojiBaseSize) *
+                    p.emojiBaseSize) *
                 0.95;
             final icon = Padding(
               padding: const EdgeInsets.only(right: 2),
               child: Icon(Icons.download_rounded, size: size, color: color),
             );
-            if (ctx == null) return icon;
+            if (!interactive) return icon;
             return GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () {
                 if (onDownloadAttachment != null) {
-                  onDownloadAttachment(ctx, href, filename);
+                  onDownloadAttachment(iconCtx, href, filename);
                 } else {
-                  handler(ctx, href);
+                  handler(iconCtx, href);
                 }
               },
               child: icon,
@@ -478,36 +390,12 @@ class InlineFlattener {
   InlineSpan _buildStyledSpan(
     InlineStyleKind kind,
     List<InlineNode> children,
-    LinkActionHandler handler,
-    EmojiImageBuilder emojiBuilder,
-    MentionTapHandler mentionHandler,
-    ImageContentBuilder imageBuilder,
-    FootnoteTapHandler footnoteHandler,
-    LocalDateBuilder? localDateBuilder,
-    MathInlineBuilder? mathInlineBuilder,
-    AttachmentDownloadHandler? onDownloadAttachment,
-    double emojiBaseSize,
-    int totalImagesInPost,
-    BuildContext? context,
-    List<GestureRecognizer> recognizers, {
+    _FlattenPass p, {
     GestureRecognizer? inheritedRecognizer,
   }) {
-    List<InlineSpan> buildChildren() => _build(
-          children,
-          handler,
-          emojiBuilder,
-          mentionHandler,
-          imageBuilder,
-          footnoteHandler,
-          localDateBuilder,
-          mathInlineBuilder,
-          onDownloadAttachment,
-          emojiBaseSize,
-          totalImagesInPost,
-          context,
-          recognizers,
-          inheritedRecognizer: inheritedRecognizer,
-        );
+    final emojiBaseSize = p.emojiBaseSize;
+    List<InlineSpan> buildChildren() =>
+        _build(children, p, inheritedRecognizer: inheritedRecognizer);
 
     // 上/下标:小字号 + 垂直偏移(WidgetSpan)。对齐 fwfh:0.833x + super/sub。
     if (kind == InlineStyleKind.superscript ||
@@ -635,8 +523,7 @@ class InlineFlattener {
   WidgetSpan _buildEmojiSpan(
     EmojiRun emoji,
     EmojiImageBuilder emojiBuilder,
-    double emojiBaseSize,
-    BuildContext? context, {
+    double emojiBaseSize, {
     GestureRecognizer? inheritedRecognizer,
   }) {
     final size = emoji.isOnlyEmoji ? 32.0 : emojiBaseSize;
@@ -646,13 +533,14 @@ class InlineFlattener {
         : const EdgeInsets.symmetric(horizontal: 2.0);
     // 选区文本由自研选区的映射表(buildInlineProjection)统一投影成 `:name:`,
     // 不在此处用 SelectableAdapter(那是已废弃的 SelectionArea 方案)。
+    // builder 用挂载处的活 Builder ctx(编辑器路径一直如此),产物可跨挂载复用。
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: Padding(
         padding: margin,
         child: Builder(
           builder: (ctx) {
-            return emojiBuilder(context ?? ctx, emoji, size);
+            return emojiBuilder(ctx, emoji, size);
           },
         ),
       ),
@@ -681,20 +569,21 @@ class InlineFlattener {
   /// InlineCodeBackgroundPainter 按 mentionText 投影区间自绘,点击走
   /// recognizer(链接同款,经 [FlattenResult.recognizers] 释放)。
   /// 带状态 emoji 的 mention 需嵌图,保留 WidgetSpan 路径。
-  TextSpan _buildMentionTextSpan(
-    MentionRun mention,
-    MentionTapHandler mentionHandler,
-    double emojiBaseSize,
-    BuildContext? context,
-    List<GestureRecognizer> recognizers,
-  ) {
-    final scheme = context == null ? null : Theme.of(context).colorScheme;
-    final recognizer = context == null
+  TextSpan _buildMentionTextSpan(MentionRun mention, _FlattenPass p) {
+    final ctx = p.context;
+    final mount = p.mount;
+    final mentionHandler = p.mentionHandler;
+    final scheme = ctx == null ? null : Theme.of(ctx).colorScheme;
+    // onTap 只捕获 mount,点击时现取活 context(链接同款,不悬空)。
+    final recognizer = ctx == null
         ? null
         : (TapGestureRecognizer()
-            ..onTap = () =>
-                mentionHandler(context, mention.username, mention.href));
-    if (recognizer != null) recognizers.add(recognizer);
+          ..onTap = () {
+            final live = mount.context;
+            if (live == null) return;
+            mentionHandler(live, mention.username, mention.href);
+          });
+    if (recognizer != null) p.recognizers.add(recognizer);
     return TextSpan(
       // recognizer 不从父 span 传播,pad 与文本叶子都得挂(整个药丸可点)
       children: [
@@ -705,7 +594,7 @@ class InlineFlattener {
           style: TextStyle(
             color: scheme?.primary,
             // 与 WidgetSpan 版一致:小一号(0.82em)
-            fontSize: emojiBaseSize * 0.82,
+            fontSize: p.emojiBaseSize * 0.82,
           ),
         ),
         TextSpan(text: kInlineCodePadChar, recognizer: recognizer),
@@ -713,18 +602,16 @@ class InlineFlattener {
     );
   }
 
-  WidgetSpan _buildMentionSpan(    MentionRun mention,
-    EmojiImageBuilder emojiBuilder,
-    MentionTapHandler mentionHandler,
-    double emojiBaseSize,
-    BuildContext? context,
-  ) {
+  WidgetSpan _buildMentionSpan(MentionRun mention, _FlattenPass p) {
+    final emojiBuilder = p.emojiBuilder;
+    final mentionHandler = p.mentionHandler;
+    final emojiBaseSize = p.emojiBaseSize;
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: Builder(
         builder: (ctx) {
-          final effectiveCtx = context ?? ctx;
-          final scheme = Theme.of(effectiveCtx).colorScheme;
+          // 全部用挂载处活 ctx:Theme 随挂载点、onTap 不悬空,产物可跨挂载复用。
+          final scheme = Theme.of(ctx).colorScheme;
           final fontSize = emojiBaseSize * 0.82;
           final statusEmojiSize = fontSize * 1.2;
           // chip 高度锁定 = 正文行高(主项目正文统一 height:1.5),让 chip
@@ -732,7 +619,7 @@ class InlineFlattener {
           final lineHeight = emojiBaseSize * 1.5;
           return GestureDetector(
             onTap: () => mentionHandler(
-              effectiveCtx,
+              ctx,
               mention.username,
               mention.href,
             ),
@@ -758,7 +645,7 @@ class InlineFlattener {
                   if (mention.statusEmoji != null) ...[
                     const SizedBox(width: 2),
                     emojiBuilder(
-                      effectiveCtx,
+                      ctx,
                       mention.statusEmoji!,
                       statusEmojiSize,
                     ),
@@ -786,14 +673,13 @@ class InlineFlattener {
     ImageRun image,
     ImageContentBuilder imageBuilder,
     int totalImagesInPost,
-    BuildContext? context,
   ) {
     // lightbox 图(典型形态:Discourse cooked 上传图)单独成行,
     // 加上下小 margin 区隔相邻图片 / 文字。普通 inline <img> 不加。
+    // builder 用挂载处活 ctx(编辑器路径一直如此),产物可跨挂载复用。
     final isLightbox = image.lightboxUrl != null;
     final child = Builder(
-      builder: (ctx) =>
-          imageBuilder(context ?? ctx, image, totalImagesInPost),
+      builder: (ctx) => imageBuilder(ctx, image, totalImagesInPost),
     );
     return WidgetSpan(
       // bottom(≈ CSS img 默认 vertical-align:baseline):图底边贴文字
@@ -819,42 +705,10 @@ class InlineFlattener {
   /// 需要透传 handlers),所以 spoiler 子树用 Text.rich + _build 再展平,
   /// recognizer 仍累计到外层 recognizers 列表里(由 InlineSpanText 统一
   /// dispose)。
-  WidgetSpan _buildSpoilerSpan(
-    List<InlineNode> children,
-    LinkActionHandler handler,
-    EmojiImageBuilder emojiBuilder,
-    MentionTapHandler mentionHandler,
-    ImageContentBuilder imageBuilder,
-    FootnoteTapHandler footnoteHandler,
-    LocalDateBuilder? localDateBuilder,
-
-    MathInlineBuilder? mathInlineBuilder,
-    AttachmentDownloadHandler? onDownloadAttachment,
-    double emojiBaseSize,
-    int totalImagesInPost,
-    BuildContext? context,
-    List<GestureRecognizer> recognizers,
-  ) {
+  WidgetSpan _buildSpoilerSpan(List<InlineNode> children, _FlattenPass p) {
     // 子节点提前 flatten 成 InlineSpan list,避免 _SpoilerInlineWidget
     // 内部还要依赖 InlineFlattener
-    final spans = _build(
-      children,
-      handler,
-      emojiBuilder,
-      mentionHandler,
-      imageBuilder,
-      footnoteHandler,
-
-      localDateBuilder,
-
-
-      mathInlineBuilder,
-      onDownloadAttachment,
-      emojiBaseSize,
-      totalImagesInPost,
-      context,
-      recognizers,
-    );
+    final spans = _build(children, p);
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: _SpoilerInlineWidget(spans: spans),

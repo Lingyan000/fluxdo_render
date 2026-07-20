@@ -14,6 +14,7 @@ export 'src/chunk/html_chunker.dart';
 export 'src/config/render_config.dart';
 export 'src/dev/fixtures_index.dart';
 export 'src/dev/fixtures_index.g.dart';
+export 'src/flatten/flatten_cache.dart';
 export 'src/flatten/inline_flattener.dart';
 export 'src/node/node.dart';
 export 'src/parser/paragraph_parser.dart';

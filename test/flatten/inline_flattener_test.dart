@@ -110,7 +110,12 @@ void main() {
       expect(result.recognizers, hasLength(1));
       expect(result.recognizers[0], isA<TapGestureRecognizer>());
 
-      // 直接触发 onTap 验证 handler 被调
+      // 新契约:点击经 mount 现取活 context,未挂载登记时 no-op(防悬空)
+      (result.recognizers[0] as TapGestureRecognizer).onTap!();
+      expect(tapped, isNull, reason: '未 attach 挂载 context 时点击应 no-op');
+
+      // 挂载登记后点击生效
+      result.mount.attach(capturedContext);
       (result.recognizers[0] as TapGestureRecognizer).onTap!();
       expect(tapped, 'https://example.com');
 
@@ -425,6 +430,8 @@ void main() {
                 tappedHref = href;
               },
             );
+            // 新契约:挂载方登记活 context,recognizer 点击时现取
+            result.mount.attach(c);
             return Text.rich(result.span);
           }),
         ),

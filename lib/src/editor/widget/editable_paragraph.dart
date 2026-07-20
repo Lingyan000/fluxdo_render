@@ -133,6 +133,7 @@ class _EditableParagraphState extends State<EditableParagraph> {
   void _disposeResult() {
     final r = _result;
     if (r != null) {
+      r.mount.detach(context);
       for (final rec in r.recognizers) {
         rec.dispose();
       }
@@ -169,6 +170,9 @@ class _EditableParagraphState extends State<EditableParagraph> {
   @override
   Widget build(BuildContext context) {
     final result = _ensureResult();
+    // 挂载登记:flatten 契约的点击闭包经 mount 现取活 context。
+    // (编辑态 link/mention 不产 recognizer,登记只为契约完整。)
+    result.mount.attach(context);
     final block = widget.block;
     final style = _effectiveStyle;
     final em = widget.baseStyle.fontSize ?? 14;
