@@ -41,14 +41,24 @@ enum MarkKind {
   /// decoration 思路的简化版)。
   spoilerInline,
 
-  /// 链接 `[text](href)`(LinkRun)。唯一带 attr(href)的 mark ——
-  /// 见 [MarkSpan.attr]。编辑态蓝色下划线,不可点(编辑器语义)。
+  /// 链接 `[text](href)`(LinkRun)。带 attr(href)—— 见 [MarkSpan.attr]。
+  /// 编辑态蓝色下划线,不可点(编辑器语义)。
   link,
+
+  /// 前景色 `[color=#rrggbb]…[/color]`(ColoredRun.color)。attr 存色值。
+  ///
+  /// 做成 mark 而不是留给 ColoredRun 岛化,是因为岛是**不可编辑**的:
+  /// 打完一句带色的话整行会变成只读岛、光标直接消失(实测复现)。
+  /// 做成 mark 后文字照常可编辑,颜色只是区间样式。
+  textColor,
+
+  /// 背景色 `[bgcolor=#rrggbb]…[/bgcolor]`(ColoredRun.background)。
+  bgColor,
 }
 
 /// 一段样式区间 `[start, end)`(扁平文本坐标)。
 ///
-/// [attr]:mark 的附加值(目前仅 [MarkKind.link] 的 href)。同 kind
+/// [attr]:mark 的附加值([MarkKind.link] 的 href、颜色系的色值)。同 kind
 /// 不同 attr 的区间**不合并**(两个不同链接相邻仍是两个链接)。
 @immutable
 class MarkSpan {
@@ -133,6 +143,22 @@ class EditableTextContent {
   /// [insertAtom]/fromInlines 建立原子)。
   static String sanitizeText(String input) =>
       input.contains(kAtomChar) ? input.replaceAll(kAtomChar, '') : input;
+
+  /// Color → `#rrggbb`(mark attr 存这个形态,与序列化口径一致)。
+  static String _hex(Color c) =>
+      '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+  /// `#rgb` / `#rrggbb` → Color;解析不出返回 null。
+  static Color? parseHex(String? v) {
+    if (v == null) return null;
+    var h = v.trim();
+    if (!h.startsWith('#')) return null;
+    h = h.substring(1);
+    if (h.length == 3) h = h.split('').map((c) => '$c$c').join();
+    if (h.length != 6) return null;
+    final n = int.tryParse(h, radix: 16);
+    return n == null ? null : Color(0xFF000000 | n);
+  }
 
   /// [offset] 处(其后)的字符是否原子。
   bool isAtomAt(int offset) => atoms.containsKey(offset);
@@ -233,9 +259,15 @@ class EditableTextContent {
           // ProseMirror image 是 inline:true 一等行内节点)
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
+        case ColoredRun(:final color, :final background, :final children):
+          // 颜色 → 带 attr 的 mark(见 MarkKind.textColor 注释:岛化会
+          // 让整行变只读、光标消失)
+          _flattenInto(children, buf, marks, atoms, [
+            ...activeKinds,
+            if (background != null) (MarkKind.bgColor, _hex(background)),
+            if (color != null) (MarkKind.textColor, _hex(color)),
+          ]);
         // ---- 白名单外(防御降级,正常链路由 doc_converter 拦截岛化) ----
-        case ColoredRun(:final children):
-          _flattenInto(children, buf, marks, atoms, activeKinds);
         case FootnoteRefRun():
         case ClickCountRun():
         case MathInlineRun():
@@ -330,10 +362,19 @@ class EditableTextContent {
       };
       // link href:覆盖片段的 link mark 的 attr(同帧唯一)
       String? href;
+      String? fgHex;
+      String? bgHex;
       for (final m in marks) {
-        if (m.kind == MarkKind.link && m.start <= s && m.end >= e) {
-          href = m.attr;
-          break;
+        if (m.start > s || m.end < e) continue;
+        switch (m.kind) {
+          case MarkKind.link:
+            href ??= m.attr;
+          case MarkKind.textColor:
+            fgHex ??= m.attr;
+          case MarkKind.bgColor:
+            bgHex ??= m.attr;
+          default:
+            break;
         }
       }
       if (piece == kAtomChar) {
@@ -346,15 +387,57 @@ class EditableTextContent {
         continue;
       }
       var node = _wrapPiece(piece, kinds, href,
-          forEditing: forEditing, editingLinkColor: editingLinkColor);
+          forEditing: forEditing,
+          editingLinkColor: editingLinkColor,
+          fgHex: fgHex,
+          bgHex: bgHex);
       if (markerColor != null &&
           markerRanges.any((r) => r.$1 <= s && r.$2 >= e)) {
         node = ColoredRun(color: markerColor, children: [node]);
       }
       out.add(node);
     }
-    return out;
+    return _applyOnlyEmoji(out);
   }
+
+  /// Discourse 大表情语义:整段**只有** emoji(空白不算内容)且不超过
+  /// [_maxOnlyEmoji] 个 → 全部标 isOnlyEmoji(渲染 32dp);超了则全部
+  /// 普通尺寸。规则与 cook 引擎实测一致:
+  /// `:a:`→1 大 / `:a: :a: :a:`→3 全大 / 4 个→全不大。
+  ///
+  /// 放在 [toInlines] 里而不是只放导出路径,是因为编辑器实时渲染
+  /// (editable_paragraph)和导出(doc_converter)走的是同一个出口 ——
+  /// 只在导出侧标记会导致"刚插入的 emoji 是小的,切到源码再切回来才
+  /// 变大"(实测复现)。
+  static List<InlineNode> _applyOnlyEmoji(List<InlineNode> out) {
+    var emojiCount = 0;
+    for (final n in out) {
+      if (n is EmojiRun) {
+        emojiCount++;
+        continue;
+      }
+      // 纯空白的文本片段不算内容;其余任何节点都让本段不再是"只有表情"
+      if (n is TextRun && n.text.trim().isEmpty) continue;
+      return out;
+    }
+    if (emojiCount == 0) return out;
+    final large = emojiCount <= _maxOnlyEmoji;
+    var changed = false;
+    final result = [
+      for (final n in out)
+        if (n is EmojiRun && n.isOnlyEmoji != large)
+          () {
+            changed = true;
+            return EmojiRun(name: n.name, url: n.url, isOnlyEmoji: large);
+          }()
+        else
+          n,
+    ];
+    return changed ? result : out;
+  }
+
+  /// 超过这个数量就不再算大表情(对齐 Discourse)。
+  static const int _maxOnlyEmoji = 3;
 
   static InlineNode _wrapAtom(
     InlineNode atom,
@@ -379,6 +462,8 @@ class EditableTextContent {
     String? href, {
     required bool forEditing,
     Color? editingLinkColor,
+    String? fgHex,
+    String? bgHex,
   }) {
     InlineNode node;
     if (kinds.contains(MarkKind.inlineCode)) {
@@ -411,8 +496,9 @@ class EditableTextContent {
           children: [node],
         );
       }
-      return node;
+      return _applyColorMarks(node, kinds, fgHex, bgHex);
     }
+    node = _applyColorMarks(node, kinds, fgHex, bgHex);
     // link/spoiler 包最外(阅读端 <a>/<span class=spoiler> 里嵌样式的形态)
     if (kinds.contains(MarkKind.link)) {
       node = LinkRun(href: href ?? '', children: [node]);
@@ -421,6 +507,19 @@ class EditableTextContent {
       node = SpoilerRun(children: [node]);
     }
     return node;
+  }
+
+  /// 颜色 mark → ColoredRun(前景/背景可同时存在,合成一个节点)。
+  static InlineNode _applyColorMarks(
+    InlineNode node,
+    Set<MarkKind> kinds,
+    String? fgHex,
+    String? bgHex,
+  ) {
+    final fg = kinds.contains(MarkKind.textColor) ? parseHex(fgHex) : null;
+    final bg = kinds.contains(MarkKind.bgColor) ? parseHex(bgHex) : null;
+    if (fg == null && bg == null) return node;
+    return ColoredRun(color: fg, background: bg, children: [node]);
   }
 
   // -----------------------------------------------------------------
@@ -717,6 +816,12 @@ class EditableTextContent {
   /// 返回第一个匹配的 mark；link 不参与展开。
   MarkSpan? markAtBoundary(int offset) {
     for (final m in marks) {
+      // link 与颜色系不参与显形:它们的字面量带值([color=#f00] /
+      // ](href)),而显形的标记表只按 kind 取串、拿不到 attr,展开会把
+      // 色值/链接丢掉。这两类靠工具栏和源码模式编辑。
+      // link 不参与显形(闭标记 ](href) 与链接编辑另有入口)。
+      // 颜色系**参与** —— 展开成 [color=#xxx]…[/color] 字面量才能像
+      // markdown 一样改色值/改范围。
       if (m.kind == MarkKind.link) continue;
       if (offset == m.start || offset == m.end) return m;
     }
@@ -726,9 +831,14 @@ class EditableTextContent {
   /// 展开一个 mark：移除 MarkSpan，在文本对应位置插入标记字符。
   /// 返回 (新 content, 光标偏移量调整值)。
   (EditableTextContent, int) revealMark(MarkSpan mark, int cursorOffset) {
-    final open = _markOpenTag(mark.kind);
-    // link 的闭标记带 href:`](https://…)` —— 用固定 `]` 会把 href
-    // 直接丢掉(展开再折叠 = 链接变纯文本)。显形出来正好可以改地址。
+    // 带 attr 的 mark 要把值写进字面量,否则展开再折叠就把值丢了:
+    // link 的值在**闭**标记(`](href)`),颜色的值在**开**标记
+    // (`[color=#f00]`)。
+    final open = switch (mark.kind) {
+      MarkKind.textColor => '[color=${mark.attr ?? ''}]',
+      MarkKind.bgColor => '[bgcolor=${mark.attr ?? ''}]',
+      _ => _markOpenTag(mark.kind),
+    };
     final close = mark.kind == MarkKind.link
         ? '](${mark.attr ?? ''})'
         : _markCloseTag(mark.kind);
@@ -753,14 +863,28 @@ class EditableTextContent {
     MarkKind kind,
     int cursorOffset,
   ) {
-    final open = _markOpenTag(kind);
     final close = _markCloseTag(kind);
-    final openLen = open.length;
     final closeLen = close.length;
-    // 验证开标记仍在 revealStart 位置
-    if (revealStart + openLen > text.length) return null;
-    if (text.substring(revealStart, revealStart + openLen) != open) {
-      return null;
+    // 开标记:颜色系带色值,长度随用户编辑变化 → 正则取;其余定长比对。
+    final int openLen;
+    String? openAttr;
+    final openRe = switch (kind) {
+      MarkKind.textColor => _colorOpenRe,
+      MarkKind.bgColor => _bgColorOpenRe,
+      _ => null,
+    };
+    if (openRe != null) {
+      final m = openRe.matchAsPrefix(text, revealStart);
+      if (m == null) return null;
+      openLen = m.end - m.start;
+      openAttr = m.group(1);
+    } else {
+      final open = _markOpenTag(kind);
+      openLen = open.length;
+      if (revealStart + openLen > text.length) return null;
+      if (text.substring(revealStart, revealStart + openLen) != open) {
+        return null;
+      }
     }
     // 从末尾往前找配对闭标记（避免匹配用户输入的同字符）
     final contentStart = revealStart + openLen;
@@ -778,6 +902,7 @@ class EditableTextContent {
     } else {
       closePos = text.lastIndexOf(close, text.length);
       closeLenActual = closeLen;
+      attr ??= openAttr; // 颜色:值在开标记里
     }
     if (closePos < contentStart) return null;
     final closeEnd = closePos + closeLenActual;
@@ -815,6 +940,10 @@ class EditableTextContent {
 /// link 的闭标记 `](href)`(href 允许为空;不含 `)` 字符)。
 final RegExp _linkCloseRe = RegExp(r'\]\(([^)]*)\)');
 
+/// 颜色开标记(色值用户可改 → 正则,不能定长比对)。
+final RegExp _colorOpenRe = RegExp(r'\[color=([^\]]*)\]');
+final RegExp _bgColorOpenRe = RegExp(r'\[bgcolor=([^\]]*)\]');
+
 /// mark 开标记。
 String _markOpenTag(MarkKind kind) => switch (kind) {
       MarkKind.strong => '**',
@@ -824,6 +953,8 @@ String _markOpenTag(MarkKind kind) => switch (kind) {
       MarkKind.lineThrough => '~~',
       MarkKind.spoilerInline => '[spoiler]',
       MarkKind.link => '[',
+      // 不参与显形(见 markAtBoundary),给个空串保 switch 穷尽
+      MarkKind.textColor || MarkKind.bgColor => '',
     };
 
 /// mark 闭标记。
@@ -835,4 +966,6 @@ String _markCloseTag(MarkKind kind) => switch (kind) {
       MarkKind.lineThrough => '~~',
       MarkKind.spoilerInline => '[/spoiler]',
       MarkKind.link => ']',
+      MarkKind.textColor => '[/color]',
+      MarkKind.bgColor => '[/bgcolor]',
     };

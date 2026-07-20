@@ -371,8 +371,8 @@ class EditorImeClient with TextInputClient {
     if (rawDiff != null && rawDiff.inserted.contains('\n')) {
       final withoutBreaks = rawDiff.inserted.replaceAll('\n', '');
       if (withoutBreaks.isEmpty && rawDiff.oldEnd == rawDiff.start) {
-        // 纯插入换行 = 回车 → 分段
-        state.splitBlock();
+        // 纯插入换行 = 回车 → 按宿主策略分段或插软换行
+        state.insertNewline();
         syncFromState(show: false);
         return;
       }
@@ -587,7 +587,7 @@ class EditorImeClient with TextInputClient {
       _applyingPlatformUpdate = true;
       try {
         state.sealHistory();
-        state.splitBlock();
+        state.insertNewline();
         syncFromState(show: false);
       } finally {
         _applyingPlatformUpdate = false;

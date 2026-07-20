@@ -496,7 +496,9 @@ void main() {
         serializeIslandNode(const ParagraphNode(id: 'b', inlines: [
           ColoredRun(color: Color(0xFFE03E2D), children: [TextRun('红')]),
         ])),
-        '<span style="color:#e03e2d">红</span>',
+        // BBCode 而非 span[style]:后者的 style 会被消毒器剥掉,
+        // 客户端 cook 往返门禁过不了(见 _serializeColored 注释)
+        '[color=#e03e2d]红[/color]',
       );
     });
 

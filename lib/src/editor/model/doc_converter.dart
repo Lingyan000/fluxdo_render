@@ -58,6 +58,9 @@ bool isEditableInline(InlineNode n) => switch (n) {
             (isOneboxLink
                 ? href.isNotEmpty
                 : children.every(isEditableInline)),
+      // 颜色:mark 化(MarkKind.textColor/bgColor),内容照常可编辑 ——
+      // 不放行的话带色的整行会被岛化成只读,光标直接消失。
+      ColoredRun(:final children) => children.every(isEditableInline),
       StyledRun(:final kind, :final children) => switch (kind) {
           InlineStyleKind.underline ||
           InlineStyleKind.lineThrough =>
@@ -421,18 +424,10 @@ BlockNode _textBlockToNode(TextBlock block, String Function() nextId) {
   return ParagraphNode(id: nextId(), inlines: _exportInlines(block));
 }
 
-/// toInlines + only-emoji 还原:整块恰一个 emoji 原子(无其他内容)时
-/// 标记 isOnlyEmoji(Discourse 大表情语义)。
-List<InlineNode> _exportInlines(TextBlock block) {
-  final inlines = block.content.toInlines();
-  if (inlines.length == 1 && inlines.first is EmojiRun) {
-    final e = inlines.first as EmojiRun;
-    if (!e.isOnlyEmoji) {
-      return [EmojiRun(name: e.name, url: e.url, isOnlyEmoji: true)];
-    }
-  }
-  return inlines;
-}
+/// toInlines 即可 —— only-emoji(Discourse 大表情)由
+/// [EditableTextContent.toInlines] 统一判定,编辑态渲染与导出共用同一
+/// 套规则(此前只在导出侧标,导致实时插入的 emoji 不变大)。
+List<InlineNode> _exportInlines(TextBlock block) => block.content.toInlines();
 
 /// 连续 listItem run(同容器层)→ ListNode 树(深度栈重建)。
 ///

@@ -162,9 +162,6 @@ class _RevealedAtom {
   final String literal;
 }
 
-int _markOpenTagLen(MarkKind kind) => _markOpenTagStr(kind).length;
-int _markCloseTagLen(MarkKind kind) => _markCloseTagStr(kind).length;
-
 String _markOpenTagStr(MarkKind kind) => switch (kind) {
       MarkKind.strong => '**',
       MarkKind.em => '*',
@@ -173,6 +170,8 @@ String _markOpenTagStr(MarkKind kind) => switch (kind) {
       MarkKind.lineThrough => '~~',
       MarkKind.spoilerInline => '[spoiler]',
       MarkKind.link => '[',
+      // 颜色系不参与显形(见 EditableTextContent.markAtBoundary)
+      MarkKind.textColor || MarkKind.bgColor => '',
     };
 
 String _markCloseTagStr(MarkKind kind) => switch (kind) {
@@ -183,7 +182,28 @@ String _markCloseTagStr(MarkKind kind) => switch (kind) {
       MarkKind.lineThrough => '~~',
       MarkKind.spoilerInline => '[/spoiler]',
       MarkKind.link => ']',
+      MarkKind.textColor => '[/color]',
+      MarkKind.bgColor => '[/bgcolor]',
     };
+
+/// 颜色系开标记的正则(色值用户可改 → 长度不固定,不能定长前缀比对)。
+RegExp? _openTagReFor(MarkKind kind) => switch (kind) {
+      MarkKind.textColor => RegExp(r'\[color=([^\]]*)\]'),
+      MarkKind.bgColor => RegExp(r'\[bgcolor=([^\]]*)\]'),
+      _ => null,
+    };
+
+/// [start] 处开标记的实际长度;不匹配返回 null。
+int? _openTagLenAt(String text, int start, MarkKind kind) {
+  final re = _openTagReFor(kind);
+  if (re != null) {
+    final m = re.matchAsPrefix(text, start);
+    return m == null ? null : m.end - m.start;
+  }
+  final tag = _markOpenTagStr(kind);
+  if (start + tag.length > text.length) return null;
+  return text.substring(start, start + tag.length) == tag ? tag.length : null;
+}
 
 /// 编辑器状态机。
 class EditorState extends ChangeNotifier {
@@ -354,11 +374,10 @@ class EditorState extends ChangeNotifier {
     final r = _revealed;
     if (r != null && r.blockId == blockId) {
       final text = block.content.text;
-      final openTag = _markOpenTagStr(r.kind);
+      final openLen = _openTagLenAt(text, r.revealStart, r.kind);
       final closeTag = _markCloseTagStr(r.kind);
-      final openEnd = r.revealStart + openTag.length;
-      if (openEnd <= text.length &&
-          text.substring(r.revealStart, openEnd) == openTag) {
+      if (openLen != null) {
+        final openEnd = r.revealStart + openLen;
         out.add((r.revealStart, openEnd));
         final closePos = text.indexOf(closeTag, openEnd);
         if (closePos >= 0) out.add((closePos, closePos + closeTag.length));
@@ -660,17 +679,13 @@ class EditorState extends ChangeNotifier {
     if (sel.extent.blockId != r.blockId) return false;
     final block = textBlockById(r.blockId);
     if (block == null) return false;
-    final open = _markOpenTagLen(r.kind);
-    final close = _markCloseTagLen(r.kind);
     // 展开区域 = [revealStart, revealStart + open + content + close]
     // 需找到闭标记位置
     final text = block.content.text;
-    final openTag = _markOpenTagStr(r.kind);
+    final open = _openTagLenAt(text, r.revealStart, r.kind);
+    if (open == null) return false;
     final closeTag = _markCloseTagStr(r.kind);
-    if (r.revealStart + open > text.length) return false;
-    if (text.substring(r.revealStart, r.revealStart + open) != openTag) {
-      return false;
-    }
+    final close = closeTag.length;
     final closePos = text.indexOf(closeTag, r.revealStart + open);
     if (closePos < 0) return false;
     final regionEnd = closePos + close;
@@ -1323,6 +1338,33 @@ class EditorState extends ChangeNotifier {
       base: EditorPosition(blockId: islandId, offset: 0),
       extent: EditorPosition(blockId: islandId, offset: 1),
     ));
+  }
+
+  /// 回车是否插**软换行**(段内 `\n` → cook 成 `<br>`)而非新建块。
+  ///
+  /// 宿主偏好,硬件按键链与 IME 两条回车路径共用(见 [insertNewline])。
+  /// 默认 false = 保持"回车即分块"的历史语义,由宿主显式打开。
+  ///
+  /// 背景:块间序列化用 `\n\n`,cook 成两个 `<p>`,行距比 Discourse
+  /// 网页版 composer(回车插单个 `\n`)明显大。
+  bool enterInsertsSoftBreak = false;
+
+  /// 回车的统一入口:按 [enterInsertsSoftBreak] 决定软换行还是分块。
+  ///
+  /// 列表项与标题里始终分块 —— 前者要接着开下一条,后者要退出标题,
+  /// 软换行在这两种块里没有意义。
+  void insertNewline() {
+    if (!enterInsertsSoftBreak) {
+      splitBlock();
+      return;
+    }
+    final sel = _selection;
+    final block = sel == null ? null : textBlockById(sel.extent.blockId);
+    if (block == null || block.isListItem || block.isHeading) {
+      splitBlock();
+      return;
+    }
+    insertText('\n');
   }
 
   /// 光标处回车分块(属性感知,语义表见计划)。

@@ -201,6 +201,10 @@ String _serializeListRun(List<TextBlock> run) {
 /// lineThrough;inlineCode 独占由 toInlines 语义保证,这里同优先级处理即可)。
 const _markOrder = [
   MarkKind.spoilerInline,
+  // 颜色包在 link 外层:cook 实测 `[color=…][…](url)[/color]` 可解析,
+  // 反过来 link 里嵌 color 会让锚文本被 BBCode 切碎
+  MarkKind.bgColor,
+  MarkKind.textColor,
   MarkKind.link,
   MarkKind.strong,
   MarkKind.em,
@@ -218,6 +222,8 @@ String _openTag(MarkSpan m, {required bool htmlEmphasis}) =>
       MarkKind.lineThrough => '~~',
       MarkKind.spoilerInline => '[spoiler]',
       MarkKind.link => '[',
+      MarkKind.textColor => '[color=${m.attr ?? ''}]',
+      MarkKind.bgColor => '[bgcolor=${m.attr ?? ''}]',
     };
 
 String _closeTag(MarkSpan m, {required bool htmlEmphasis}) =>
@@ -229,6 +235,8 @@ String _closeTag(MarkSpan m, {required bool htmlEmphasis}) =>
       MarkKind.lineThrough => '~~',
       MarkKind.spoilerInline => '[/spoiler]',
       MarkKind.link => '](${m.attr ?? ''})',
+      MarkKind.textColor => '[/color]',
+      MarkKind.bgColor => '[/bgcolor]',
     };
 
 /// 是否存在交错区间(a.start < b.start < a.end < b.end)。
@@ -786,20 +794,28 @@ String _serializeLocalDate(LocalDateRun n) {
   return buf.toString();
 }
 
-/// 着色 span 重建(`<span style="color:…">`,服务端 HTML 白名单形态)。
+/// 着色重建 → **BBCode**(`[color=…]` / `[bgcolor=…]`)。
+///
+/// 为什么不写 `<span style="color:…">`(服务端 cooked 的原始形态):
+/// Discourse 的 HTML 消毒器会把 span 上的 style 属性剥掉(实测
+/// `<span style="color:#FF0000">红</span>` → `<span>红</span>`),
+/// 只有 bbcode-color 插件在注册语法的同时把它加进了白名单。于是写
+/// span 形态的 raw 经客户端 cook 会丢色 —— 往返门禁(cook(raw) vs
+/// cook(docToRaw(doc)))必然不等,整帖降级源码模式。
+/// `[color=…]` 两端都认:服务端有插件、客户端有本地转换。
 String _serializeColored(ColoredRun n) {
   String hex(Color c) {
     final v = c.toARGB32() & 0xFFFFFF;
     return '#${v.toRadixString(16).padLeft(6, '0')}';
   }
 
-  final styles = <String>[
-    if (n.color != null) 'color:${hex(n.color!)}',
-    if (n.background != null) 'background-color:${hex(n.background!)}',
-  ];
-  final inner = _serializeIslandInlines(n.children);
-  if (styles.isEmpty) return inner;
-  return '<span style="${styles.join(';')}">$inner</span>';
+  var out = _serializeIslandInlines(n.children);
+  // 前景包在里层、背景在外层(与解析侧的嵌套顺序一致)
+  if (n.color != null) out = '[color=${hex(n.color!)}]$out[/color]';
+  if (n.background != null) {
+    out = '[bgcolor=${hex(n.background!)}]$out[/bgcolor]';
+  }
+  return out;
 }
 
 String _serializeListNode(ListNode list, int depth) {
