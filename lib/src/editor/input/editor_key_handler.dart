@@ -293,6 +293,18 @@ bool _producedPrintable(KeyEvent event) {
   return ch != null && ch.isNotEmpty && ch.codeUnitAt(0) >= 0x20;
 }
 
+/// Shift 是否按下 —— **权威判定**,宿主按键拦截层必须用这个。
+///
+/// 与 [primaryModifierHeld] 同源:`HardwareKeyboard` 的缓存状态在 Windows
+/// 上会失真(中文输入法用 Shift 切中英文,IME 吞掉 key-up)。取**合取**:
+/// 全局说按着 且 本处理器确实收到过 Shift 按下且未收到抬起。
+///
+/// 漏用它的实测后果:宿主 `_handleEnterAsSoftBreak` 的判据是
+/// `soft == shift`,Shift 卡住时「回车=软换行」被反转成分段 —— 用户设置
+/// 了「回车不空行」,回车却插出空行。
+bool shiftModifierHeld() =>
+    HardwareKeyboard.instance.isShiftPressed && _localShiftDown;
+
 /// 主修饰键(Windows/Linux 的 Ctrl、macOS 的 Cmd)是否按下 —— **权威判定**。
 ///
 /// 宿主的按键拦截层必须用这个,而不是直接读 `HardwareKeyboard`:后者在

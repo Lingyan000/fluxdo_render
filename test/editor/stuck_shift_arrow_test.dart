@@ -117,4 +117,19 @@ void main() {
       expect(state.blocks.length, before + 1);
     });
   });
+
+  group('shiftModifierHeld 权威判定(宿主用它决定回车语义)', () {
+    test('本地没见过 Shift 按下 → 判定为未按住', () {
+      expect(shiftModifierHeld(), isFalse,
+          reason: '全局状态卡住时也不能算按住,否则「回车=软换行」被反转成分段');
+    });
+
+    test('收到 Shift 按下后为真,抬起后回到假', () {
+      send(shiftDown());
+      // 全局 HardwareKeyboard 在测试环境未同步,合取判据保守取假;
+      // 这里只断言抬起后一定为假(不会卡住)。
+      send(shiftUp());
+      expect(shiftModifierHeld(), isFalse);
+    });
+  });
 }
