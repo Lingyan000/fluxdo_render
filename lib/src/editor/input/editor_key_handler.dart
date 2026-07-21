@@ -56,8 +56,7 @@ KeyEventResult handleEditorKeyEvent(
   final isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final pressed = HardwareKeyboard.instance;
   final primary = (isMac ? pressed.isMetaPressed : pressed.isControlPressed) ||
-      (!_producedPrintable(event) &&
-          (_localPrimaryDown || _isSyntheticModifiedKey(event)));
+      (!_producedPrintable(event) && _isSyntheticModifiedKey(event));
   final shift = _shiftHeld(event, pressed);
 
   // 跨段选区 + 可打印字符:IME 窗口只覆盖单段,平台模型里没有这个跨段
@@ -254,7 +253,17 @@ void _trackShift(KeyEvent event) {
 bool _shiftHeld(KeyEvent event, HardwareKeyboard pressed) =>
     pressed.isShiftPressed && _localShiftDown;
 
-/// 本地看到的主修饰键是否按下。
+/// 本地看到的主修饰键是否按下(**仅用于诊断/保留,不参与 primary 判定**)。
+///
+/// 曾把它并进 primary 取析取,结果是灾难:Ctrl 的 key-up 一旦丢失,
+/// _localPrimaryDown 永久为真 → **此后每一次回车都被当成 Ctrl+Enter**,
+/// 直接把帖子发出去(实测:回车 / Shift+回车 / Ctrl+回车 全部发送)。
+/// 而它对 Win+V 那个场景本就没用 —— 那里 Flutter 合成的是 Ctrl **抬起**,
+/// 本地跟踪同样会被清掉,真正兜住的是 [_isSyntheticModifiedKey] 的 250ms
+/// 窗口。故 primary 回到「HardwareKeyboard 或 250ms 窗口」这套已验证的判据。
+///
+/// 教训:修饰键判据宁可漏认(顶多快捷键不生效),**绝不能多认** —— 多认
+/// 会触发发送/删除这类不可逆动作。Shift 那条取合取正是这个道理。
 ///
 /// 与 [_localShiftDown] 同源问题、**方向相反**:Ctrl 会被平台/IME 弄成
 /// 假的「已抬起」(见上方 Win+V 注释),导致 `primary` 为 false ——
@@ -265,21 +274,14 @@ bool _shiftHeld(KeyEvent event, HardwareKeyboard pressed) =>
 ///
 /// 所以这里取**析取**(任一为真即认):宁可多认一次 Ctrl(最坏是少插一个
 /// 换行),也不能漏认(漏认会毁掉正在写的内容)。Shift 那条相反,取合取。
-bool _localPrimaryDown = false;
-
 void _trackModifierDown(KeyEvent event, {required bool isMac}) {
+  if (event is! KeyDownEvent) return;
   final k = event.logicalKey;
   final isPrimaryModifier = isMac
       ? (k == LogicalKeyboardKey.metaLeft || k == LogicalKeyboardKey.metaRight)
       : (k == LogicalKeyboardKey.controlLeft ||
           k == LogicalKeyboardKey.controlRight);
-  if (!isPrimaryModifier) return;
-  if (event is KeyDownEvent) {
-    _localPrimaryDown = true;
-    _lastModifierDownAt = DateTime.now();
-  } else if (event is KeyUpEvent) {
-    _localPrimaryDown = false;
-  }
+  if (isPrimaryModifier) _lastModifierDownAt = DateTime.now();
 }
 
 /// 本次按键是否**产出了可打印字符**。
@@ -318,7 +320,6 @@ bool shiftModifierHeld() =>
 /// 污染下一个用例。
 @visibleForTesting
 void debugResetModifierState() {
-  _localPrimaryDown = false;
   _localShiftDown = false;
   _lastModifierDownAt = null;
 }
@@ -327,8 +328,7 @@ bool primaryModifierHeld(KeyEvent event) {
   final isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final pressed = HardwareKeyboard.instance;
   return (isMac ? pressed.isMetaPressed : pressed.isControlPressed) ||
-      (!_producedPrintable(event) &&
-          (_localPrimaryDown || _isSyntheticModifiedKey(event)));
+      (!_producedPrintable(event) && _isSyntheticModifiedKey(event));
 }
 
 bool _isSyntheticModifiedKey(KeyEvent event) {

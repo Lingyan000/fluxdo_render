@@ -111,6 +111,27 @@ void main() {
     // 的 250ms 补偿窗口会**有意**把它仍算作 Ctrl+Enter(那是 Win+V 注入
     // 序列的补偿),属既有设计,不是本次改动引入。
 
+
+    test('Ctrl 按下过但已抬起且超出补偿窗口 → Enter 必须当普通回车', () async {
+      // 回归:曾把「本地看到 Ctrl 按下」并进 primary 取析取,Ctrl 的
+      // key-up 一丢,此后每次回车都被当成 Ctrl+Enter —— 真机表现为
+      // 回车/Shift+回车/Ctrl+回车**全部把帖子发出去**。
+      send(ctrlDown());
+      send(ctrlUp());
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      final before = state.blocks.length;
+      send(enterDown());
+      expect(state.blocks.length, before + 1,
+          reason: 'primary 不成立 → 内核照常 splitBlock,不能放行给提交');
+    });
+
+    test('primaryModifierHeld 不因历史按下而永久为真', () async {
+      send(ctrlDown());
+      send(ctrlUp());
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(primaryModifierHeld(enterDown()), isFalse);
+    });
+
     test('从未按过 Ctrl → Enter 正常分段', () {
       final before = state.blocks.length;
       send(enterDown());
