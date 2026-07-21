@@ -206,9 +206,14 @@ String _markCloseTagStr(MarkKind kind) => switch (kind) {
     };
 
 /// 颜色系开标记的正则(色值用户可改 → 长度不固定,不能定长前缀比对)。
+/// 提到顶层常量:[_openTagLenAt] 在光标进出标记边界时反复调用,
+/// 现编正则纯属浪费。
+final RegExp _colorOpenTagRe = RegExp(r'\[color=([^\]]*)\]');
+final RegExp _bgColorOpenTagRe = RegExp(r'\[bgcolor=([^\]]*)\]');
+
 RegExp? _openTagReFor(MarkKind kind) => switch (kind) {
-      MarkKind.textColor => RegExp(r'\[color=([^\]]*)\]'),
-      MarkKind.bgColor => RegExp(r'\[bgcolor=([^\]]*)\]'),
+      MarkKind.textColor => _colorOpenTagRe,
+      MarkKind.bgColor => _bgColorOpenTagRe,
       _ => null,
     };
 
