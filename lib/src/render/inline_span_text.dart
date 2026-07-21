@@ -20,6 +20,7 @@ import 'link_handler.dart';
 import 'local_date_handler.dart';
 import 'math_handler.dart';
 import 'mention_handler.dart';
+import 'paragraph_warmup.dart';
 import 'selectable_text_box.dart';
 
 class InlineSpanText extends StatefulWidget {
@@ -187,6 +188,13 @@ class _InlineSpanTextState extends State<InlineSpanText> {
         !projection.hasSpanMention &&
         widget.maxLines == null &&
         widget.overflow == TextOverflow.clip;
+
+    if (useDirectPaint) {
+      // 预热探针:登记挂载真实使用的 (baseStyle, theme, flattener),
+      // idle 预热用同源 key 构缓存条目(见 paragraph_warmup.dart)。
+      ParagraphWarmupProbe.noteStyle(
+          widget.baseStyle, theme, widget.flattener);
+    }
 
     // 选区注册 + 高亮统一由 SelectableTextBox 封装(无 SelectionScope 时退化
     // 为裸文本,零成本)。直绘块经 BlockTextGeometry 接入同一套选区。

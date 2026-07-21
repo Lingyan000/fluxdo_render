@@ -25,6 +25,8 @@ export 'src/render/iframe_handler.dart';
 export 'src/render/audio_handler.dart';
 export 'src/render/cached_paragraph_text.dart'
     show ParagraphLayoutCache, CachedParagraphText;
+export 'src/render/paragraph_warmup.dart'
+    show ParagraphWarmup, ParagraphWarmupProbe, WarmupContext;
 export 'src/render/video_handler.dart';
 export 'src/render/image_handler.dart';
 export 'src/render/inline_span_text.dart';

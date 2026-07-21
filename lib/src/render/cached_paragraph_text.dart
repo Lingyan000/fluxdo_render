@@ -52,6 +52,7 @@ import 'package:flutter/widgets.dart';
 
 import '../flatten/inline_flattener.dart';
 import '../selection/block_text_geometry.dart';
+import 'paragraph_warmup.dart';
 
 /// 直绘环境:除 FlattenResult 外影响排版结果的全部输入。
 @immutable
@@ -348,6 +349,9 @@ class RenderCachedParagraph extends RenderBox with BlockTextGeometry {
       constraints.minWidth,
       constraints.maxWidth,
     );
+    // 预热探针:登记真实布局用的 (env, 约束宽),idle 预热同源构 key。
+    ParagraphWarmupProbe.noteEnv(
+        _env, constraints.minWidth, constraints.maxWidth);
     size = constraints.constrain(entry.size);
   }
 
