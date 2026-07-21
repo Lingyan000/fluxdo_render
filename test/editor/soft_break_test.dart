@@ -72,5 +72,26 @@ void main() {
       s.insertNewline();
       expect(s.blocks.length, 2, reason: '标题里软换行没有意义');
     });
+
+    test('容器内仍分块,连续两次可退出引用(不会永远困住)', () {
+      final frame = QuoteFrame(groupId: 'g0');
+      final s = _stateWith(
+        TextBlock(
+          id: 'b0',
+          content: EditableTextContent(text: '引用内容'),
+          containers: [frame],
+        ),
+      )..enterInsertsSoftBreak = true;
+      // 第一次回车:容器内非空段仍分块(不是塞 \n),新块继承容器。
+      s.insertNewline();
+      expect(s.blocks.length, 2);
+      final second = s.blocks[1] as TextBlock;
+      expect(second.containers, [frame], reason: '容器内软换行没有意义,应分块并继承容器');
+      // 第二次回车:容器内空段回车 → 弹出容器,逃出引用。
+      s.insertNewline();
+      expect(s.blocks.length, 2, reason: '弹出容器是原地属性变更,不新增块');
+      final popped = s.blocks[1] as TextBlock;
+      expect(popped.containers, isEmpty, reason: '两次回车后应逃出引用块');
+    });
   });
 }

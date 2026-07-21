@@ -1466,8 +1466,11 @@ class EditorState extends ChangeNotifier {
 
   /// 回车的统一入口:按 [enterInsertsSoftBreak] 决定软换行还是分块。
   ///
-  /// 列表项与标题里始终分块 —— 前者要接着开下一条,后者要退出标题,
-  /// 软换行在这两种块里没有意义。
+  /// 列表项、标题、容器内的块始终分块 —— 前两者要接着开下一条 / 退出
+  /// 标题,软换行没有意义;容器内(引用/剧透/…)必须走 splitBlock,
+  /// 因为"回车退出容器"的逐级弹出只写在 splitBlock 里 —— 若软换行只
+  /// insertText('\n'),光标会被永远困在容器最后一个非空段里,回车多少
+  /// 次都出不去(容器内软换行本身对 BBCode/blockquote 序列化也没意义)。
   void insertNewline() {
     if (!enterInsertsSoftBreak) {
       splitBlock();
@@ -1475,7 +1478,10 @@ class EditorState extends ChangeNotifier {
     }
     final sel = _selection;
     final block = sel == null ? null : textBlockById(sel.extent.blockId);
-    if (block == null || block.isListItem || block.isHeading) {
+    if (block == null ||
+        block.isListItem ||
+        block.isHeading ||
+        block.containers.isNotEmpty) {
       splitBlock();
       return;
     }
