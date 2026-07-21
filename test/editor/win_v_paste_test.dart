@@ -29,6 +29,8 @@ void main() {
       );
 
   setUp(() {
+    // 修饰键跟踪是模块级全局,跨用例/跨文件会互相污染,必须重置
+    debugResetModifierState();
     state = EditorState.fromTexts(['abc']);
     state.updateSelection(EditorSelection.collapsed(
         EditorPosition(blockId: state.blocks.first.id, offset: 0)));

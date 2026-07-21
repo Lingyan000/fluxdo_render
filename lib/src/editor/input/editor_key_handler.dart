@@ -37,6 +37,11 @@ KeyEventResult handleEditorKeyEvent(
   void Function()? onClipboardCut,
   void Function()? onClipboardPaste,
 }) {
+  // 修饰键自跟踪必须在下面的 KeyUp 早退**之前**做,否则永远收不到抬起,
+  // 本地状态会一直卡在按下。
+  _trackShift(event);
+  _trackModifierDown(event, isMac: defaultTargetPlatform == TargetPlatform.macOS);
+
   if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
     return KeyEventResult.ignored;
   }
@@ -50,10 +55,10 @@ KeyEventResult handleEditorKeyEvent(
 
   final isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final pressed = HardwareKeyboard.instance;
-  _trackModifierDown(event, isMac: isMac);
   final primary = (isMac ? pressed.isMetaPressed : pressed.isControlPressed) ||
-      _isSyntheticModifiedKey(event);
-  final shift = pressed.isShiftPressed;
+      (!_producedPrintable(event) &&
+          (_localPrimaryDown || _isSyntheticModifiedKey(event)));
+  final shift = _shiftHeld(event, pressed);
 
   // 跨段选区 + 可打印字符:IME 窗口只覆盖单段,平台模型里没有这个跨段
   // 选区 —— 直接放行会让平台把字符插进**过期的单段模型**,再经 diff 写进
@@ -221,14 +226,97 @@ KeyEventResult handleEditorKeyEvent(
 const Duration _modifierWindow = Duration(milliseconds: 250);
 DateTime? _lastModifierDownAt;
 
+// ---------------------------------------------------------------------
+// Shift 状态自跟踪(Windows 输入法切中英文导致的卡键)
+// ---------------------------------------------------------------------
+//
+// HardwareKeyboard 的缓存修饰键状态在 Windows 上会失真:中文输入法用
+// **Shift 切中英文**,IME 会吞掉 Shift 的 key-up,Flutter 便一直认为
+// Shift 按着。此后按方向键 → `extend: true` → 光标移动变成扩选。真机
+// 现象:用户没按 shift,从行尾按左键却选中了末尾几个字(还有更早一次
+// 表现为方向键把整个岛"选中")。同一文件上方 Win+V 那段注释是同类问题
+// 的另一例 —— 平台注入/IME 介入时修饰键状态不可信。
+//
+// 判据改为**合取**:全局状态说按着 **且** 本处理器确实收到过 Shift 按下
+// 而没收到抬起。编辑器有焦点时真实的 shift+方向键两个事件都会到这里,
+// 不影响正常扩选;而"焦点在 IME 窗口时丢掉的抬起"不会污染本地状态。
+bool _localShiftDown = false;
+
+void _trackShift(KeyEvent event) {
+  final k = event.logicalKey;
+  if (k != LogicalKeyboardKey.shiftLeft && k != LogicalKeyboardKey.shiftRight) {
+    return;
+  }
+  if (event is KeyDownEvent) _localShiftDown = true;
+  if (event is KeyUpEvent) _localShiftDown = false;
+}
+
+bool _shiftHeld(KeyEvent event, HardwareKeyboard pressed) =>
+    pressed.isShiftPressed && _localShiftDown;
+
+/// 本地看到的主修饰键是否按下。
+///
+/// 与 [_localShiftDown] 同源问题、**方向相反**:Ctrl 会被平台/IME 弄成
+/// 假的「已抬起」(见上方 Win+V 注释),导致 `primary` 为 false ——
+/// Ctrl+Enter 于是被当成普通回车:内核 `splitBlock()` 分一段、宿主的软
+/// 换行再插一个,真机表现为**按一次换两行**,而且发不出去。
+/// 既有的 [_isSyntheticModifiedKey] 只覆盖 250ms 窗口,按住 Ctrl 稍久
+/// 再敲 Enter 就失效。
+///
+/// 所以这里取**析取**(任一为真即认):宁可多认一次 Ctrl(最坏是少插一个
+/// 换行),也不能漏认(漏认会毁掉正在写的内容)。Shift 那条相反,取合取。
+bool _localPrimaryDown = false;
+
 void _trackModifierDown(KeyEvent event, {required bool isMac}) {
-  if (event is! KeyDownEvent) return;
   final k = event.logicalKey;
   final isPrimaryModifier = isMac
       ? (k == LogicalKeyboardKey.metaLeft || k == LogicalKeyboardKey.metaRight)
       : (k == LogicalKeyboardKey.controlLeft ||
           k == LogicalKeyboardKey.controlRight);
-  if (isPrimaryModifier) _lastModifierDownAt = DateTime.now();
+  if (!isPrimaryModifier) return;
+  if (event is KeyDownEvent) {
+    _localPrimaryDown = true;
+    _lastModifierDownAt = DateTime.now();
+  } else if (event is KeyUpEvent) {
+    _localPrimaryDown = false;
+  }
+}
+
+/// 本次按键是否**产出了可打印字符**。
+///
+/// 产出字符 = 用户在打字,此时不能把本地跟踪的修饰键当成快捷键修饰位 ——
+/// 否则 Ctrl 状态卡住时,中文输入法敲拼音 `v` 会被误判成 Ctrl+V 粘贴
+/// (既有 _isSyntheticModifiedKey 正是靠 character==null 防这个)。
+/// 阈值取 0x20:回车等控制字符(0x0A)不算「打字」。
+bool _producedPrintable(KeyEvent event) {
+  final ch = event.character;
+  return ch != null && ch.isNotEmpty && ch.codeUnitAt(0) >= 0x20;
+}
+
+/// 主修饰键(Windows/Linux 的 Ctrl、macOS 的 Cmd)是否按下 —— **权威判定**。
+///
+/// 宿主的按键拦截层必须用这个,而不是直接读 `HardwareKeyboard`:后者在
+/// 平台注入/IME 介入时会失真(见上方 Win+V 与 _localPrimaryDown 的注释)。
+/// 两边口径不一致的后果是 Ctrl+Enter 被当普通回车 —— 内核分段、宿主再插
+/// 软换行,一次按键换两行还发不出去。
+/// 清空修饰键的本地跟踪状态。
+///
+/// 这些状态是**模块级全局**(编辑器同时只有一个焦点实例,不必按实例存)。
+/// 测试之间必须重置,否则上个用例按下的 Ctrl 会连同 250ms 补偿窗口一起
+/// 污染下一个用例。
+@visibleForTesting
+void debugResetModifierState() {
+  _localPrimaryDown = false;
+  _localShiftDown = false;
+  _lastModifierDownAt = null;
+}
+
+bool primaryModifierHeld(KeyEvent event) {
+  final isMac = defaultTargetPlatform == TargetPlatform.macOS;
+  final pressed = HardwareKeyboard.instance;
+  return (isMac ? pressed.isMetaPressed : pressed.isControlPressed) ||
+      (!_producedPrintable(event) &&
+          (_localPrimaryDown || _isSyntheticModifiedKey(event)));
 }
 
 bool _isSyntheticModifiedKey(KeyEvent event) {
