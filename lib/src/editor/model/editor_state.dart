@@ -715,12 +715,16 @@ class EditorState extends ChangeNotifier {
       restored = r.node;
       literalLen = r.literal.length;
     } else {
-      // 字面被改:按当前 `![…](…)` 边界重取(长度可能变了)。
-      final edited = _editedAtomLiteral(text, r.start);
+      // 字面被改:按原子类型的语法边界重取(长度可能变了)。
+      final isSize = r.node is SizedRun;
+      final edited = isSize
+          ? _editedSizeLiteral(text, r.start)
+          : _editedAtomLiteral(text, r.start);
       if (edited == null) return;
-      restored = parseImageMarkdown(edited);
+      restored =
+          isSize ? parseSizeMarkdown(edited) : parseImageMarkdown(edited);
       literalLen = edited.length;
-      if (restored == null) return; // 非图片/语法不完整:保持字面
+      if (restored == null) return; // 语法不完整:保持字面,交给序列化解释
     }
 
     final newContent = block.content
@@ -739,6 +743,14 @@ class EditorState extends ChangeNotifier {
         offset: c <= r.start ? c : (c - shrink).clamp(r.start, c),
       ));
     }
+  }
+
+  /// 从 [start] 起取一段完整的字面 `[size=N]…[/size]`(用户改过长度)。
+  static String? _editedSizeLiteral(String text, int start) {
+    if (start >= text.length || !text.startsWith('[size=', start)) return null;
+    final close = text.indexOf('[/size]', start);
+    if (close < 0) return null;
+    return text.substring(start, close + '[/size]'.length);
   }
 
   /// 从 [start] 起取一段完整的字面图片语法(用户改过长度)。

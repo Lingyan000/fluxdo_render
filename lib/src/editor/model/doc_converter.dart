@@ -39,6 +39,13 @@ bool isEditableInline(InlineNode n) => switch (n) {
       // 后的工具条(缩放/删除/alt/加网格)由宿主浮层承载,查看器在
       // 「已选中再点」时打开。
       ImageRun() => true,
+      // `[size=N]` **刻意不放行** → 所在段落整体岛化成块(与分割线同款)。
+      //
+      // 试过行内原子:原子在编辑文本里只占 1 个哨兵字符,但投影要按里面
+      // 真实字符数走(阅读端要逐字选中),两套坐标对不上 —— 光标定位、
+      // 命中、宽度全偏,放大后顶出边界。块级岛没这个问题(本来就占 1 个
+      // 单位),而且现成的双击/回车进岛改源码(_tryEditSelectedIsland)
+      // 直接可用,体验与分割线一致。
       EmRun(:final children) => children.every(isEditableInline),
       StrongRun(:final children) => children.every(isEditableInline),
       InlineCodeRun() => true,

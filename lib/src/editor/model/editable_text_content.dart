@@ -148,6 +148,19 @@ class EditableTextContent {
   static String _hex(Color c) =>
       '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
 
+  /// 倍数 → 百分比字符串(`1.5` → `150`;整数不写小数点,与 raw 口径一致)。
+  static String _pct(double scale) {
+    final v = scale * 100;
+    return v == v.roundToDouble() ? v.round().toString() : '$v';
+  }
+
+  /// 百分比字符串 → 倍数(`150` → `1.5`);解析不出返回 null。
+  static double? parsePct(String? v) {
+    if (v == null) return null;
+    final n = double.tryParse(v.trim());
+    return (n == null || n < 0) ? null : n / 100.0;
+  }
+
   /// `#rgb` / `#rrggbb` → Color;解析不出返回 null。
   static Color? parseHex(String? v) {
     if (v == null) return null;
@@ -259,6 +272,10 @@ class EditableTextContent {
           // ProseMirror image 是 inline:true 一等行内节点)
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
+        case SizedRun(:final children):
+          // 正常链路走不到:doc_converter 已把含 [size] 的段落整体岛化。
+          // 这里只作防御兜底(同其他白名单外节点),摊平子节点不丢字。
+          _flattenInto(children, buf, marks, atoms, activeKinds);
         case ColoredRun(:final color, :final background, :final children):
           // 颜色 → 带 attr 的 mark(见 MarkKind.textColor 注释:岛化会
           // 让整行变只读、光标消失)
@@ -507,6 +524,23 @@ class EditableTextContent {
       node = SpoilerRun(children: [node]);
     }
     return node;
+  }
+
+  /// 字号 mark → SizedRun。
+  ///
+  /// **编辑态夹下限 1 倍**:`[size=0]` 真按 0 倍画在编辑器里就是隐形的、
+  /// 根本没法编辑(用户明确要求"最小为正常大小、最大不限制")。上限不夹。
+  /// 阅读端([forEditing] = false)不夹,原样对齐网页端。
+  /// 注意夹的只是**渲染**;raw 由 mark 的 attr 决定,发出去仍是原值。
+  static InlineNode _applySizeMark(
+    InlineNode node,
+    String? pct, {
+    required bool forEditing,
+  }) {
+    final scale = parsePct(pct);
+    if (scale == null) return node;
+    final effective = forEditing && scale < 1.0 ? 1.0 : scale;
+    return SizedRun(scale: effective, children: [node]);
   }
 
   /// 颜色 mark → ColoredRun(前景/背景可同时存在,合成一个节点)。

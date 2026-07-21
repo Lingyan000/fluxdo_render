@@ -368,6 +368,8 @@ String _inlineToMarkdown(EditableTextContent content) {
         final LocalDateRun d => _serializeLocalDate(d),
         // 行内图片原子(裸图):标准图片语法
         final ImageRun img => _serializeImageRun(img),
+        // `[size=N]` 原子(编辑态固定块):写回 BBCode,连同内部文本
+        final SizedRun s => _serializeSized(s),
         _ => '',
       });
     } else if (ch == '\n') {
@@ -395,9 +397,15 @@ String _escapeInline(String ch, int index, String text) {
       // (parser 把 span.chcklst-box 还原成这个字面量),转义会把勾选框
       // 变回纯文本。仅当后面不是 `(`(不会被误认成链接)时保留。
       if (_isChecklistAt(text, index)) return ch;
+      // BBCode 例外:手打的 `[size=…]`/`[color=…]` 等被转义后就成了字面
+      // 文本,用户在富文本编辑器里根本打不出这些标签(实测:打
+      // `[size=1]a[/size]` 存下来是 `\[size=1\]a\[/size\]`)。与 checklist
+      // 同理放行 —— 只放行本地 cook 真正会转换的那几个标签。
+      if (_bbcodeTagLenAt(text, index) != null) return ch;
       return '\\$ch';
     case ']':
       if (index >= 2 && _isChecklistAt(text, index - 2)) return ch;
+      if (_isBbcodeCloseBracketAt(text, index)) return ch;
       return '\\$ch';
     case '*':
     case '_':
@@ -411,6 +419,37 @@ String _escapeInline(String ch, int index, String text) {
     default:
       return ch;
   }
+}
+
+/// 本地真正支持往返的 BBCode 标签(开/闭)。范围**刻意收窄**到
+/// DiscourseCookService 会在 cook 后补转换、序列化会写回的那几个 ——
+/// 放行越多,用户想把 `[foo]` 当字面文本写的场景就越容易被吞。
+/// 注意**不要**加 `^`:`matchAsPrefix(text, index)` 本身就锚定在 index,
+/// 而 `^` 断言的是整串开头 —— 两者叠加会让 index>0 处的标签(如闭标签)
+/// 永远匹配不上(实测:只有位于文首的开标签生效)。
+final RegExp _bbcodeTagRe = RegExp(
+  r'\[/?(?:size|color|bgcolor|spoiler|u)(?:=[^\]\s]*)?\]',
+  caseSensitive: false,
+);
+
+/// [index] 处若是已知 BBCode 标签,返回其总长度(含方括号),否则 null。
+int? _bbcodeTagLenAt(String text, int index) {
+  if (index < 0 || index >= text.length || text[index] != '[') return null;
+  final m = _bbcodeTagRe.matchAsPrefix(text, index);
+  return m == null ? null : m.end - index;
+}
+
+/// [index] 处的 `]` 是否是某个已知 BBCode 标签的收尾方括号。
+bool _isBbcodeCloseBracketAt(String text, int index) {
+  for (var i = index - 1; i >= 0; i--) {
+    final c = text[i];
+    if (c == ']') return false; // 中间又出现 ] → 不是同一个标签
+    if (c == '[') {
+      final len = _bbcodeTagLenAt(text, i);
+      return len != null && i + len == index + 1;
+    }
+  }
+  return false;
 }
 
 /// [index] 处是否是 checklist 方框(`[x]`/`[X]`/`[ ]`,且其后非 `(`)。
@@ -762,6 +801,8 @@ String _serializeIslandInlines(List<InlineNode> inlines) {
         // [color]/[bgcolor] BBCode 是 linux.do 未装插件的语法(cook 探针:
         // 原样输出文本);着色 span 只能来自服务端放行的 HTML —— 写回同形态
         buf.write(_serializeColored(n));
+      case SizedRun():
+        buf.write(_serializeSized(n));
       case StyledRun(:final kind, :final children):
         final inner = _serializeIslandInlines(children);
         buf.write(switch (kind) {
@@ -820,6 +861,18 @@ String _serializeColored(ColoredRun n) {
     out = '[bgcolor=${hex(n.background!)}]$out[/bgcolor]';
   }
   return out;
+}
+
+/// 字号 → `[size=N]`。
+///
+/// 与 [_serializeColored] 同一条理由:`<span style="font-size:…">` 形态经
+/// 客户端 cook 会被消毒掉样式,往返门禁必然不等 → 整帖降级源码模式。
+/// `[size=N]` 两端都认(服务端有 bbcode 插件、客户端有本地转换),
+/// 且实测映射就是 `N` ↔ `font-size:N%`。
+String _serializeSized(SizedRun n) {
+  final pct = n.scale * 100;
+  final v = pct == pct.roundToDouble() ? pct.round().toString() : '$pct';
+  return '[size=$v]${_serializeIslandInlines(n.children)}[/size]';
 }
 
 String _serializeListNode(ListNode list, int depth) {
@@ -926,11 +979,31 @@ String? atomToMarkdown(InlineNode node) => switch (node) {
       EmojiRun(:final name) => name.isEmpty ? null : ':$name:',
       MentionRun(:final username) => '@$username',
       final LocalDateRun d => _serializeLocalDate(d),
+      // `[size=N]` 原子:显形时展开成字面 BBCode 供编辑(同分割线思路)
+      final SizedRun s => _serializeSized(s),
       _ => null,
     };
 
 final RegExp _imageMdRe =
     RegExp(r'^!\[([^\]]*?)(?:\|(\d+)x(\d+)(?:,\s*(\d+)%)?)?\]\(([^)]*)\)$');
+
+/// 字面 `[size=N]内容[/size]` → [SizedRun];不匹配返回 null。
+///
+/// 显形编辑后折叠用:用户可以直接把 `[size=0]` 改成 `[size=150]`,或改
+/// 里面的文字。内容里不允许再嵌 `[size` —— 保持"取最内层一段"的语义。
+final RegExp _sizeMdRe =
+    RegExp(r'^\[size=(\d{1,4})\]((?:(?!\[/?size)[\s\S])*)\[/size\]$');
+
+SizedRun? parseSizeMarkdown(String literal) {
+  final m = _sizeMdRe.firstMatch(literal);
+  if (m == null) return null;
+  final pct = int.tryParse(m.group(1)!);
+  if (pct == null) return null;
+  return SizedRun(
+    scale: pct / 100.0,
+    children: [TextRun(m.group(2)!)],
+  );
+}
 
 /// 字面图片语法 → [ImageRun];不匹配返回 null。
 ///
