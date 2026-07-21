@@ -12,6 +12,7 @@ library;
 
 import 'package:flutter/rendering.dart';
 
+import 'block_text_geometry.dart';
 import 'selection_geometry.dart';
 import 'selection_registry.dart';
 
@@ -106,14 +107,14 @@ class SelectionNavigator {
     final idx = _indexOf(blocks, sel.extent.blockId);
     if (idx < 0) return;
 
-    final paragraph = registry.byId(sel.extent.blockId)?.paragraph;
-    if (paragraph == null) {
+    final geometry = registry.byId(sel.extent.blockId)?.geometry;
+    if (geometry == null) {
       // extent 块 off-screen,无行几何 → 退化按字符(best-effort)。
       moveExtentByCharacter(controller, forward: down);
       return;
     }
 
-    final caret = _caretBox(paragraph, sel.extent.renderOffset);
+    final caret = _caretBox(geometry, sel.extent.renderOffset);
     if (caret == null) {
       moveExtentByCharacter(controller, forward: down);
       return;
@@ -130,7 +131,7 @@ class SelectionNavigator {
     // 行边界 ±0.5px 抖动。
     final midY = (caret.top + caret.bottom) / 2;
     final targetY = down ? midY + lineHeight : midY - lineHeight;
-    final size = paragraph.size;
+    final size = geometry.renderBox.size;
 
     if (targetY < 0) {
       // 越过本块顶部 → 跳上一块末边界。
@@ -145,7 +146,7 @@ class SelectionNavigator {
 
     // 同块内逐行:目标点 (caret 中点 x, targetY)。
     final targetX = (caret.left + caret.right) / 2;
-    final tp = paragraph.getPositionForOffset(Offset(targetX, targetY));
+    final tp = geometry.getPositionForOffset(Offset(targetX, targetY));
     final newExtent = sel.extent.copyWith(renderOffset: tp.offset);
     if (newExtent == sel.extent) return;
     controller.selection = sel.copyWith(extent: newExtent);
@@ -182,15 +183,15 @@ class SelectionNavigator {
   /// 优先用 [offset, offset+1] 的 box(caret 右侧字符行框);末尾偏移
   /// (offset == 末尾,右侧无字符)退化用 [offset-1, offset] 的 box。都取不到
   /// (空块)返回 null。
-  static Rect? _caretBox(RenderParagraph paragraph, int offset) {
+  static Rect? _caretBox(BlockTextGeometry geometry, int offset) {
     // 先试右侧字符框。
-    final right = paragraph.getBoxesForSelection(
+    final right = geometry.getBoxesForSelection(
       TextSelection(baseOffset: offset, extentOffset: offset + 1),
     );
     if (right.isNotEmpty) return right.first.toRect();
     // 末尾:试左侧字符框。
     if (offset > 0) {
-      final left = paragraph.getBoxesForSelection(
+      final left = geometry.getBoxesForSelection(
         TextSelection(baseOffset: offset - 1, extentOffset: offset),
       );
       if (left.isNotEmpty) return left.last.toRect();

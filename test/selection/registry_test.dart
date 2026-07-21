@@ -5,6 +5,8 @@ import 'package:fluxdo_render/src/render/inline_span_text.dart';
 import 'package:fluxdo_render/src/selection/selection_registry.dart';
 import 'package:fluxdo_render/src/selection/selection_scope.dart';
 
+import '../test_text_finders.dart';
+
 void main() {
   Widget wrap(SelectionController controller, List<Widget> children) {
     return MaterialApp(
@@ -101,6 +103,6 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('无选区上下文'), findsOneWidget);
+    expect(findRenderedText('无选区上下文'), findsOneWidget);
   });
 }

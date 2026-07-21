@@ -1,12 +1,13 @@
-/// 可选块的句柄 —— registry 通过它访问某个文本块的 RenderParagraph + 映射表。
+/// 可选块的句柄 —— registry 通过它访问某个文本块的文本几何 + 映射表。
 ///
-/// **不缓存 RenderParagraph / 几何**(已探针实测:虚拟列表滚出视口块会被回收,
+/// **不缓存 RenderObject / 几何**(已探针实测:虚拟列表滚出视口块会被回收,
 /// 滚回重建 RenderObject 会换新)。全部 getter 实时取,保证虚拟化/滚动安全。
 library;
 
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart' show ScrollableState;
 
+import 'block_text_geometry.dart';
 import 'projection.dart';
 import 'selection_geometry.dart';
 
@@ -15,7 +16,18 @@ abstract class SelectableBlockHandle {
   SelectableBlockId get id;
 
   /// 实时取当前 RenderParagraph;块未 mount / 已回收时返回 null(调用方跳过)。
+  ///
+  /// 仅编辑器路径(光标/IME 需要 TextPainter 级精确 caret)与
+  /// InlineCodeBackgroundPainter 直读;阅读态选区消费方一律走 [geometry]
+  /// (直绘块没有 RenderParagraph,只有几何)。
   RenderParagraph? get paragraph;
+
+  /// 实时取文本几何(选区/高亮/命中/导出的统一入口)。
+  /// 默认包装 [paragraph];直绘块覆写本 getter 返回自己的几何实现。
+  BlockTextGeometry? get geometry {
+    final p = paragraph;
+    return p == null ? null : ParagraphGeometry(p);
+  }
 
   /// 渲染偏移 ↔ 逻辑投影 映射表(随块内容更新)。
   RenderTextProjection get projection;
@@ -36,13 +48,13 @@ abstract class SelectableBlockHandle {
 
   /// 块在全局坐标系的矩形(用于视觉序排序 + 命中)。null = 不可用。
   Rect? globalRect() {
-    final p = paragraph;
-    if (p == null || !p.attached || !p.hasSize) return null;
-    final origin = p.localToGlobal(Offset.zero);
+    final g = geometry;
+    if (g == null || !g.isLive) return null;
+    final origin = g.renderBox.localToGlobal(Offset.zero);
     // keepAlive 保活但移出视口的块可能无有效 paint 变换 → localToGlobal 出
     // NaN/Infinity。这种几何无效,不能进视觉序/选区(否则 toolbar 定位 NaN 崩)。
     if (!origin.dx.isFinite || !origin.dy.isFinite) return null;
-    final raw = origin & p.size;
+    final raw = origin & g.renderBox.size;
     final clip = clipBoundsGetter?.call();
     if (clip == null) return raw;
     final r = raw.intersect(clip);
@@ -56,10 +68,12 @@ class CallbackBlockHandle extends SelectableBlockHandle {
     required this.id,
     required RenderParagraph? Function() paragraphGetter,
     required RenderTextProjection Function() projectionGetter,
+    BlockTextGeometry? Function()? geometryGetter,
     Rect? Function()? clipBoundsGetter,
     List<ScrollableState> Function()? interiorScrollablesGetter,
   })  : _paragraphGetter = paragraphGetter,
         _projectionGetter = projectionGetter,
+        _geometryGetter = geometryGetter,
         _clipBoundsGetter = clipBoundsGetter,
         _interiorScrollablesGetter = interiorScrollablesGetter;
 
@@ -68,11 +82,19 @@ class CallbackBlockHandle extends SelectableBlockHandle {
 
   final RenderParagraph? Function() _paragraphGetter;
   final RenderTextProjection Function() _projectionGetter;
+  final BlockTextGeometry? Function()? _geometryGetter;
   final Rect? Function()? _clipBoundsGetter;
   final List<ScrollableState> Function()? _interiorScrollablesGetter;
 
   @override
   RenderParagraph? get paragraph => _paragraphGetter();
+
+  @override
+  BlockTextGeometry? get geometry {
+    final getter = _geometryGetter;
+    if (getter != null) return getter();
+    return super.geometry;
+  }
 
   @override
   RenderTextProjection get projection => _projectionGetter();

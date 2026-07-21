@@ -76,9 +76,10 @@ class SelectionHitTester {
     return _localPosition(nearest, clamped);
   }
 
-  /// 框架真实 hit-test:从 [root] 往下,命中路径里第一个「已注册」的
-  /// RenderParagraph(路径是 deepest-first,故第一个 = 最内层,与嵌套容器
-  /// 取最内一致)。取不到返回 null(交由 globalRect 兜底)。
+  /// 框架真实 hit-test:从 [root] 往下,命中路径里第一个「已注册」块的
+  /// 几何宿主 RenderBox(路径是 deepest-first,故第一个 = 最内层,与嵌套
+  /// 容器取最内一致)。RichText 路径宿主 = RenderParagraph,直绘路径 =
+  /// 直绘 RenderObject 本体。取不到返回 null(交由 globalRect 兜底)。
   DocumentPosition? _frameworkHit(Offset global, RenderObject? root) {
     if (root is! RenderBox || !root.attached || !root.hasSize) return null;
     final local = root.globalToLocal(global);
@@ -88,9 +89,10 @@ class SelectionHitTester {
     final live = registry.liveHandles;
     for (final entry in result.path) {
       final target = entry.target;
-      if (target is! RenderParagraph) continue;
+      if (target is! RenderBox) continue;
       for (final h in live) {
-        if (identical(h.paragraph, target)) {
+        final g = h.geometry;
+        if (g != null && identical(g.renderBox, target)) {
           return _localPosition(h, global);
         }
       }
@@ -99,10 +101,10 @@ class SelectionHitTester {
   }
 
   DocumentPosition? _localPosition(SelectableBlockHandle h, Offset global) {
-    final p = h.paragraph;
-    if (p == null) return null;
-    final local = p.globalToLocal(global);
-    final tp = p.getPositionForOffset(local);
+    final g = h.geometry;
+    if (g == null) return null;
+    final local = g.renderBox.globalToLocal(global);
+    final tp = g.getPositionForOffset(local);
     return DocumentPosition(
       blockId: h.id,
       renderOffset: tp.offset,
@@ -115,9 +117,9 @@ class SelectionHitTester {
   /// (已探针实测)。
   ({int start, int end})? wordBoundaryAt(DocumentPosition pos) {
     final h = registry.byId(pos.blockId);
-    final p = h?.paragraph;
-    if (p == null) return null;
-    final wb = p.getWordBoundary(TextPosition(offset: pos.renderOffset));
+    final g = h?.geometry;
+    if (g == null) return null;
+    final wb = g.getWordBoundary(TextPosition(offset: pos.renderOffset));
     return (start: wb.start, end: wb.end);
   }
 
@@ -125,14 +127,12 @@ class SelectionHitTester {
   /// 「指文字所在行」都用它(对齐 SDK _buildInfoForMagnifier 的 caretRect)。
   /// 块不可见(回收/离屏 NaN)时返回 null。
   Rect? caretRectAt(DocumentPosition pos) {
-    final p = registry.byId(pos.blockId)?.paragraph;
-    if (p == null || !p.attached || !p.hasSize) return null;
-    final tp = TextPosition(offset: pos.renderOffset);
-    final local = p.getOffsetForCaret(tp, Rect.zero);
-    final height = p.getFullHeightForCaret(tp);
-    final topLeft = p.localToGlobal(local);
+    final g = registry.byId(pos.blockId)?.geometry;
+    if (g == null || !g.isLive) return null;
+    final local = g.caretRectAt(pos.renderOffset);
+    final topLeft = g.renderBox.localToGlobal(local.topLeft);
     if (!topLeft.dx.isFinite || !topLeft.dy.isFinite) return null;
-    return topLeft & Size(0, height);
+    return topLeft & local.size;
   }
 
   /// 编辑光标的**全局矩形**(宽 0)—— 与 [caretRectAt] 的区别:高度是

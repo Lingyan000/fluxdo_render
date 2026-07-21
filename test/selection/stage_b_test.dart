@@ -9,6 +9,8 @@ import 'package:fluxdo_render/src/selection/selection_registry.dart';
 import 'package:fluxdo_render/src/selection/selection_range.dart';
 import 'package:fluxdo_render/src/selection/selection_scope.dart';
 
+import '../test_text_finders.dart';
+
 void main() {
   Widget host(SelectionController c, List<List<InlineNode>> paragraphs) {
     return MaterialApp(
@@ -151,7 +153,7 @@ void main() {
     // 两段都该贡献高亮矩形
     expect(data!.globalRects.length, greaterThanOrEqualTo(2));
     // 外接框应跨两段(高度 > 单段)
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     expect(data.globalBounds.height, greaterThan(para.size.height));
   });
 }

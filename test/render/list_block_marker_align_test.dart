@@ -11,6 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/node/node.dart';
 import 'package:fluxdo_render/src/render/node_factory.dart';
 
+import '../test_text_finders.dart';
+
 void main() {
   testWidgets('块级 li:bullet 与首块(h4)文字顶部对齐', (tester) async {
     await tester.pumpWidget(
@@ -43,7 +45,7 @@ void main() {
     // 证明 bullet 落在 heading 首行上,而非浮在 margin 之上。
     final discCenter =
         tester.getCenter(find.byKey(const ValueKey('ul_marker_disc'))).dy;
-    final qCenter = tester.getCenter(find.text('Q')).dy;
+    final qCenter = tester.getCenter(findRenderedText('Q')).dy;
     expect((discCenter - qCenter).abs(), lessThan(8.0),
         reason: 'bullet 浮高了:discCenter=$discCenter qCenter=$qCenter');
   });

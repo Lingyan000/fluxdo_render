@@ -83,6 +83,7 @@ class FlattenResult {
     required this.recognizers,
     required this.projection,
     required this.mount,
+    required this.hasPlaceholders,
   });
 
   final TextSpan span;
@@ -99,6 +100,11 @@ class FlattenResult {
   /// 的 context)。承载 span 的 widget 须在 build 时 [SpanMountContext.attach]、
   /// dispose 时 detach;未挂载时点击 no-op。
   final SpanMountContext mount;
+
+  /// span 树里是否含 PlaceholderSpan(WidgetSpan 原子:emoji/图/mention-chip/
+  /// spoiler/脚注/公式/上下标等)。直绘路径(CachedParagraphText)只吃
+  /// 纯 TextSpan 段落,构建时一次性扫描,分路判据零遍历成本。
+  final bool hasPlaceholders;
 }
 
 /// 单次 flatten 的参数包:handlers/尺寸/上下文 + recognizer 累计列表。
@@ -192,11 +198,15 @@ class InlineFlattener {
     final children = <InlineSpan>[
       for (final node in inlines) _toSpan(node, pass),
     ];
+    final rootSpan = TextSpan(style: baseStyle, children: children);
     return FlattenResult(
-      span: TextSpan(style: baseStyle, children: children),
+      span: rootSpan,
       recognizers: pass.recognizers,
       projection: buildInlineProjection(inlines),
       mount: pass.mount,
+      // visitChildren 对每个"有内容"(text/placeholder)的 span 调 visitor,
+      // 返 false 即短路 —— 整体返回 false = 存在 PlaceholderSpan。
+      hasPlaceholders: !rootSpan.visitChildren((s) => s is! PlaceholderSpan),
     );
   }
 

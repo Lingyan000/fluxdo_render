@@ -11,6 +11,8 @@ import 'package:fluxdo_render/src/selection/selection_gesture_layer.dart';
 import 'package:fluxdo_render/src/selection/selection_registry.dart';
 import 'package:fluxdo_render/src/selection/selection_scope.dart';
 
+import '../test_text_finders.dart';
+
 void main() {
   Widget host(SelectionController c, List<InlineNode> inlines) {
     return MaterialApp(
@@ -33,7 +35,7 @@ void main() {
     await tester.pumpWidget(host(c, const [TextRun('Hello world selection')]));
     await tester.pumpAndSettle();
 
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     final rect = para.localToGlobal(Offset.zero) & para.size;
     final hit = SelectionHitTester(c.registry);
     final pos = hit.positionAt(rect.center);
@@ -46,7 +48,7 @@ void main() {
     final c = SelectionController(SelectionRegistry());
     await tester.pumpWidget(host(c, const [TextRun('abc')]));
     await tester.pumpAndSettle();
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     final rect = para.localToGlobal(Offset.zero) & para.size;
     final hit = SelectionHitTester(c.registry);
     // 点块下方 500px 空白
@@ -58,7 +60,7 @@ void main() {
     final c = SelectionController(SelectionRegistry());
     await tester.pumpWidget(host(c, const [TextRun('Hello world')]));
     await tester.pumpAndSettle();
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     final hit = SelectionHitTester(c.registry);
     // 第一个块,renderOffset 1(在 "Hello" 内)
     final blockId = c.registry.liveHandles.first.id;
@@ -124,7 +126,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     final center = para.localToGlobal(Offset.zero) +
         Offset(para.size.width / 2, para.size.height / 2);
     // 长按起选(选词)

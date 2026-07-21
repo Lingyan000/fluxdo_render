@@ -12,6 +12,7 @@ import '../flatten/flatten_cache.dart';
 import '../flatten/inline_flattener.dart';
 import '../node/inline_node.dart';
 import '../selection/projection.dart';
+import 'cached_paragraph_text.dart';
 import 'emoji_handler.dart';
 import 'footnote_handler.dart';
 import 'image_handler.dart';
@@ -108,9 +109,10 @@ class _InlineSpanTextState extends State<InlineSpanText> {
   @override
   void reassemble() {
     // hot reload:全局缓存整体失效(在用条目延迟释放),本 State 重新
-    // acquire,渲染代码改动立即可见。
+    // acquire,渲染代码改动立即可见。布局缓存(ui.Paragraph)同步清。
     _releaseResult();
     FlattenCache.evictAll();
+    ParagraphLayoutCache.evictAll();
     super.reassemble();
   }
 
@@ -168,19 +170,42 @@ class _InlineSpanTextState extends State<InlineSpanText> {
     // 挂载登记:recognizer 点击闭包经 mount 现取活 context(flatten 契约
     // 已去 context 捕获),每次 build 刷新登记保证拿到的是当前挂载点。
     result.mount.attach(context);
+
+    // ---- 分路:直绘缓存 vs RichText ----
+    //
+    // 直绘(CachedParagraphText,缓存 ui.Paragraph drawParagraph):
+    // sliver 回收重进零排版零测量 —— 笔3 收益主体。判据(全部满足):
+    // - 无 PlaceholderSpan(WidgetSpan 原子画不出);
+    // - 无行内代码/TextSpan-mention(灰底 InlineCodeBackgroundPainter
+    //   仍直读 RenderParagraph,首期不动它);
+    // - 无 maxLines/overflow 定制(引用卡标题单行省略语义走 TextPainter
+    //   的 ellipsis,直绘层未实现 —— 这类块量少,留 RichText)。
+    // 其余段落(交互原子/富装饰)走原 RichText 路径,行为不变。
+    final projection = result.projection;
+    final useDirectPaint = !result.hasPlaceholders &&
+        !projection.hasInlineCode &&
+        !projection.hasSpanMention &&
+        widget.maxLines == null &&
+        widget.overflow == TextOverflow.clip;
+
     // 选区注册 + 高亮统一由 SelectableTextBox 封装(无 SelectionScope 时退化
-    // 为裸 Text.rich,零成本)。
+    // 为裸文本,零成本)。直绘块经 BlockTextGeometry 接入同一套选区。
     return SelectableTextBox(
       projectionGetter: () => _projection,
       documentOrder: widget.documentOrder,
       chunkIndex: widget.chunkIndex,
       debugLabel: 'inlineText',
-      child: Text.rich(
-        result.span,
-        textAlign: widget.textAlign,
-        maxLines: widget.maxLines,
-        overflow: widget.overflow,
-      ),
+      child: useDirectPaint
+          ? CachedParagraphText(
+              result: result,
+              textAlign: widget.textAlign,
+            )
+          : Text.rich(
+              result.span,
+              textAlign: widget.textAlign,
+              maxLines: widget.maxLines,
+              overflow: widget.overflow,
+            ),
     );
   }
 }

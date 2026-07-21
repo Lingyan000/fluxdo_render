@@ -16,6 +16,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../selection/block_text_geometry.dart';
 import '../selection/projection.dart';
 import '../selection/selectable_block_handle.dart';
 import '../selection/selection_geometry.dart';
@@ -91,6 +92,27 @@ class _SelectableTextBoxState extends State<SelectableTextBox> {
     return found;
   }
 
+  /// 从 child 子树找第一个几何提供者:直绘 RenderObject(自实现
+  /// BlockTextGeometry)优先,否则 RenderParagraph 包适配。两路径互斥
+  /// (一个块只有一种文本渲染),深度优先首个命中即返回。
+  BlockTextGeometry? _findGeometry() {
+    final ctx = _childKey.currentContext;
+    if (ctx == null) return null;
+    final ro = ctx.findRenderObject();
+    if (ro == null) return null;
+    return _firstGeometry(ro);
+  }
+
+  BlockTextGeometry? _firstGeometry(RenderObject node) {
+    if (node is BlockTextGeometry) return node as BlockTextGeometry;
+    if (node is RenderParagraph) return ParagraphGeometry(node);
+    BlockTextGeometry? found;
+    node.visitChildren((child) {
+      found ??= _firstGeometry(child);
+    });
+    return found;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -149,6 +171,7 @@ class _SelectableTextBoxState extends State<SelectableTextBox> {
       id: id,
       paragraphGetter: _findParagraph,
       projectionGetter: widget.projectionGetter,
+      geometryGetter: _findGeometry,
       clipBoundsGetter: clipGetter,
       interiorScrollablesGetter: _interiorScrollables,
     );

@@ -23,6 +23,8 @@ export 'src/render/emoji_handler.dart';
 export 'src/render/footnote_handler.dart';
 export 'src/render/iframe_handler.dart';
 export 'src/render/audio_handler.dart';
+export 'src/render/cached_paragraph_text.dart'
+    show ParagraphLayoutCache, CachedParagraphText;
 export 'src/render/video_handler.dart';
 export 'src/render/image_handler.dart';
 export 'src/render/inline_span_text.dart';

@@ -7,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/node/node.dart';
 import 'package:fluxdo_render/src/render/node_factory.dart';
 
+import '../test_text_finders.dart';
+
 void main() {
   Future<Container> calloutContainer(
     WidgetTester tester,
@@ -52,7 +54,7 @@ void main() {
         title: '提示');
     expect(margin(c), (top: 8.0, bottom: 8.0));
     expect(corners(c), (tr: 4.0, br: 4.0));
-    expect(find.text('提示'), findsOneWidget); // 标题头
+    expect(findRenderedText('提示'), findsOneWidget); // 标题头
   });
 
   testWidgets('first:上外边距 + 上圆角 + 标题头(无下圆角)', (tester) async {
@@ -60,7 +62,7 @@ void main() {
         title: '提示');
     expect(margin(c), (top: 8.0, bottom: 0.0));
     expect(corners(c), (tr: 4.0, br: 0.0));
-    expect(find.text('提示'), findsOneWidget);
+    expect(findRenderedText('提示'), findsOneWidget);
   });
 
   testWidgets('mid:无外边距/圆角/标题(只正文 + 连续装饰)', (tester) async {
@@ -68,7 +70,7 @@ void main() {
     expect(margin(c), (top: 0.0, bottom: 0.0));
     expect(corners(c), (tr: 0.0, br: 0.0));
     // 中片不渲染标题头(info 默认标题 "Info" / "信息" 都不应出现)
-    expect(find.text('正文'), findsOneWidget);
+    expect(findRenderedText('正文'), findsOneWidget);
   });
 
   testWidgets('last:下外边距 + 下圆角 + 无标题', (tester) async {
