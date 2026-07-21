@@ -91,9 +91,15 @@ void main() {
     await tester.pumpAndSettle();
     final h = controller.registry.liveHandles.first;
     expect(h.projection.projectAll(), '心情:heart:');
-    // RenderParagraph 实时可取
-    expect(h.paragraph, isNotNull);
-    expect(h.projection.renderLength, h.paragraph!.text.toPlainText().length);
+    // 文本几何实时可取(emoji 段落走直绘岛,geometry 是直绘 RenderObject
+    // 而非 RenderParagraph —— 选区几何统一经 BlockTextGeometry 抽象)。
+    final g = h.geometry;
+    expect(g, isNotNull);
+    // renderLength = 文字 2 字 + emoji 占 1 ￼
+    expect(h.projection.renderLength, 3);
+    // 几何原语可用:emoji 占位落在词边界上整颗选中
+    final wb = g!.getWordBoundary(const TextPosition(offset: 2));
+    expect(wb.end - wb.start, greaterThanOrEqualTo(1));
   });
 
   testWidgets('无 SelectionScope 时不崩(退化不可选)', (tester) async {

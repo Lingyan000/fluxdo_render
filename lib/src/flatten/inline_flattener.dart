@@ -24,7 +24,7 @@
 library;
 
 import 'dart:math' show Random;
-import 'dart:ui' as ui show FragmentShader;
+import 'dart:ui' as ui show FragmentShader, PlaceholderAlignment;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -76,6 +76,31 @@ class SpanMountContext {
   }
 }
 
+/// 直绘「岛」:占位尺寸**不依赖 widget 布局即可确定**的 WidgetSpan 原子。
+/// 当前只有 emoji(普通 = 1em、only-emoji = 32dp,margin 常量),这是它
+/// 能进直绘路径(CachedParagraphText)的根本前提 —— 图片/公式/chip 的
+/// 占位尺寸都要先布局 widget 才知道,进不了。
+class SpanIsland {
+  const SpanIsland({
+    required this.child,
+    required this.width,
+    required this.height,
+    required this.alignment,
+  });
+
+  /// 与 RichText 路径同一实例(WidgetSpan.child:Padding + Builder +
+  /// emojiBuilder),直绘岛直接挂它 —— 加载/动图/兜底行为零分歧。
+  final Widget child;
+
+  /// 占位尺寸(含 margin;= RichText 路径下该 child 的布局尺寸)。
+  /// 注:emoji 加载失败的 `:name:` 胶囊可能宽于此值,RichText 会撑大
+  /// 占位而直绘 tight 压缩 —— 异常兜底形态的可接受差异。
+  final double width;
+  final double height;
+
+  final ui.PlaceholderAlignment alignment;
+}
+
 /// 压平结果 — InlineSpan 树 + 需要 dispose 的 recognizers + 选区映射表。
 class FlattenResult {
   FlattenResult({
@@ -83,7 +108,7 @@ class FlattenResult {
     required this.recognizers,
     required this.projection,
     required this.mount,
-    required this.hasPlaceholders,
+    required this.islands,
   });
 
   final TextSpan span;
@@ -101,10 +126,18 @@ class FlattenResult {
   /// dispose 时 detach;未挂载时点击 no-op。
   final SpanMountContext mount;
 
-  /// span 树里是否含 PlaceholderSpan(WidgetSpan 原子:emoji/图/mention-chip/
-  /// spoiler/脚注/公式/上下标等)。直绘路径(CachedParagraphText)只吃
-  /// 纯 TextSpan 段落,构建时一次性扫描,分路判据零遍历成本。
-  final bool hasPlaceholders;
+  /// span 树全部 PlaceholderSpan 的**按序**清单(顺序 = builder
+  /// placeholderCount 序 = getBoxesForPlaceholders 序):emoji 记
+  /// [SpanIsland],其他 WidgetSpan(图/chip/公式/spoiler/上下标等)记
+  /// null。构建时一次性收集,分路判据零遍历成本。
+  final List<SpanIsland?> islands;
+
+  /// span 树里是否含 PlaceholderSpan。
+  bool get hasPlaceholders => islands.isNotEmpty;
+
+  /// 全部占位都是岛(emoji)→ 段落可进直绘(占位岛模式)。
+  bool get allPlaceholdersAreIslands =>
+      islands.isNotEmpty && !islands.contains(null);
 }
 
 /// 单次 flatten 的参数包:handlers/尺寸/上下文 + recognizer 累计列表。
@@ -145,6 +178,10 @@ class _FlattenPass {
 
   /// 本次 flatten 创建的 recognizer 累计表(随 FlattenResult 返回)。
   final List<GestureRecognizer> recognizers = [];
+
+  /// WidgetSpan → 岛 登记表(_buildEmojiSpan 写入,_collectIslands 按
+  /// 遍历序对齐输出;identity map,flatten 内一次性)。
+  final Map<PlaceholderSpan, SpanIsland> islandBySpan = {};
 }
 
 class InlineFlattener {
@@ -204,10 +241,25 @@ class InlineFlattener {
       recognizers: pass.recognizers,
       projection: buildInlineProjection(inlines),
       mount: pass.mount,
-      // visitChildren 对每个"有内容"(text/placeholder)的 span 调 visitor,
-      // 返 false 即短路 —— 整体返回 false = 存在 PlaceholderSpan。
-      hasPlaceholders: !rootSpan.visitChildren((s) => s is! PlaceholderSpan),
+      // 按 span 树遍历序收集全部 PlaceholderSpan(顺序 = builder 的
+      // placeholderCount 序):emoji 在 _buildEmojiSpan 已登记 SpanIsland,
+      // 其余 WidgetSpan 登记 null(非岛,段落进不了直绘)。
+      islands: _collectIslands(rootSpan, pass),
     );
+  }
+
+  /// 按遍历序对齐 placeholder ↔ 岛:_buildEmojiSpan 把 (WidgetSpan → 岛)
+  /// 写进 pass.islandBySpan,这里 visitChildren(与 ParagraphBuilder 的
+  /// build 同序)逐个查表输出;非 emoji 的 PlaceholderSpan 查不到 → null。
+  static List<SpanIsland?> _collectIslands(TextSpan root, _FlattenPass pass) {
+    final result = <SpanIsland?>[];
+    root.visitChildren((s) {
+      if (s is PlaceholderSpan) {
+        result.add(pass.islandBySpan[s]);
+      }
+      return true;
+    });
+    return result;
   }
 
   List<InlineSpan> _build(
@@ -271,12 +323,8 @@ class InlineFlattener {
           p.context,
           inheritedRecognizer: inheritedRecognizer,
         ),
-      EmojiRun() => _buildEmojiSpan(
-          node,
-          p.emojiBuilder,
-          p.emojiBaseSize,
-          inheritedRecognizer: inheritedRecognizer,
-        ),
+      EmojiRun() => _buildEmojiSpan(node, p,
+          inheritedRecognizer: inheritedRecognizer),
       MentionRun() => node.statusEmoji == null
           ? _buildMentionTextSpan(node, p)
           : _buildMentionSpan(node, p),
@@ -532,10 +580,10 @@ class InlineFlattener {
   /// 时统一处理(mention 内的状态 emoji 也是同样问题)。
   WidgetSpan _buildEmojiSpan(
     EmojiRun emoji,
-    EmojiImageBuilder emojiBuilder,
-    double emojiBaseSize, {
+    _FlattenPass p, {
     GestureRecognizer? inheritedRecognizer,
   }) {
+    final emojiBaseSize = p.emojiBaseSize;
     final size = emoji.isOnlyEmoji ? 32.0 : emojiBaseSize;
     // legacy 对齐:普通 emoji 左右各 2px;only-emoji 左右 1px + 上下 0.5em
     final margin = emoji.isOnlyEmoji
@@ -544,17 +592,28 @@ class InlineFlattener {
     // 选区文本由自研选区的映射表(buildInlineProjection)统一投影成 `:name:`,
     // 不在此处用 SelectableAdapter(那是已废弃的 SelectionArea 方案)。
     // builder 用挂载处的活 Builder ctx(编辑器路径一直如此),产物可跨挂载复用。
-    return WidgetSpan(
-      alignment: PlaceholderAlignment.middle,
-      child: Padding(
-        padding: margin,
-        child: Builder(
-          builder: (ctx) {
-            return emojiBuilder(ctx, emoji, size);
-          },
-        ),
+    final child = Padding(
+      padding: margin,
+      child: Builder(
+        builder: (ctx) {
+          return p.emojiBuilder(ctx, emoji, size);
+        },
       ),
     );
+    final span = WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: child,
+    );
+    // 岛登记:emoji 的占位尺寸不依赖 widget 布局(size + margin 均为
+    // 确定值)—— 直绘路径据此 addPlaceholder,与 RichText 布局同构
+    // (emojiBuilder 契约:自行用 size 约束尺寸)。
+    p.islandBySpan[span] = SpanIsland(
+      child: child,
+      width: size + margin.horizontal,
+      height: size + margin.vertical,
+      alignment: ui.PlaceholderAlignment.middle,
+    );
+    return span;
   }
 
   /// Mention 渲染:chip 样式(灰底圆角 + primary 字 + 0.82em),

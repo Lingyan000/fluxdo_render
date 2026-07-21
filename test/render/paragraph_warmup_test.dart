@@ -1,8 +1,9 @@
 /// ParagraphWarmup 单测:预热产物与挂载路径 key 同源(缓存命中)。
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/fluxdo_render.dart';
-import 'package:fluxdo_render/src/render/cached_paragraph_text.dart';
 
 void main() {
   setUp(() {

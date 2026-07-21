@@ -203,8 +203,37 @@ class ParagraphLayoutCache {
         textScaler: env.textScaler,
       ),
     );
-    root.build(builder, textScaler: env.textScaler);
+    root.build(
+      builder,
+      textScaler: env.textScaler,
+      dimensions: _placeholderDims(flat, env),
+    );
     return builder.build();
+  }
+
+  /// 岛占位尺寸(直绘判据保证 islands 全非 null)。缩放语义对齐 SDK:
+  /// RichText 给 WidgetSpan child 包 _AutoScaleInlineWidget(按字号缩放
+  /// 因子放大 child),占位 = child 布局尺寸 × 因子;这里等价地把确定
+  /// 尺寸 × 因子(emoji 尺寸恒derive自根字号,因子按根字号算)。
+  static List<PlaceholderDimensions>? _placeholderDims(
+      FlattenResult flat, ParagraphEnv env) {
+    if (flat.islands.isEmpty) return const [];
+    final scale = islandScale(flat, env);
+    return [
+      for (final island in flat.islands)
+        PlaceholderDimensions(
+          size: Size(island!.width * scale, island.height * scale),
+          alignment: island.alignment,
+        ),
+    ];
+  }
+
+  /// 岛的 textScaler 缩放因子(1.0 = 无系统字体缩放,绝对主流)。
+  static double islandScale(FlattenResult flat, ParagraphEnv env) {
+    final fontSize =
+        flat.span.style?.fontSize ?? env.rootStyle.fontSize ?? 14.0;
+    if (fontSize == 0) return 0;
+    return env.textScaler.scale(fontSize) / fontSize;
   }
 
   static ParagraphLayoutEntry _layout(
@@ -268,12 +297,22 @@ class _MetricsKey {
 }
 
 /// 直绘段落 widget:缓存 ui.Paragraph 上屏 + 链接命中 + 选区几何 + 语义。
-class CachedParagraphText extends LeafRenderObjectWidget {
-  const CachedParagraphText({
+///
+/// [FlattenResult.islands] 非空时(emoji 段落)为 MultiChild:children =
+/// 各岛的真 widget(RichText 路径同一实例,加载/动图/兜底零分歧),
+/// layout 后按 getBoxesForPlaceholders 摆进占位坑 —— 与 RenderParagraph
+/// 处理 WidgetSpan 同款机制(同一渲染树/变换链,非 overlay 对齐)。
+class CachedParagraphText extends MultiChildRenderObjectWidget {
+  CachedParagraphText({
     super.key,
     required this.result,
     this.textAlign,
-  });
+  }) : super(
+          children: [
+            for (final island in result.islands)
+              if (island != null) island.child,
+          ],
+        );
 
   final FlattenResult result;
   final TextAlign? textAlign;
@@ -303,9 +342,17 @@ class CachedParagraphText extends LeafRenderObjectWidget {
   }
 }
 
-/// 直绘 RenderObject。布局 = 缓存查询;绘制 = drawParagraph;
-/// 命中 = 偏移反查 recognizer;选区 = BlockTextGeometry;语义 = 整段 label。
-class RenderCachedParagraph extends RenderBox with BlockTextGeometry {
+/// 岛子节点的 parentData(占位坑偏移由 performLayout 回填)。
+class _IslandParentData extends ContainerBoxParentData<RenderBox> {}
+
+/// 直绘 RenderObject。布局 = 缓存查询 + 岛坑位回填;绘制 = drawParagraph
+/// + 岛子节点;命中 = 岛子节点优先,再偏移反查 recognizer;选区 =
+/// BlockTextGeometry;语义 = 整段 label。
+class RenderCachedParagraph extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _IslandParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _IslandParentData>,
+        BlockTextGeometry {
   RenderCachedParagraph({
     required FlattenResult result,
     required ParagraphEnv env,
@@ -339,6 +386,13 @@ class RenderCachedParagraph extends RenderBox with BlockTextGeometry {
   String get _plainText =>
       _cachedPlainText ??= _result.span.toPlainText(includePlaceholders: false);
 
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _IslandParentData) {
+      child.parentData = _IslandParentData();
+    }
+  }
+
   // ---- RenderBox ----
 
   @override
@@ -353,6 +407,25 @@ class RenderCachedParagraph extends RenderBox with BlockTextGeometry {
     ParagraphWarmupProbe.noteEnv(
         _env, constraints.minWidth, constraints.maxWidth);
     size = constraints.constrain(entry.size);
+
+    // 岛子节点:tight 约束到占位尺寸(与 addPlaceholder 一致;emoji
+    // builder 契约本就按 size 出图),坑位来自段落布局的占位盒。
+    var child = firstChild;
+    if (child == null) return;
+    final boxes = entry.paragraph.getBoxesForPlaceholders();
+    final scale = ParagraphLayoutCache.islandScale(_result, _env);
+    var boxIndex = 0;
+    for (final island in _result.islands) {
+      if (island == null) continue; // 直绘判据下不该出现,防御跳过
+      if (child == null || boxIndex >= boxes.length) break;
+      final box = boxes[boxIndex].toRect();
+      child.layout(BoxConstraints.tight(
+        Size(island.width * scale, island.height * scale),
+      ));
+      (child.parentData! as _IslandParentData).offset = box.topLeft;
+      child = (child.parentData! as _IslandParentData).nextSibling;
+      boxIndex++;
+    }
   }
 
   @override
@@ -389,6 +462,7 @@ class RenderCachedParagraph extends RenderBox with BlockTextGeometry {
     final entry = _entry;
     if (entry == null) return;
     context.canvas.drawParagraph(entry.paragraph, offset);
+    defaultPaint(context, offset); // 岛子节点(emoji)画在文字之上
   }
 
   // ---- 语义(a11y 朗读;整段 label,粒度粗于 RenderParagraph 逐 span) ----
@@ -405,6 +479,10 @@ class RenderCachedParagraph extends RenderBox with BlockTextGeometry {
 
   @override
   bool hitTestSelf(Offset position) => true;
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position); // 岛子节点优先
 
   @override
   void handleEvent(PointerEvent event, covariant BoxHitTestEntry entry) {

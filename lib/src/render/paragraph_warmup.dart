@@ -219,9 +219,9 @@ class ParagraphWarmup {
           context: context,
         ),
       );
-      // 直绘判据同 InlineSpanText:满足才预排版。
+      // 直绘判据同 InlineSpanText:满足才预排版(emoji 占位岛可进)。
       final projection = flat.projection;
-      if (!flat.hasPlaceholders &&
+      if ((!flat.hasPlaceholders || flat.allPlaceholdersAreIslands) &&
           !projection.hasInlineCode &&
           !projection.hasSpanMention) {
         ParagraphLayoutCache.obtain(flat, ctx.env, ctx.minWidth, ctx.maxWidth);

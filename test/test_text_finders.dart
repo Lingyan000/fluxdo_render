@@ -14,7 +14,6 @@ library;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fluxdo_render/fluxdo_render.dart';
 import 'package:fluxdo_render/src/render/cached_paragraph_text.dart';
 import 'package:fluxdo_render/src/selection/block_text_geometry.dart';
 

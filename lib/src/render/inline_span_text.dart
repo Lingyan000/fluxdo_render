@@ -24,6 +24,12 @@ import 'paragraph_warmup.dart';
 import 'selectable_text_box.dart';
 
 class InlineSpanText extends StatefulWidget {
+  /// 测试钩子:强制走 RichText 路径(生成双路径对照基线用)。
+  /// golden 流程:开着它 + 确定性 emoji builder 重锁基线(基线 =
+  /// RichText 形态)→ 关掉跑 golden = 直绘 vs RichText 的像素级对照。
+  @visibleForTesting
+  static bool debugForceRichText = false;
+
   const InlineSpanText({
     super.key,
     required this.inlines,
@@ -176,14 +182,16 @@ class _InlineSpanTextState extends State<InlineSpanText> {
     //
     // 直绘(CachedParagraphText,缓存 ui.Paragraph drawParagraph):
     // sliver 回收重进零排版零测量 —— 笔3 收益主体。判据(全部满足):
-    // - 无 PlaceholderSpan(WidgetSpan 原子画不出);
+    // - 占位全是「岛」(emoji,占位尺寸确定)或无占位;其他 WidgetSpan
+    //   原子(图/chip/公式)占位尺寸依赖 widget 布局,画不了;
     // - 无行内代码/TextSpan-mention(灰底 InlineCodeBackgroundPainter
     //   仍直读 RenderParagraph,首期不动它);
     // - 无 maxLines/overflow 定制(引用卡标题单行省略语义走 TextPainter
     //   的 ellipsis,直绘层未实现 —— 这类块量少,留 RichText)。
     // 其余段落(交互原子/富装饰)走原 RichText 路径,行为不变。
     final projection = result.projection;
-    final useDirectPaint = !result.hasPlaceholders &&
+    final useDirectPaint = !InlineSpanText.debugForceRichText &&
+        (!result.hasPlaceholders || result.allPlaceholdersAreIslands) &&
         !projection.hasInlineCode &&
         !projection.hasSpanMention &&
         widget.maxLines == null &&
