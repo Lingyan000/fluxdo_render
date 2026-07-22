@@ -18,6 +18,7 @@ import 'package:fluxdo_render/src/node/inline_node.dart';
 final pad = EditorImeClient.padCharForTesting;
 
 void main() {
+  _softBreakTests();
   TestWidgetsFlutterBinding.ensureInitialized();
 
   (EditorState, EditorImeClient) makeAttached({
@@ -355,6 +356,68 @@ void main() {
       ));
       expect((state.blocks[0] as TextBlock).content.text, 'hi world');
       expect(state.selection!.extent.offset, 2);
+    });
+  });
+}
+
+/// 段内软换行(cook 的 `<br>` 导入形态)必须扛得住 IME 回调。
+///
+/// 真机回归:网页端带换行的草稿在 fluxdo 打开后,只要打一个字,整段
+/// 换行全没、几行并成一行 —— 早先 IME 层无条件 `replaceAll('\n','')`,
+/// 把"段内既有软换行"和"平台插入的回车"一起洗了。
+void _softBreakTests() {
+  final pad = EditorImeClient.padCharForTesting;
+
+  group('段内软换行', () {
+    (EditorState, EditorImeClient) attach(String text, {int? caret}) {
+      final c = caret ?? text.length;
+      final state = EditorState(blocks: [
+        TextBlock(id: 'b0', content: EditableTextContent(text: text)),
+      ]);
+      state.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: 'b0', offset: c)));
+      final ime = EditorImeClient(state: state);
+      ime.debugAttachToBlock(
+        'b0',
+        EditorImeClient.debugFormat(TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: c),
+        )),
+      );
+      return (state, ime);
+    }
+
+    String textOf(EditorState s) => (s.blocks.first as TextBlock).content.text;
+
+    test('末尾打字:既有换行原样保留', () {
+      const t = '第一行\n第二行\n第三行';
+      final (state, ime) = attach(t);
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad$t*',
+        selection: TextSelection.collapsed(offset: t.length + 2),
+      ));
+      expect(textOf(state), '$t*');
+    });
+
+    test('中间打字:换行数不变', () {
+      const t = '第一行\n第二行';
+      final (state, ime) = attach(t, caret: 3);
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad第一行X\n第二行',
+        selection: const TextSelection.collapsed(offset: 5),
+      ));
+      expect(textOf(state), '第一行X\n第二行');
+    });
+
+    test('平台插入的换行仍然是分段(不进文本)', () {
+      const t = '第一行\n第二行';
+      final (state, ime) = attach(t);
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad$t\n',
+        selection: TextSelection.collapsed(offset: t.length + 2),
+      ));
+      expect(state.blocks.length, 2, reason: '回车 → 分段');
+      expect(textOf(state), t, reason: '既有软换行没被吃');
     });
   });
 }
