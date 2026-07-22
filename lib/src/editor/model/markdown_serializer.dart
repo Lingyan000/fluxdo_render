@@ -877,3 +877,43 @@ String _serializeTable(
   }
   return lines.join('\n');
 }
+
+// ---------------------------------------------------------------------
+// 原子 ↔ 字面 markdown(atom reveal 用:光标贴到原子边界时显形成
+// `![alt](src)` / `:name:` / `@user`,可直接改地址、改名)
+// ---------------------------------------------------------------------
+
+/// 原子节点的字面 raw 形态;不认识的节点返回 null(不展开)。
+String? atomToMarkdown(InlineNode node) => switch (node) {
+      final ImageRun img => _serializeImageRun(img),
+      EmojiRun(:final name) => name.isEmpty ? null : ':$name:',
+      MentionRun(:final username) => '@$username',
+      final LocalDateRun d => _serializeLocalDate(d),
+      _ => null,
+    };
+
+final RegExp _imageMdRe =
+    RegExp(r'^!\[([^\]]*?)(?:\|(\d+)x(\d+)(?:,\s*(\d+)%)?)?\]\(([^)]*)\)$');
+
+/// 字面图片语法 → [ImageRun];不匹配返回 null。
+///
+/// `upload://` 短链同时写进 origSrc —— 那是 raw 的规范形态,序列化必须
+/// 写回短链(见 [_serializeImageRun])。
+ImageRun? parseImageMarkdown(String literal) {
+  final m = _imageMdRe.firstMatch(literal);
+  if (m == null) return null;
+  final src = m.group(5)!;
+  final w = double.tryParse(m.group(2) ?? '');
+  final h = double.tryParse(m.group(3) ?? '');
+  final scale = double.tryParse(m.group(4) ?? '');
+  return ImageRun(
+    src: src,
+    alt: m.group(1) ?? '',
+    origSrc: src.startsWith('upload://') ? src : null,
+    width: w,
+    height: h,
+    origWidth: w,
+    origHeight: h,
+    scale: scale,
+  );
+}
