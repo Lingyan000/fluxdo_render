@@ -1198,13 +1198,14 @@ class EditorState extends ChangeNotifier {
   }
 
   /// 行内规则应用:`[matchStart, matchStart+delim+content+delim)` 区间,
-  /// 删两侧定界符、对内容施加 [kind],光标落内容尾。独立 undo 步。
+  /// 删两侧定界符、对内容施加 [kind],光标落 [caretOffset]。独立 undo 步。
   void applyInlineInputRule(
     String blockId, {
     required int matchStart,
     required int delimLength,
     required int contentLength,
     required MarkKind kind,
+    int? caretOffset,
   }) {
     final i = indexOfBlock(blockId);
     if (i < 0) return;
@@ -1229,7 +1230,11 @@ class EditorState extends ChangeNotifier {
     _commit(
       newBlocks,
       EditorSelection.collapsed(
-        EditorPosition(blockId: blockId, offset: matchStart + contentLength),
+        EditorPosition(
+          blockId: blockId,
+          offset: (caretOffset ?? matchStart + contentLength)
+              .clamp(0, content.length),
+        ),
       ),
       groupWithPrevious: false,
     );

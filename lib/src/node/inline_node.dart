@@ -37,6 +37,29 @@ class TextRun extends InlineNode {
   String toString() => 'TextRun(${text.length} chars)';
 }
 
+/// 编辑态 Live Preview 的虚拟 Markdown 定界符。
+///
+/// 它占渲染宽度但不占文档/复制偏移；阅读端和序列化永远不会产生此节点。
+@immutable
+class EditingDelimiterRun extends TextRun {
+  const EditingDelimiterRun(super.text, {this.color});
+
+  final Color? color;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EditingDelimiterRun &&
+          text == other.text &&
+          color == other.color;
+
+  @override
+  int get hashCode => Object.hash(text, color);
+
+  @override
+  String toString() => 'EditingDelimiterRun("$text")';
+}
+
 /// `<em>` / `<i>` 斜体,可包含嵌套行内子节点。
 @immutable
 class EmRun extends InlineNode {

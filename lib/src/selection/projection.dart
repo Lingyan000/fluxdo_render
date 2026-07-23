@@ -22,6 +22,9 @@ enum ProjectionKind {
   lineBreak,
   inlineCode,
 
+  /// 编辑态 Live Preview 虚拟定界符(渲染有宽度,逻辑内容为空)。
+  editingDelimiter,
+
   /// 行内代码两侧注入的 NBSP 粘性内边距(见 kInlineCodePadChar)。
   /// 渲染占 1 字符、逻辑投影恒为空串(不属于内容,复制/引用不带出)。
   codePad,
@@ -204,7 +207,7 @@ class RenderTextProjection {
     for (final e in entries) {
       final entryContentLen = _contentLenOfEntry(e);
       if (remaining <= 0) {
-        if (entryContentLen == 0) continue; // pad/ZWSP:光标不停这
+        if (entryContentLen == 0) continue; // pad/ZWSP/虚拟定界符
         return e.renderStart;
       }
       if (remaining < entryContentLen) {

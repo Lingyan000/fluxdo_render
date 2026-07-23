@@ -198,6 +198,7 @@ class FluxdoEditor extends StatefulWidget {
     required this.state,
     this.baseTextStyle,
     this.autofocus = false,
+    this.liveMarkdownPreview = true,
     this.focusNode,
     this.nodeFactory,
     this.markdownImporter,
@@ -223,6 +224,9 @@ class FluxdoEditor extends StatefulWidget {
   final TextStyle? baseTextStyle;
 
   final bool autofocus;
+
+  /// 光标进入行内格式范围时展开 Markdown 定界符；离开后折叠为富文本。
+  final bool liveMarkdownPreview;
 
   /// 外部焦点节点(宿主监听焦点态做键盘/面板联动;null 内部自建)。
   final FocusNode? focusNode;
@@ -2035,6 +2039,11 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
     final composingBlockId =
         state.hasComposing ? state.selection?.extent.blockId : null;
+    final previewSelection = widget.liveMarkdownPreview &&
+            _focusNode.hasPrimaryFocus &&
+            (state.selection?.isCollapsed ?? false)
+        ? state.selection
+        : null;
 
     // 有序列表序号(派生渲染态):连续 listItem run 内扫描,run 首项取
     // listStart;ordered/depth 切换重新起算(同 depth 的 ol 连续编号)。
@@ -2133,6 +2142,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
               composing: tb.id == composingBlockId
                   ? state.composing
                   : TextRange.empty,
+              revealMarkdownAt: previewSelection?.extent.blockId == tb.id
+                  ? previewSelection!.extent.offset
+                  : null,
               listMarkerOrdinal: ordinals[i],
               // 行内图片原子走岛同一图片管线(upload 解析/解码上限);
               // hover=click(可点选)。注意:builder 产物进 flatten 缓存

@@ -59,6 +59,14 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
   void walk(List<InlineNode> nodes) {
     for (final node in nodes) {
       switch (node) {
+        case EditingDelimiterRun(:final text):
+          entries.add(ProjectionEntry(
+            renderStart: cursor,
+            renderLen: text.length,
+            logicalText: '',
+            kind: ProjectionKind.editingDelimiter,
+          ));
+          cursor += text.length;
         case TextRun(:final text):
           addText(insertSoftBreaks(text), ProjectionKind.text);
         case LineBreakRun():
