@@ -203,6 +203,7 @@ class FluxdoEditor extends StatefulWidget {
     this.nodeFactory,
     this.markdownImporter,
     this.richPasteImporter,
+    this.onCalloutTypeTrigger,
     this.onIslandEditRequest,
     this.onContainerTitleEdit,
     this.onTableEdited,
@@ -245,6 +246,20 @@ class FluxdoEditor extends StatefulWidget {
   /// 空 = 剪贴板无富内容或转换失败,回落 [markdownImporter] 纯文本路径;
   /// 抛异常同回落。null = 不启用富粘贴。
   final Future<List<EditorBlock>?> Function()? richPasteImporter;
+
+  /// input rule `[!type] ` 命中(callout 手打)时的完整内容征集回调:
+  /// 宿主弹标题/折叠态对话框(同"+"菜单插入共用一个对话框),返回完整
+  /// Obsidian callout markdown(`> [!type]±  标题\n> 正文`);取消返回
+  /// null(本次触发放弃,已清空的标记文本不恢复,用户可继续打字)。
+  ///
+  /// 为什么不直接插一个空壳让用户接着打字:callout 落地后是**岛**(只读
+  /// 块,不是可续行编辑的容器)——插入空壳后按 Enter 换行,新行文本会
+  /// 被当成岛后面的新段落,而不是并入岛的正文,视觉上"标题"和"正文"
+  /// 拆成两个不相干的块(真机复现)。"+" 菜单插入从不出这问题,因为它
+  /// 靠对话框把标题/正文一次性收全再插入,插入的就已经是完整体——手打
+  /// 触发复用同一个对话框,从根上避开"岛不可续写"这个架构限制,而不是
+  /// 打补丁擦屁股。
+  final Future<String?> Function(String type)? onCalloutTypeTrigger;
 
   /// 双击岛 → 请求编辑(宿主弹源码对话框,改完调 state.replaceIsland)。
   /// null = 岛只读不可编辑。
@@ -341,6 +356,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     // input rule `--- ` → 分隔线岛(经 cook 链路;importer 未注入时用
     // markdown 纯文本兜底 —— 至少不静默)
     _ime.onHorizontalRuleRequest = _insertHorizontalRule;
+    // input rule `[!type] ` → callout 岛(同 hr,经 cook 链路)
+    _ime.onCalloutRequest = _insertCalloutFromTyping;
     // iOS 浮动光标(长按空格 trackpad 模式)
     _ime.onFloatingCursor = _onFloatingCursor;
     // macOS selector 快捷键(自管 IME 激活时 Cmd+A/C/V/X 走 selector)
@@ -1496,6 +1513,30 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
     if (!mounted || frag == null || frag.isEmpty) return;
     // 光标已在触发块(规则清空后 offset 0),粘贴语义插入
+    widget.state.pasteBlocks(frag);
+    _ime.syncFromState(show: false);
+  }
+
+  /// input rule `[!type] ` 命中:征集完整内容(标题/正文/折叠态)后一次性
+  /// 插 callout 岛。见 [FluxdoEditor.onCalloutTypeTrigger] 注释——不能
+  /// 先插空壳再等用户续行打字,岛不是可续写容器。
+  Future<void> _insertCalloutFromTyping(String blockId) async {
+    final type = widget.state.pendingCalloutType;
+    widget.state.pendingCalloutType = null;
+    final trigger = widget.onCalloutTypeTrigger;
+    final importer = widget.markdownImporter;
+    if (trigger == null || importer == null || type == null || type.isEmpty) {
+      return;
+    }
+    final markdown = await trigger(type);
+    if (!mounted || markdown == null || markdown.isEmpty) return;
+    List<EditorBlock>? frag;
+    try {
+      frag = await importer(markdown);
+    } catch (_) {
+      return;
+    }
+    if (!mounted || frag == null || frag.isEmpty) return;
     widget.state.pasteBlocks(frag);
     _ime.syncFromState(show: false);
   }

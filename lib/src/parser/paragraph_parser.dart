@@ -418,7 +418,8 @@ class ParagraphParser {
                       node, calloutAttr, nextId, nextImageIndex));
                 } else {
                   final callout =
-                      _tryParseCallout(node, nextId, nextImageIndex);
+                      _tryParseCalloutFromClass(node, nextId, nextImageIndex) ??
+                          _tryParseCallout(node, nextId, nextImageIndex);
                   if (callout != null) {
                     out.add(callout);
                   } else {
@@ -1082,6 +1083,71 @@ class ParagraphParser {
   /// - children:
   ///   - 首段 `<br>` 后的剩余 inline → 一个新 ParagraphNode(若非空)
   ///   - 首段之后的所有兄弟节点 → 递归 _parseBlocks
+  /// discourse-obsidian-callouts 服务端渲染的真实 cooked 结构(优先于文本
+  /// 标记识别):`<blockquote class="callout [is-collapsible] [is-collapsed]"
+  /// data-callout-type="TYPE">` + `<div class="callout-title">` (含
+  /// `.callout-icon` svg + `.callout-title-inner` 标题) + `<div
+  /// class="callout-content">` 正文。插件在服务端把 `[!type]` 文本标记整体
+  /// 替换成了这个结构,不再保留原始 `[!type]` 文本 —— 旧的 [_tryParseCallout]
+  /// 只认得客户端 cook() 未跑该转换前的裸文本形态,对这种真实结构永远 return
+  /// null,导致真实帖子里的 callout 全部退化成普通 BlockquoteNode。
+  CalloutNode? _tryParseCalloutFromClass(
+    dom.Element blockquoteEl,
+    String Function() nextId,
+    int Function() nextImageIndex,
+  ) {
+    if (!blockquoteEl.classes.contains('callout')) return null;
+    final typeRaw =
+        (blockquoteEl.attributes['data-callout-type'] ?? '').trim().toLowerCase();
+    if (typeRaw.isEmpty) return null;
+
+    final bool? foldable = blockquoteEl.classes.contains('is-collapsible')
+        ? !blockquoteEl.classes.contains('is-collapsed')
+        : null;
+
+    dom.Element? titleEl;
+    dom.Element? contentEl;
+    for (final c in blockquoteEl.children) {
+      if (c.classes.contains('callout-title')) {
+        titleEl = c;
+      } else if (c.classes.contains('callout-content')) {
+        contentEl = c;
+      }
+    }
+
+    List<InlineNode>? titleInlines;
+    String? title;
+    final titleInnerEl = titleEl?.querySelector('.callout-title-inner');
+    if (titleInnerEl != null) {
+      final inls = <InlineNode>[];
+      for (final n in titleInnerEl.nodes) {
+        _collectInlineFromAnyNode(n, inls, nextImageIndex);
+      }
+      _normalizeWhitespace(inls);
+      if (inls.isNotEmpty) {
+        titleInlines = List.unmodifiable(inls);
+        title = titleInnerEl.text.trim();
+        if (title.isEmpty) title = null;
+      }
+    }
+
+    final children = contentEl == null
+        ? const <BlockNode>[]
+        : _parseBlocks(contentEl.nodes, nextId, nextImageIndex,
+            keepBlankEdges: true);
+
+    return CalloutNode(
+      id: nextId(),
+      kind: CalloutKind.fromType(typeRaw),
+      typeRaw: typeRaw,
+      title: title,
+      titleInlines: titleInlines,
+      foldable: foldable,
+      children: children,
+      chunkPos: _blockquoteChunkPos(blockquoteEl),
+    );
+  }
+
   CalloutNode? _tryParseCallout(
     dom.Element blockquoteEl,
     String Function() nextId,

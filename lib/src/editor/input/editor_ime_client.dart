@@ -65,6 +65,11 @@ class EditorImeClient with TextInputClient {
   /// 链路产,状态层不造岛)。参数 = 触发块 id(标记文本已清空)。
   void Function(String blockId)? onHorizontalRuleRequest;
 
+  /// input rule `[!type] ` 命中时的 callout 插入请求(同 hr,岛节点由
+  /// 视图层经 cook 链路产)。参数 = 触发块 id;匹配到的类型在
+  /// [EditorState.pendingCalloutType]。
+  void Function(String blockId)? onCalloutRequest;
+
   /// iOS 浮动光标报文(长按空格 trackpad 模式)。IME 客户端只转发 ——
   /// 几何(基准光标矩形/命中/幽灵绘制)全在视图层。
   void Function(RawFloatingCursorPoint point)? onFloatingCursor;
@@ -251,6 +256,8 @@ class EditorImeClient with TextInputClient {
     );
     if (outcome == InputRuleOutcome.hrRequest) {
       onHorizontalRuleRequest?.call(blockId);
+    } else if (outcome == InputRuleOutcome.calloutRequest) {
+      onCalloutRequest?.call(blockId);
     }
   }
 
@@ -507,6 +514,8 @@ class EditorImeClient with TextInputClient {
       );
       if (outcome == InputRuleOutcome.hrRequest) {
         onHorizontalRuleRequest?.call(blockId);
+      } else if (outcome == InputRuleOutcome.calloutRequest) {
+        onCalloutRequest?.call(blockId);
       }
     } else if (!composingActive && wasComposing) {
       // 上屏同时还带了文本变化(部分 IME 会把最后一个字符和上屏合并发)

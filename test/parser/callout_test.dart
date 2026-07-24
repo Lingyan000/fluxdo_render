@@ -229,4 +229,69 @@ void main() {
       expect(c.titleInlines!.whereType<LinkRun>(), isEmpty);
     });
   });
+
+  group('parser callout 真实服务端 cooked 结构(class=callout)', () {
+    test('基础 note → CalloutNode + kind=note + titleInlines/正文正确提取', () {
+      final result = parser.parse(
+        '<blockquote dir="auto" data-callout-type="note" class="callout" '
+        'style="background-color: rgba(8, 109, 221, 0.1);">'
+        '<div class="callout-title">'
+        '<span class="callout-icon"><svg></svg></span>'
+        '<span class="callout-title-inner">Note</span>'
+        '</div>'
+        '<div class="callout-content"><p>Lorem ipsum dolor sit amet</p></div>'
+        '</blockquote>',
+      );
+      expect(result, hasLength(1));
+      final c = result[0] as CalloutNode;
+      expect(c.kind, CalloutKind.note);
+      expect(c.typeRaw, 'note');
+      expect(c.title, 'Note');
+      expect(c.foldable, isNull);
+      expect(c.children, hasLength(1));
+      final p = c.children[0] as ParagraphNode;
+      expect((p.inlines.first as TextRun).text.trim(), 'Lorem ipsum dolor sit amet');
+    });
+
+    test('is-collapsible 无 is-collapsed → foldable=true(默认展开)', () {
+      final c = parser.parse(
+        '<blockquote data-callout-type="warning" class="callout is-collapsible">'
+        '<div class="callout-title"><span class="callout-title-inner">别看了</span></div>'
+        '<div class="callout-content"><p>正文</p></div>'
+        '</blockquote>',
+      )[0] as CalloutNode;
+      expect(c.kind, CalloutKind.warning);
+      expect(c.title, '别看了');
+      expect(c.foldable, isTrue);
+    });
+
+    test('is-collapsible + is-collapsed → foldable=false(默认折叠)', () {
+      final c = parser.parse(
+        '<blockquote data-callout-type="success" '
+        'class="callout is-collapsible is-collapsed">'
+        '<div class="callout-title"><span class="callout-title-inner">非常成功</span></div>'
+        '<div class="callout-content"><p>正文</p></div>'
+        '</blockquote>',
+      )[0] as CalloutNode;
+      expect(c.foldable, isFalse);
+    });
+
+    test('多段正文 + 混合块级都能进 children', () {
+      final c = parser.parse(
+        '<blockquote data-callout-type="tip" class="callout">'
+        '<div class="callout-title"><span class="callout-title-inner">Tip</span></div>'
+        '<div class="callout-content"><p>第一段</p><p>第二段</p><ul><li>项目</li></ul></div>'
+        '</blockquote>',
+      )[0] as CalloutNode;
+      expect(c.children, hasLength(3));
+      expect(c.children[2], isA<ListNode>());
+    });
+
+    test('没有 class=callout 的普通 blockquote 不受影响,仍回落普通逻辑', () {
+      final result = parser.parse(
+        '<blockquote><p>普通引用</p></blockquote>',
+      );
+      expect(result[0], isA<BlockquoteNode>());
+    });
+  });
 }

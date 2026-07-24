@@ -80,6 +80,29 @@ void main() {
       expect(first(s).content.text, '');
     });
 
+    test('[!note] 空格 → calloutRequest,标记清空,类型存 pendingCalloutType', () {
+      var s = empty();
+      expect(type(s, '[!note] '), InputRuleOutcome.calloutRequest);
+      expect(first(s).content.text, '', reason: '标记已删');
+      expect(s.pendingCalloutType, 'note');
+
+      // 类型大小写不敏感,统一存小写
+      s = empty();
+      expect(type(s, '[!WARNING] '), InputRuleOutcome.calloutRequest);
+      expect(s.pendingCalloutType, 'warning');
+
+      // 已在引用层里(先 "> " 再敲)一样命中
+      s = empty();
+      type(s, '> ');
+      expect(type(s, '[!tip] '), InputRuleOutcome.calloutRequest);
+      expect(s.pendingCalloutType, 'tip');
+
+      // 非行首不触发
+      s = empty();
+      s.insertText('文字');
+      expect(type(s, '[!note] '), InputRuleOutcome.none, reason: '非行首');
+    });
+
     test('排除:行中打标记不触发;heading 内不再转换;标记区含原子不触发', () {
       var s = empty();
       s.insertText('文字');

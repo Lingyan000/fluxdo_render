@@ -33,6 +33,11 @@ enum InputRuleOutcome {
   /// `---` 命中:请求视图层插入分隔线(状态层不产岛节点)。
   /// 触发行文本已清空。
   hrRequest,
+
+  /// `[!type] ` 命中(callout 手打):请求视图层经 cook 链路把当前块
+  /// 换成 callout 岛。触发行文本已清空,匹配到的类型存在
+  /// [EditorState.pendingCalloutType]。
+  calloutRequest,
 }
 
 /// 对 [blockId] 块在光标处尝试应用 input rules。
@@ -112,6 +117,11 @@ final _bulletRe = RegExp(r'^[-*] $');
 final _orderedRe = RegExp(r'^(\d{1,9})[.)] $');
 final _quoteRe = RegExp(r'^> $');
 final _hrRe = RegExp(r'^(---|\*\*\*|___) $');
+// Obsidian callout 语法起手式:`[!note] `。先敲 `> ` 进引用层再敲这个
+// 也一样命中——`> ` 那条规则已经把标记文本清空,`before` 到这里已经不
+// 带字面 `> ` 了。类型只收字母,不含 `+`/`-` 折叠后缀——那个后缀打字
+// 场景太少见,手打先只覆盖最常用的"裸类型名"。
+final _calloutRe = RegExp(r'^\[!([a-zA-Z]+)\] $');
 
 InputRuleOutcome _tryBlockRules(
   EditorState state,
@@ -138,6 +148,20 @@ InputRuleOutcome _tryBlockRules(
       transform: (b) => b, // 类型不变,仅清标记;岛由视图层插
     );
     return InputRuleOutcome.hrRequest;
+  }
+
+  // callout:任何段落块都可触发(空段打 "[!note] " 或引用层里打
+  // "> [!note] ")
+  final callout = _calloutRe.firstMatch(before);
+  if (callout != null && block.isParagraph) {
+    state.pendingCalloutType = callout.group(1)!.toLowerCase();
+    state.sealHistory();
+    state.applyBlockInputRule(
+      block.id,
+      markerLength: caret,
+      transform: (b) => b, // 类型不变,仅清标记;岛由视图层经 cook 插
+    );
+    return InputRuleOutcome.calloutRequest;
   }
 
   // 已是结构块(heading/listItem)不再转换;引用层可继续叠标记

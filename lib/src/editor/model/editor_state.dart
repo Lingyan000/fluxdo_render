@@ -296,6 +296,12 @@ class EditorState extends ChangeNotifier {
   List<EditorBlock> _blocks;
   List<EditorBlock> get blocks => _blocks;
 
+  /// [InputRuleOutcome.calloutRequest] 命中时临时存放匹配到的 callout
+  /// 类型(如 "note")。触发规则那一刻就把标记文本清空了,视图层收到
+  /// outcome 时已经读不到原始 `[!note]` 字面量,靠这个字段带过去；
+  /// 视图层读取后必须清空,一次性消费。
+  String? pendingCalloutType;
+
   /// 文档修订号:每次 [_blocks] 快照替换 +1(选区/composing 变化不计)。
   /// 视图层用它区分「编辑引发的光标移动」(瞬时贴上)与「纯导航」(滑行)。
   int get docRevision => _docRevision;
