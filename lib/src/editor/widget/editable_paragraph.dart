@@ -24,7 +24,8 @@ import '../../render/image_handler.dart' show ImageContentBuilder;
 import '../../render/list_item_layout.dart';
 import '../../render/selectable_text_box.dart';
 import '../../selection/projection.dart';
-import '../model/editable_text_content.dart' show MarkKind;
+import '../model/editable_text_content.dart'
+    show EditableTextContent, MarkKind;
 import '../model/editor_state.dart';
 
 class EditableParagraph extends StatefulWidget {
@@ -37,9 +38,14 @@ class EditableParagraph extends StatefulWidget {
     this.listMarkerOrdinal = 1,
     this.imageContentBuilder,
     this.emojiImageBuilder,
+    this.markerRanges = const [],
   });
 
   final TextBlock block;
+
+  /// 本段当前显形的字面 markdown 标记区间(`**`/`> `)。渲染成淡色 ——
+  /// 让用户一眼看出这是「标记」不是正文(展开态才非空)。
+  final List<(int, int)> markerRanges;
 
   /// 在编辑器文档中的序号(= blocks index;SelectableBlockId.docOrder)。
   final int documentOrder;
@@ -84,6 +90,8 @@ class _EditableParagraphState extends State<EditableParagraph> {
       widget.block.content.toInlines(
         forEditing: true,
         editingLinkColor: _linkColor,
+        markerRanges: widget.markerRanges,
+        markerColor: _markerColor,
       ),
       _effectiveStyle,
       // 行内图片原子(裸图):走宿主图片管线(upload 解析/解码上限),
@@ -107,13 +115,17 @@ class _EditableParagraphState extends State<EditableParagraph> {
   }
 
   Color? _linkColor;
+  Color? _markerColor;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final next = Theme.of(context).colorScheme.primary;
-    if (next != _linkColor) {
+    final scheme = Theme.of(context).colorScheme;
+    final nextMarker = scheme.onSurfaceVariant.withValues(alpha: 0.45);
+    if (next != _linkColor || nextMarker != _markerColor) {
       _linkColor = next;
+      _markerColor = nextMarker;
       _disposeResult();
     }
   }
@@ -125,7 +137,8 @@ class _EditableParagraphState extends State<EditableParagraph> {
     if (oldWidget.block.content != widget.block.content ||
         oldWidget.block.kind != widget.block.kind ||
         oldWidget.block.headingLevel != widget.block.headingLevel ||
-        oldWidget.baseStyle != widget.baseStyle) {
+        oldWidget.baseStyle != widget.baseStyle ||
+        !listEquals(oldWidget.markerRanges, widget.markerRanges)) {
       _disposeResult();
     }
   }
@@ -182,8 +195,18 @@ class _EditableParagraphState extends State<EditableParagraph> {
     // (行高由图撑,输入文字不改行高,caret 走 editingCaretRectIn 的
     // 行盒校正);无图段落维持强制(M1 光标稳定性:空段=满段=恒定行高,
     // emoji/mention/date 原子都不超行高,不受影响)。
+    //
+    // [size] 大字号同理要放开:钳成裸字体高度后,放大字号的实际渲染高度
+    // 超出行盒但没被布局撑开,首行会顶穿到宿主标题栏(真机复现:
+    // [size=300] 起首字压住"回复话题"标题)。只要段内有 size mark(scale
+    // != 1)就放开,不区分放大/缩小 —— 缩小时同理不该被强制拉到裸字体高。
     final hasImageAtom =
         block.content.atoms.values.any((a) => a is ImageRun);
+    final hasSizedText = block.content.marks.any((m) {
+      if (m.kind != MarkKind.size) return false;
+      final scale = EditableTextContent.parsePct(m.attr);
+      return scale != null && scale != 1.0;
+    });
 
     Widget text = KeyedSubtree(
       key: _textKey,
@@ -195,7 +218,7 @@ class _EditableParagraphState extends State<EditableParagraph> {
         result.span,
         strutStyle: StrutStyle.fromTextStyle(
           style,
-          forceStrutHeight: !hasImageAtom,
+          forceStrutHeight: !hasImageAtom && !hasSizedText,
         ),
       ),
     );
@@ -227,6 +250,30 @@ class _EditableParagraphState extends State<EditableParagraph> {
           ranges: spoilerSpans,
           fillColor: scheme.onSurface.withValues(alpha: 0.08),
           borderColor: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+        ),
+        child: text,
+      );
+    }
+
+    // 极小字号([size=0] 等)编辑态标识:实线描边框,提示"这段内容被
+    // 缩到隐藏了"——光标不在区间内时容易忽略过去,补一个视觉标记
+    // (光标移到边界会自动展开成字面 [size=0]…[/size],见 mark reveal)。
+    final hiddenSizeSpans = [
+      for (final m in block.content.marks)
+        if (m.kind == MarkKind.size &&
+            (EditableTextContent.parsePct(m.attr) ?? 1.0) <= 0.15)
+          TextRange(start: m.start, end: m.end),
+    ];
+    if (hiddenSizeSpans.isNotEmpty) {
+      final scheme = Theme.of(context).colorScheme;
+      text = CustomPaint(
+        painter: _SpoilerDecorPainter(
+          paragraphGetter: _findParagraph,
+          projectionGetter: () => _result?.projection,
+          ranges: hiddenSizeSpans,
+          fillColor: scheme.errorContainer.withValues(alpha: 0.18),
+          borderColor: scheme.error.withValues(alpha: 0.6),
+          dashed: false,
         ),
         child: text,
       );
@@ -343,6 +390,7 @@ class _SpoilerDecorPainter extends CustomPainter {
     required this.ranges,
     required this.fillColor,
     required this.borderColor,
+    this.dashed = true,
   });
 
   final RenderParagraph? Function() paragraphGetter;
@@ -353,6 +401,9 @@ class _SpoilerDecorPainter extends CustomPainter {
 
   final Color fillColor;
   final Color borderColor;
+
+  /// false = 实线框(用于极小字号标记,与剧透虚线框区分语义)。
+  final bool dashed;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -382,7 +433,11 @@ class _SpoilerDecorPainter extends CustomPainter {
           const Radius.circular(3),
         );
         canvas.drawRRect(rect, fill);
-        _drawDashedRRect(canvas, rect, border);
+        if (dashed) {
+          _drawDashedRRect(canvas, rect, border);
+        } else {
+          canvas.drawRRect(rect, border);
+        }
       }
     }
   }
@@ -405,5 +460,6 @@ class _SpoilerDecorPainter extends CustomPainter {
   bool shouldRepaint(covariant _SpoilerDecorPainter oldDelegate) =>
       !listEquals(oldDelegate.ranges, ranges) ||
       oldDelegate.fillColor != fillColor ||
-      oldDelegate.borderColor != borderColor;
+      oldDelegate.borderColor != borderColor ||
+      oldDelegate.dashed != dashed;
 }

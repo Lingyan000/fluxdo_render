@@ -20,6 +20,7 @@ library;
 
 import '../model/editable_text_content.dart';
 import '../model/editor_state.dart';
+import '../model/markdown_serializer.dart' show parseImageMarkdown;
 
 /// 规则应用结果。
 enum InputRuleOutcome {
@@ -32,6 +33,11 @@ enum InputRuleOutcome {
   /// `---` 命中:请求视图层插入分隔线(状态层不产岛节点)。
   /// 触发行文本已清空。
   hrRequest,
+
+  /// `[!type] ` 命中(callout 手打):请求视图层经 cook 链路把当前块
+  /// 换成 callout 岛。触发行文本已清空,匹配到的类型存在
+  /// [EditorState.pendingCalloutType]。
+  calloutRequest,
 }
 
 /// 对 [blockId] 块在光标处尝试应用 input rules。
@@ -55,10 +61,51 @@ InputRuleOutcome tryApplyInputRules(
   if (typedChar == ' ') {
     return _tryBlockRules(state, block, sel.extent.offset);
   }
-  if (typedChar == '*' || typedChar == '`' || typedChar == '~' || typedChar == '_') {
-    return _tryInlineRules(state, block, sel.extent.offset);
+  // mark 展开区内是字面标记编辑态(光标在边界展开的 `**`),行内规则
+  // 必须避让 —— 否则规则会把展开的标记立即折叠回 mark,编辑功能被吃掉。
+  if (state.caretInRevealedRegion) return InputRuleOutcome.none;
+  if (typedChar == ')') {
+    return _tryImageOrLinkRule(state, block, sel.extent.offset);
   }
-  return InputRuleOutcome.none;
+  if (typedChar == '*' || typedChar == '`' || typedChar == '~' || typedChar == '_') {
+    final tail = _tryInlineRules(state, block, sel.extent.offset);
+    if (tail != InputRuleOutcome.none) return tail;
+    // 收尾定界符先打、开定界符后补的场景(`诚邀你测试~~` 打完再回行首
+    // 补 `~~`)：此时光标停在**开**定界符之后,上面的 `$` 锚定规则看的是
+    // 光标左边,永远命中不了。
+    return _tryOpenDelimRules(state, block, sel.extent.offset);
+  }
+  if (typedChar == ']') {
+    var tail = _tryBbcodeAttrRules(state, block, sel.extent.offset);
+    if (tail != InputRuleOutcome.none) return tail;
+    // 先打闭标记、光标挪回来补开标记(`x[size=150]` 场景),同
+    // _tryOpenDelimRules 的顺序无关设计。
+    tail = _tryBbcodeOpenRules(state, block, sel.extent.offset);
+    if (tail != InputRuleOutcome.none) return tail;
+    // 无 attr 的 BBCode 标记([u]/[spoiler]):同上,先试收尾再试补开标记。
+    tail = _tryBbcodeMarkRules(state, block, sel.extent.offset);
+    if (tail != InputRuleOutcome.none) return tail;
+    return _tryBbcodeMarkOpenRules(state, block, sel.extent.offset);
+  }
+  if (typedChar == '>') {
+    // HTML 样式标签(`<small>`/`<big>`/`<mark>`/`<sup>`/`<sub>`/`<kbd>`),
+    // 同 BBCode 无 attr 版三种顺序全支持。
+    var tail = _tryHtmlMarkRules(state, block, sel.extent.offset);
+    if (tail != InputRuleOutcome.none) return tail;
+    return _tryHtmlMarkOpenRules(state, block, sel.extent.offset);
+  }
+  // 光标后紧跟闭定界符:先打好 `****` 再回中间填内容的场景(收尾定
+  // 界符不是最后敲的,上面的 $ 锚定规则永远不会命中)—— 把光标后的
+  // 闭定界符拼上再匹配,补齐"实时渲染"预期。
+  final pairTail = _tryInsidePairRules(state, block, sel.extent.offset);
+  if (pairTail != InputRuleOutcome.none) return pairTail;
+  // 同理,BBCode 版:先打好 `[size=150][/size]`(内容留空)再回中间敲
+  // 内容 —— 每敲一个字都要重判,因为敲的字符本身不是触发字符(不是
+  // `]`),前面几条规则的字符白名单派发不到这里。
+  final bbTail = _tryBbcodeInsidePairRules(state, block, sel.extent.offset);
+  if (bbTail != InputRuleOutcome.none) return bbTail;
+  // 同理,HTML 标签版。
+  return _tryHtmlInsidePairRules(state, block, sel.extent.offset);
 }
 
 // ---------------------------------------------------------------------
@@ -70,6 +117,11 @@ final _bulletRe = RegExp(r'^[-*] $');
 final _orderedRe = RegExp(r'^(\d{1,9})[.)] $');
 final _quoteRe = RegExp(r'^> $');
 final _hrRe = RegExp(r'^(---|\*\*\*|___) $');
+// Obsidian callout 语法起手式:`[!note] `。先敲 `> ` 进引用层再敲这个
+// 也一样命中——`> ` 那条规则已经把标记文本清空,`before` 到这里已经不
+// 带字面 `> ` 了。类型只收字母,不含 `+`/`-` 折叠后缀——那个后缀打字
+// 场景太少见,手打先只覆盖最常用的"裸类型名"。
+final _calloutRe = RegExp(r'^\[!([a-zA-Z]+)\] $');
 
 InputRuleOutcome _tryBlockRules(
   EditorState state,
@@ -96,6 +148,20 @@ InputRuleOutcome _tryBlockRules(
       transform: (b) => b, // 类型不变,仅清标记;岛由视图层插
     );
     return InputRuleOutcome.hrRequest;
+  }
+
+  // callout:任何段落块都可触发(空段打 "[!note] " 或引用层里打
+  // "> [!note] ")
+  final callout = _calloutRe.firstMatch(before);
+  if (callout != null && block.isParagraph) {
+    state.pendingCalloutType = callout.group(1)!.toLowerCase();
+    state.sealHistory();
+    state.applyBlockInputRule(
+      block.id,
+      markerLength: caret,
+      transform: (b) => b, // 类型不变,仅清标记;岛由视图层经 cook 插
+    );
+    return InputRuleOutcome.calloutRequest;
   }
 
   // 已是结构块(heading/listItem)不再转换;引用层可继续叠标记
@@ -155,17 +221,17 @@ InputRuleOutcome _tryBlockRules(
 // 行内规则(收尾定界符)
 // ---------------------------------------------------------------------
 
-/// (正则, mark, 定界符长度)。按特异性排序:长定界符优先(`**` 先于 `*`)。
+/// (正则, mark, 定界符)。按特异性排序:长定界符优先(`**` 先于 `*`)。
 /// 内容组不允许含定界字符本身(官方 [^*]+ 同款),且首尾非空格
 /// (`** x**` 不触发 —— CommonMark 语义)。
-final List<(RegExp, MarkKind, int)> _inlineRules = [
-  (RegExp(r'\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$'), MarkKind.strong, 2),
-  (RegExp(r'__([^_\s](?:[^_]*[^_\s])?)__$'), MarkKind.strong, 2),
-  (RegExp(r'~~([^~\s](?:[^~]*[^~\s])?)~~$'), MarkKind.lineThrough, 2),
-  (RegExp(r'`([^`]+)`$'), MarkKind.inlineCode, 1),
+final List<(RegExp, MarkKind, String)> _inlineRules = [
+  (RegExp(r'\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$'), MarkKind.strong, '**'),
+  (RegExp(r'__([^_\s](?:[^_]*[^_\s])?)__$'), MarkKind.strong, '__'),
+  (RegExp(r'~~([^~\s](?:[^~]*[^~\s])?)~~$'), MarkKind.lineThrough, '~~'),
+  (RegExp(r'`([^`]+)`$'), MarkKind.inlineCode, '`'),
   // 单 * 斜体:前面不能还是 *(否则和 ** 混淆)
-  (RegExp(r'(?<!\*)\*([^*\s](?:[^*]*[^*\s])?)\*$'), MarkKind.em, 1),
-  (RegExp(r'(?<!_)_([^_\s](?:[^_]*[^_\s])?)_$'), MarkKind.em, 1),
+  (RegExp(r'(?<!\*)\*([^*\s](?:[^*]*[^*\s])?)\*$'), MarkKind.em, '*'),
+  (RegExp(r'(?<!_)_([^_\s](?:[^_]*[^_\s])?)_$'), MarkKind.em, '_'),
 ];
 
 InputRuleOutcome _tryInlineRules(
@@ -179,12 +245,12 @@ InputRuleOutcome _tryInlineRules(
     return InputRuleOutcome.none;
   }
 
-  for (final (re, kind, delimLen) in _inlineRules) {
+  for (final (re, kind, delim) in _inlineRules) {
     final m = re.firstMatch(before);
     if (m == null) continue;
     final contentText = m.group(1)!;
     final matchStart = m.start + (m.group(0)!.length -
-        (contentText.length + delimLen * 2));
+        (contentText.length + delim.length * 2));
     // 区间内含原子:FFFC 参与正则会当普通字符 —— 允许(emoji 可加粗),
     // 但含 '\n' 不允许(跨软换行不成对)。
     if (contentText.contains('\n')) continue;
@@ -193,7 +259,7 @@ InputRuleOutcome _tryInlineRules(
     state.applyInlineInputRule(
       block.id,
       matchStart: matchStart,
-      delimLength: delimLen,
+      delimLength: delim.length,
       contentLength: contentText.length,
       kind: kind,
     );
@@ -201,3 +267,604 @@ InputRuleOutcome _tryInlineRules(
   }
   return InputRuleOutcome.none;
 }
+
+/// (正则, mark, 闭标记)。BBCode 属性标记 —— 开/闭标记不等长
+/// (`[size=150]` vs `[/size]`),属性值(group 1)进 mark.attr。
+/// 内容组不允许含 `[`(不支持嵌套 BBCode/链接,同 [_inlineRules] 的
+/// 简化取舍),首尾非空格。
+final List<(RegExp, MarkKind, String)> _bbcodeAttrRules = [
+  (
+    RegExp(r'\[size=(\d{1,4})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/size\]$'),
+    MarkKind.size,
+    '[/size]',
+  ),
+  (
+    RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/color\]$'),
+    MarkKind.textColor,
+    '[/color]',
+  ),
+  (
+    RegExp(
+        r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/bgcolor\]$'),
+    MarkKind.bgColor,
+    '[/bgcolor]',
+  ),
+];
+
+/// `[size=N]x[/size]` / `[color=#xxx]x[/color]` / `[bgcolor=...]` 收尾
+/// `]` 触发 —— 与 `**x**` 同级的即打即渲染,不必等回车送 cook。
+InputRuleOutcome _tryBbcodeAttrRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final before = block.content.text.substring(0, caret);
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (re, kind, closeTag) in _bbcodeAttrRules) {
+    final m = re.firstMatch(before);
+    if (m == null) continue;
+    final attr = m.group(1)!;
+    final contentText = m.group(2)!;
+    if (contentText.contains('\n')) continue;
+    final openTag = m.group(0)!.substring(
+        0, m.group(0)!.length - contentText.length - closeTag.length);
+    final matchStart = m.start;
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: matchStart,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+      attr: attr,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// (开标记正则, mark, 闭标记)。开标记值可变长,单独一张表 —— 用于
+/// "先打闭标记、光标挪回来补开标记" 场景([_tryBbcodeOpenRules])。
+final List<(RegExp, MarkKind, String)> _bbcodeOpenRules = [
+  (RegExp(r'\[size=(\d{1,4})\]$'), MarkKind.size, '[/size]'),
+  (RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]$'), MarkKind.textColor, '[/color]'),
+  (
+    RegExp(r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]$'),
+    MarkKind.bgColor,
+    '[/bgcolor]',
+  ),
+];
+
+/// 同 [_bbcodeOpenRules],但不 `$` 锚定 —— 给 [_tryBbcodeInsidePairRules]
+/// 在 `before` 串**中间**找开标记用(锚定版只能匹配到串尾)。
+final List<(RegExp, MarkKind, String)> _bbcodeOpenPatterns = [
+  (RegExp(r'\[size=(\d{1,4})\]'), MarkKind.size, '[/size]'),
+  (RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]'), MarkKind.textColor, '[/color]'),
+  (
+    RegExp(r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]'),
+    MarkKind.bgColor,
+    '[/bgcolor]',
+  ),
+];
+
+/// 补打 BBCode **开**标记触发:右边已经有配对的闭标记
+/// (`x[size=150]大[/size]` 这种"先打后半截、再回来补前半截"的写法)。
+/// 同 [_tryOpenDelimRules],开/闭标记不等长需要分开处理。
+InputRuleOutcome _tryBbcodeOpenRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+  final before = text.substring(0, caret);
+
+  for (final (openRe, kind, closeTag) in _bbcodeOpenRules) {
+    final openM = openRe.firstMatch(before);
+    if (openM == null) continue;
+    final openStart = openM.start;
+    final openTag = openM.group(0)!;
+
+    final rest = text.substring(caret);
+    final nl = rest.indexOf('\n');
+    final line = nl < 0 ? rest : rest.substring(0, nl);
+    final closeAt = line.indexOf(closeTag);
+    if (closeAt <= 0) continue; // 没有闭标记 / 内容为空
+    final contentText = line.substring(0, closeAt);
+    if (contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openStart,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+      attr: openM.group(1),
+      // 光标本来就在开标记之后(内容首),别甩到尾巴上
+      caretAtEnd: false,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// (开标记, mark, 闭标记)。无 attr 的 BBCode 标记 —— `[u]`/`[spoiler]`
+/// 早就是 mark 类型([MarkKind.underline]/[MarkKind.spoilerInline]),但
+/// 此前只有工具栏按钮能插入,手打字面标记不会即时渲染。
+const List<(String, MarkKind, String)> _bbcodeMarkTags = [
+  ('[u]', MarkKind.underline, '[/u]'),
+  ('[spoiler]', MarkKind.spoilerInline, '[/spoiler]'),
+  // b/i/s 真实 Discourse 支持(cook 出 strong/em/s,在消毒白名单里),
+  // 复用已有 MarkKind,同 markdown ** 定界符殊途同归。
+  ('[b]', MarkKind.strong, '[/b]'),
+  ('[i]', MarkKind.em, '[/i]'),
+  ('[s]', MarkKind.lineThrough, '[/s]'),
+];
+
+/// `[u]x[/u]` / `[spoiler]x[/spoiler]` 收尾 `]` 触发。
+InputRuleOutcome _tryBbcodeMarkRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final before = block.content.text.substring(0, caret);
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (openTag, kind, closeTag) in _bbcodeMarkTags) {
+    if (!before.endsWith(closeTag)) continue;
+    final beforeClose = before.substring(0, before.length - closeTag.length);
+    final openAt = beforeClose.lastIndexOf(openTag);
+    if (openAt < 0) continue;
+    final contentText = beforeClose.substring(openAt + openTag.length);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openAt,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 补打 `[u]`/`[spoiler]` **开**标记触发:右边已经有配对的闭标记。
+InputRuleOutcome _tryBbcodeMarkOpenRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (openTag, kind, closeTag) in _bbcodeMarkTags) {
+    final openStart = caret - openTag.length;
+    if (openStart < 0 || !text.startsWith(openTag, openStart)) continue;
+
+    final rest = text.substring(caret);
+    final nl = rest.indexOf('\n');
+    final line = nl < 0 ? rest : rest.substring(0, nl);
+    final closeAt = line.indexOf(closeTag);
+    if (closeAt <= 0) continue;
+    final contentText = line.substring(0, closeAt);
+    if (contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openStart,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+      caretAtEnd: false,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 光标后紧跟 BBCode 闭标记的"填内容"匹配:`[size=150]|[/size]` 这种
+/// 先打好整对空标记、再回中间敲内容的写法。同 [_tryInsidePairRules],
+/// 但要覆盖 attr 版(size/color/bgcolor)和无 attr 版(u/spoiler)。
+///
+/// 每敲一个内容字符都要重判 —— 敲的字符本身不是 `]`,派发不到前面
+/// 那几条收尾规则,只能靠这条兜底(挂在 [tryApplyInputRules] 末尾,
+/// 对所有非特殊字符都会跑一次)。
+InputRuleOutcome _tryBbcodeInsidePairRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+  final before = text.substring(0, caret);
+
+  // attr 版:size/color/bgcolor。[_bbcodeOpenRules] 是 `$` 锚定的(给
+  // "刚打完开标记,光标就在后面"那条规则用),这里要在 `before` 中间
+  // 找,不能锚在串尾 —— 用不锚定的版本,取离光标最近(最后)的一个。
+  for (final (openRe, kind, closeTag) in _bbcodeOpenPatterns) {
+    if (!text.startsWith(closeTag, caret)) continue;
+    final matches = openRe.allMatches(before);
+    if (matches.isEmpty) continue;
+    final openM = matches.last;
+    final contentText = before.substring(openM.end);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openM.start,
+      delimLength: closeTag.length,
+      openLength: openM.end - openM.start,
+      contentLength: contentText.length,
+      kind: kind,
+      attr: openM.group(1),
+    );
+    return InputRuleOutcome.applied;
+  }
+
+  // 无 attr 版:u/spoiler
+  for (final (openTag, kind, closeTag) in _bbcodeMarkTags) {
+    if (!text.startsWith(closeTag, caret)) continue;
+    final openAt = before.lastIndexOf(openTag);
+    if (openAt < 0) continue;
+    final contentText = before.substring(openAt + openTag.length);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openAt,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// (开标签, mark, 闭标签)。HTML 样式标签 —— 读端早就支持
+/// (InlineStyleKind.small/big/mark/superscript/subscript/monospace),
+/// 编辑态此前没有触发规则,手打字面标签不会即时渲染。
+const List<(String, MarkKind, String)> _htmlMarkTags = [
+  ('<small>', MarkKind.smallStyle, '</small>'),
+  ('<big>', MarkKind.bigStyle, '</big>'),
+  ('<mark>', MarkKind.markStyle, '</mark>'),
+  ('<sup>', MarkKind.superscript, '</sup>'),
+  ('<sub>', MarkKind.subscript, '</sub>'),
+  ('<kbd>', MarkKind.monospaceStyle, '</kbd>'),
+  // 读端(paragraph_parser.dart)已有的简化映射,同 ins→underline /
+  // del→lineThrough / samp|tt→monospace(对齐 kbd)/ cite|dfn|var→em
+  // (浏览器默认都是斜体)保持一致——复用既有 MarkKind,不新增渲染类型。
+  ('<ins>', MarkKind.underline, '</ins>'),
+  ('<del>', MarkKind.lineThrough, '</del>'),
+  ('<samp>', MarkKind.monospaceStyle, '</samp>'),
+  ('<tt>', MarkKind.monospaceStyle, '</tt>'),
+  ('<cite>', MarkKind.em, '</cite>'),
+  ('<dfn>', MarkKind.em, '</dfn>'),
+  ('<var>', MarkKind.em, '</var>'),
+];
+
+/// `<small>x</small>` 等收尾 `>` 触发。
+InputRuleOutcome _tryHtmlMarkRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final before = block.content.text.substring(0, caret);
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+    if (!before.endsWith(closeTag)) continue;
+    final beforeClose = before.substring(0, before.length - closeTag.length);
+    final openAt = beforeClose.lastIndexOf(openTag);
+    if (openAt < 0) continue;
+    final contentText = beforeClose.substring(openAt + openTag.length);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('<') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openAt,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 补打 HTML **开**标签触发:右边已经有配对的闭标签。
+InputRuleOutcome _tryHtmlMarkOpenRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+    final openStart = caret - openTag.length;
+    if (openStart < 0 || !text.startsWith(openTag, openStart)) continue;
+
+    final rest = text.substring(caret);
+    final nl = rest.indexOf('\n');
+    final line = nl < 0 ? rest : rest.substring(0, nl);
+    final closeAt = line.indexOf(closeTag);
+    if (closeAt <= 0) continue;
+    final contentText = line.substring(0, closeAt);
+    if (contentText.contains('<') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openStart,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+      caretAtEnd: false,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 光标后紧跟 HTML 闭标签的"填内容"匹配:`<small>|</small>` 这种先打
+/// 好整对空标签、再回中间敲内容的写法。同 [_tryBbcodeInsidePairRules]。
+InputRuleOutcome _tryHtmlInsidePairRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+  final before = text.substring(0, caret);
+
+  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+    if (!text.startsWith(closeTag, caret)) continue;
+    final openAt = before.lastIndexOf(openTag);
+    if (openAt < 0) continue;
+    final contentText = before.substring(openAt + openTag.length);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('<') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openAt,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 补打**开**定界符触发:右边已经有配对的闭定界符。
+///
+/// `~~诚邀你测试~~` 这种"先打后半截、再回来补前半截"的写法,光标停在开
+/// 定界符之后,[_tryInlineRules] 的 `$` 锚定正则只看光标左边,一条都命中
+/// 不了 —— 表现为怎么打都不渲染。这里把光标**右边**到闭定界符的那段拼
+/// 回去,用同一批正则判定,规则集保持单一来源。
+///
+/// 闭定界符只在当前**行**内找(不跨软换行),跟其它规则同口径。
+InputRuleOutcome _tryOpenDelimRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (re, kind, delim) in _inlineRules) {
+    final open = caret - delim.length;
+    if (open < 0) continue;
+    // 光标左边恰好是一个完整的开定界符
+    if (!text.startsWith(delim, open)) continue;
+    // 再往左不能还是同类定界字符(`***x**` 归属不明,不触发)
+    if (open > 0 && text[open - 1] == delim[0]) continue;
+
+    final rest = text.substring(caret);
+    final nl = rest.indexOf('\n');
+    final line = nl < 0 ? rest : rest.substring(0, nl);
+    final closeAt = line.indexOf(delim);
+    if (closeAt <= 0) continue; // 没有闭定界符 / 内容为空
+    // 闭定界符后面不能还是同类定界字符
+    final afterClose = closeAt + delim.length;
+    if (afterClose < line.length && line[afterClose] == delim[0]) continue;
+
+    final candidate = delim + line.substring(0, afterClose);
+    final m = re.firstMatch(candidate);
+    // 必须整段命中,否则 `~~a~~b~~` 这种会切错边界
+    if (m == null || m.start != 0 || m.group(0)!.length != candidate.length) {
+      continue;
+    }
+    final contentText = m.group(1)!;
+    if (contentText.contains('\n')) continue;
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: open,
+      delimLength: delim.length,
+      contentLength: contentText.length,
+      kind: kind,
+      // 光标本来就在内容首,别甩到尾巴上
+      caretAtEnd: false,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 光标后紧跟闭定界符的"填内容"匹配:`**|**` 里打字 → 光标后是 `**`,
+/// 把它拼到光标前文本上正则匹配。命中 = 完整 `**x**` 模式,内容恰好
+/// 终于光标(闭定界符位于光标处)。
+InputRuleOutcome _tryInsidePairRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret >= text.length) return InputRuleOutcome.none;
+  final next = text[caret];
+  if (next != '*' && next != '`' && next != '~' && next != '_') {
+    return InputRuleOutcome.none;
+  }
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  final before = text.substring(0, caret);
+  for (final (re, kind, delim) in _inlineRules) {
+    if (!text.startsWith(delim, caret)) continue;
+    // 闭定界符后不能还是同类定界字符(`**q***` 归属不明,不触发)。
+    final after = caret + delim.length;
+    if (after < text.length && text[after] == delim[0]) continue;
+    final m = re.firstMatch(before + delim);
+    if (m == null) continue;
+    final contentText = m.group(1)!;
+    if (contentText.contains('\n')) continue;
+    final matchStart = m.start + (m.group(0)!.length -
+        (contentText.length + delim.length * 2));
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: matchStart,
+      delimLength: delim.length,
+      contentLength: contentText.length,
+      kind: kind,
+    );
+    // 立刻回到展开(字面)态:光标还夹在定界符之间 = 正在编辑这段内容,
+    // 此时渲染会打断输入。mark 已建好,光标走出闭定界符时自然折叠。
+    state.revealMarkAtCaret();
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// `![alt](src)` / `[文字](href)` 收尾 `)` 触发。图片变原子,链接变
+/// link mark(href 进 attr)。
+InputRuleOutcome _tryImageOrLinkRule(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final before = block.content.text.substring(0, caret);
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  final imgM = _imageTailRe.firstMatch(before);
+  if (imgM != null) {
+    final img = parseImageMarkdown(imgM.group(0)!);
+    if (img != null) {
+      state.sealHistory();
+      state.applyImageInputRule(block.id,
+          start: imgM.start, end: caret, image: img);
+      return InputRuleOutcome.applied;
+    }
+  }
+
+  final linkM = _linkTailRe.firstMatch(before);
+  if (linkM != null) {
+    final label = linkM.group(1)!;
+    // 标签里含原子(哨兵)不拆:`[![图](…)](href)` 这种嵌套交给 cook。
+    if (!label.contains(kAtomChar)) {
+      state.sealHistory();
+      state.applyLinkInputRule(block.id,
+          start: linkM.start,
+          end: caret,
+          label: label,
+          href: linkM.group(2)!);
+      return InputRuleOutcome.applied;
+    }
+  }
+  return InputRuleOutcome.none;
+}
+
+final _imageTailRe = RegExp(r'!\[[^\]]*\]\([^)\s]*\)$');
+final _linkTailRe = RegExp(r'(?<!!)\[([^\]]+)\]\(([^)\s]*)\)$');
