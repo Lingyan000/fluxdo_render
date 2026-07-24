@@ -70,6 +70,9 @@ InputRuleOutcome tryApplyInputRules(
     // 光标左边,永远命中不了。
     return _tryOpenDelimRules(state, block, sel.extent.offset);
   }
+  if (typedChar == ']') {
+    return _tryBbcodeAttrRules(state, block, sel.extent.offset);
+  }
   // 光标后紧跟闭定界符:先打好 `****` 再回中间填内容的场景(收尾定
   // 界符不是最后敲的,上面的 $ 锚定规则永远不会命中)—— 把光标后的
   // 闭定界符拼上再匹配,补齐"实时渲染"预期。
@@ -211,6 +214,66 @@ InputRuleOutcome _tryInlineRules(
       delimLength: delim.length,
       contentLength: contentText.length,
       kind: kind,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// (正则, mark, 闭标记)。BBCode 属性标记 —— 开/闭标记不等长
+/// (`[size=150]` vs `[/size]`),属性值(group 1)进 mark.attr。
+/// 内容组不允许含 `[`(不支持嵌套 BBCode/链接,同 [_inlineRules] 的
+/// 简化取舍),首尾非空格。
+final List<(RegExp, MarkKind, String)> _bbcodeAttrRules = [
+  (
+    RegExp(r'\[size=(\d{1,4})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/size\]$'),
+    MarkKind.size,
+    '[/size]',
+  ),
+  (
+    RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/color\]$'),
+    MarkKind.textColor,
+    '[/color]',
+  ),
+  (
+    RegExp(
+        r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/bgcolor\]$'),
+    MarkKind.bgColor,
+    '[/bgcolor]',
+  ),
+];
+
+/// `[size=N]x[/size]` / `[color=#xxx]x[/color]` / `[bgcolor=...]` 收尾
+/// `]` 触发 —— 与 `**x**` 同级的即打即渲染,不必等回车送 cook。
+InputRuleOutcome _tryBbcodeAttrRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final before = block.content.text.substring(0, caret);
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (re, kind, closeTag) in _bbcodeAttrRules) {
+    final m = re.firstMatch(before);
+    if (m == null) continue;
+    final attr = m.group(1)!;
+    final contentText = m.group(2)!;
+    if (contentText.contains('\n')) continue;
+    final openTag = m.group(0)!.substring(
+        0, m.group(0)!.length - contentText.length - closeTag.length);
+    final matchStart = m.start;
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: matchStart,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+      attr: attr,
     );
     return InputRuleOutcome.applied;
   }

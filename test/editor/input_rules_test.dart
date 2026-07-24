@@ -176,6 +176,54 @@ void main() {
     });
   });
 
+  group('BBCode 属性标记(即打即渲染,同 ** 一级)', () {
+    test('[size=150]x[/size] → size mark,attr=150', () {
+      final s = empty();
+      expect(type(s, '前[size=150]大[/size]'), InputRuleOutcome.applied);
+      final b = first(s);
+      expect(b.content.text, '前大');
+      expect(b.content.marks.single,
+          const MarkSpan(start: 1, end: 2, kind: MarkKind.size, attr: '150'));
+      expect(s.selection!.extent.offset, 2, reason: '光标落内容尾');
+    });
+
+    test('一行内混排多个不同 size 区间', () {
+      final s = empty();
+      type(s, '[size=150]大[/size]');
+      type(s, '中');
+      expect(type(s, '[size=50]小[/size]'), InputRuleOutcome.applied);
+      final b = first(s);
+      expect(b.content.text, '大中小');
+      expect(b.content.marks, hasLength(2));
+      expect(
+        b.content.marks,
+        containsAll([
+          const MarkSpan(start: 0, end: 1, kind: MarkKind.size, attr: '150'),
+          const MarkSpan(start: 2, end: 3, kind: MarkKind.size, attr: '50'),
+        ]),
+      );
+    });
+
+    test('[color=#f00]x[/color] / [bgcolor=#00f]x[/bgcolor] 即打即渲染', () {
+      var s = empty();
+      expect(type(s, '[color=#f00]红字[/color]'), InputRuleOutcome.applied);
+      var mark = first(s).content.marks.single;
+      expect(mark.kind, MarkKind.textColor);
+      expect(mark.attr, '#f00');
+
+      s = empty();
+      expect(type(s, '[bgcolor=#00f]底色[/bgcolor]'), InputRuleOutcome.applied);
+      mark = first(s).content.marks.single;
+      expect(mark.kind, MarkKind.bgColor);
+      expect(mark.attr, '#00f');
+    });
+
+    test('排除:内容含 [ 不触发(不支持嵌套)', () {
+      final s = empty();
+      expect(type(s, '[size=150][a][/size]'), InputRuleOutcome.none);
+    });
+  });
+
   group('填内容匹配(先打定界符再回中间填字)', () {
     test('**|** 中间打 q → 命中但保持字面(光标仍夹在定界符间)', () {
       final s = empty();

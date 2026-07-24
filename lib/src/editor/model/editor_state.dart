@@ -1975,12 +1975,18 @@ class EditorState extends ChangeNotifier {
     /// 补打**开**定界符时光标本来就在内容首,甩到尾巴上等于替用户跳一次
     /// 光标 —— 那不是他的意图。
     bool caretAtEnd = true,
+    /// 开定界符长度(不传则同 [delimLength],对称定界符如 `**`/`~~`)。
+    /// BBCode 属性标记(`[size=150]`/`[/size]`)开闭不等长,需要分开传。
+    int? openLength,
+    /// mark 附加值(color/size 的色值/百分比),同 [MarkSpan.attr]。
+    String? attr,
   }) {
     final i = indexOfBlock(blockId);
     if (i < 0) return;
     final block = _blocks[i];
     if (block is! TextBlock) return;
-    final contentStart = matchStart + delimLength;
+    final openLen = openLength ?? delimLength;
+    final contentStart = matchStart + openLen;
     final contentEnd = contentStart + contentLength;
     final matchEnd = contentEnd + delimLength;
     if (matchEnd > block.content.length) return;
@@ -1993,6 +1999,7 @@ class EditorState extends ChangeNotifier {
       matchStart,
       matchStart + contentLength,
       kind,
+      attr: attr,
     );
     final newBlocks = [..._blocks];
     newBlocks[i] = block.copyWith(content: content);
