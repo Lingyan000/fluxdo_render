@@ -60,7 +60,39 @@ enum MarkKind {
   /// 同 textColor 的理由 —— 岛不可编辑,mark 化后一行内可以混多个不同
   /// size 区间,逐字正常编辑。
   size,
+
+  /// 其余 HTML 样式标签(`<small>`/`<big>`/`<mark>`/`<sup>`/`<sub>`/
+  /// `<kbd>`)→ StyledRun(InlineStyleKind.X)。同 underline 一样纯样式、
+  /// 无 attr,mark 化道理相同。
+  smallStyle,
+  bigStyle,
+  markStyle,
+  superscript,
+  subscript,
+  monospaceStyle,
 }
+
+/// [MarkKind] ↔ [InlineStyleKind] 双向映射(纯样式类,无 attr 的那六个)。
+InlineStyleKind? _styleKindFor(MarkKind kind) => switch (kind) {
+      MarkKind.smallStyle => InlineStyleKind.small,
+      MarkKind.bigStyle => InlineStyleKind.big,
+      MarkKind.markStyle => InlineStyleKind.mark,
+      MarkKind.superscript => InlineStyleKind.superscript,
+      MarkKind.subscript => InlineStyleKind.subscript,
+      MarkKind.monospaceStyle => InlineStyleKind.monospace,
+      _ => null,
+    };
+
+MarkKind? _markKindFor(InlineStyleKind kind) => switch (kind) {
+      InlineStyleKind.underline => MarkKind.underline,
+      InlineStyleKind.lineThrough => MarkKind.lineThrough,
+      InlineStyleKind.small => MarkKind.smallStyle,
+      InlineStyleKind.big => MarkKind.bigStyle,
+      InlineStyleKind.mark => MarkKind.markStyle,
+      InlineStyleKind.superscript => MarkKind.superscript,
+      InlineStyleKind.subscript => MarkKind.subscript,
+      InlineStyleKind.monospace => MarkKind.monospaceStyle,
+    };
 
 /// 一段样式区间 `[start, end)`(扁平文本坐标)。
 ///
@@ -235,11 +267,7 @@ class EditableTextContent {
             sanitizeText(text),
           );
         case StyledRun(:final kind, :final children):
-          final mapped = switch (kind) {
-            InlineStyleKind.underline => MarkKind.underline,
-            InlineStyleKind.lineThrough => MarkKind.lineThrough,
-            _ => null,
-          };
+          final mapped = _markKindFor(kind);
           _flattenInto(
             children,
             buf,
@@ -506,6 +534,18 @@ class EditableTextContent {
           (forEditing && kinds.contains(MarkKind.link))) {
         // 编辑态 link 借下划线样式(真 LinkRun 的 recognizer 会抢手势)
         node = StyledRun(kind: InlineStyleKind.underline, children: [node]);
+      }
+      for (final k in const [
+        MarkKind.smallStyle,
+        MarkKind.bigStyle,
+        MarkKind.markStyle,
+        MarkKind.superscript,
+        MarkKind.subscript,
+        MarkKind.monospaceStyle,
+      ]) {
+        if (kinds.contains(k)) {
+          node = StyledRun(kind: _styleKindFor(k)!, children: [node]);
+        }
       }
       if (kinds.contains(MarkKind.em)) {
         node = EmRun(children: [node]);
@@ -1016,28 +1056,49 @@ final RegExp _bgColorOpenRe = RegExp(r'\[bgcolor=([^\]]*)\]');
 final RegExp _sizeOpenRe = RegExp(r'\[size=([^\]]*)\]');
 
 /// mark 开标记。
-String _markOpenTag(MarkKind kind) => switch (kind) {
-      MarkKind.strong => '**',
-      MarkKind.em => '*',
-      MarkKind.inlineCode => '`',
-      MarkKind.underline => '[u]',
-      MarkKind.lineThrough => '~~',
-      MarkKind.spoilerInline => '[spoiler]',
-      MarkKind.link => '[',
-      // 不参与显形(见 markAtBoundary),给个空串保 switch 穷尽
-      MarkKind.textColor || MarkKind.bgColor || MarkKind.size => '',
+/// HTML 样式标签名(小写):`<tag>…</tag>`。
+String? _htmlTagNameFor(MarkKind kind) => switch (kind) {
+      MarkKind.smallStyle => 'small',
+      MarkKind.bigStyle => 'big',
+      MarkKind.markStyle => 'mark',
+      MarkKind.superscript => 'sup',
+      MarkKind.subscript => 'sub',
+      MarkKind.monospaceStyle => 'kbd',
+      _ => null,
     };
 
+String _markOpenTag(MarkKind kind) {
+  final tag = _htmlTagNameFor(kind);
+  if (tag != null) return '<$tag>';
+  return switch (kind) {
+    MarkKind.strong => '**',
+    MarkKind.em => '*',
+    MarkKind.inlineCode => '`',
+    MarkKind.underline => '[u]',
+    MarkKind.lineThrough => '~~',
+    MarkKind.spoilerInline => '[spoiler]',
+    MarkKind.link => '[',
+    // 不参与显形(见 markAtBoundary),给个空串保 switch 穷尽
+    MarkKind.textColor || MarkKind.bgColor || MarkKind.size => '',
+    _ => '',
+  };
+}
+
 /// mark 闭标记。
-String _markCloseTag(MarkKind kind) => switch (kind) {
-      MarkKind.strong => '**',
-      MarkKind.em => '*',
-      MarkKind.inlineCode => '`',
-      MarkKind.underline => '[/u]',
-      MarkKind.lineThrough => '~~',
-      MarkKind.spoilerInline => '[/spoiler]',
-      MarkKind.link => ']',
-      MarkKind.textColor => '[/color]',
-      MarkKind.bgColor => '[/bgcolor]',
-      MarkKind.size => '[/size]',
-    };
+String _markCloseTag(MarkKind kind) {
+  final tag = _htmlTagNameFor(kind);
+  if (tag != null) return '</$tag>';
+  return switch (kind) {
+    MarkKind.strong => '**',
+    MarkKind.em => '*',
+    MarkKind.inlineCode => '`',
+    MarkKind.underline => '[/u]',
+    MarkKind.lineThrough => '~~',
+    MarkKind.spoilerInline => '[/spoiler]',
+    MarkKind.link => ']',
+    MarkKind.textColor => '[/color]',
+    MarkKind.bgColor => '[/bgcolor]',
+    MarkKind.size => '[/size]',
+    _ => '',
+  };
+}

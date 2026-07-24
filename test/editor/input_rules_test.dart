@@ -307,6 +307,41 @@ void main() {
     });
   });
 
+  group('HTML 样式标签(sup/sub/mark/small/big/kbd)即打即渲染', () {
+    test('<sup>x</sup> → superscript;<mark>x</mark> → markStyle', () {
+      var s = empty();
+      expect(type(s, '前<sup>上标</sup>'), InputRuleOutcome.applied);
+      var b = first(s);
+      expect(b.content.text, '前上标');
+      expect(b.content.marks.single,
+          const MarkSpan(start: 1, end: 3, kind: MarkKind.superscript));
+
+      s = empty();
+      expect(type(s, '<mark>高亮</mark>'), InputRuleOutcome.applied);
+      expect(first(s).content.marks.single.kind, MarkKind.markStyle);
+    });
+
+    test('先打闭标签再补开标签(任意顺序)', () {
+      final s = empty();
+      s.insertText('下标[/sub]'.replaceAll('[/sub]', '</sub>'));
+      s.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: first(s).id, offset: 0)));
+      expect(type(s, '<sub>'), InputRuleOutcome.applied);
+      expect(first(s).content.marks.single.kind, MarkKind.subscript);
+    });
+
+    test('先打空标签对再填内容', () {
+      final s = empty();
+      s.insertText('<kbd></kbd>');
+      s.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: first(s).id, offset: 5)));
+      expect(type(s, 'Ctrl'), InputRuleOutcome.applied);
+      final b = first(s);
+      expect(b.content.text, 'Ctrl');
+      expect(b.content.marks.single.kind, MarkKind.monospaceStyle);
+    });
+  });
+
   group('填内容匹配(先打定界符再回中间填字)', () {
     test('**|** 中间打 q → 命中但保持字面(光标仍夹在定界符间)', () {
       final s = empty();

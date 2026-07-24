@@ -217,36 +217,61 @@ const _markOrder = [
   MarkKind.em,
   MarkKind.underline,
   MarkKind.lineThrough,
+  MarkKind.smallStyle,
+  MarkKind.bigStyle,
+  MarkKind.markStyle,
+  MarkKind.superscript,
+  MarkKind.subscript,
+  MarkKind.monospaceStyle,
   MarkKind.inlineCode,
 ];
 
-String _openTag(MarkSpan m, {required bool htmlEmphasis}) =>
-    switch (m.kind) {
-      MarkKind.strong => htmlEmphasis ? '<strong>' : '**',
-      MarkKind.em => htmlEmphasis ? '<em>' : '*',
-      MarkKind.inlineCode => '`',
-      MarkKind.underline => '[u]',
-      MarkKind.lineThrough => '~~',
-      MarkKind.spoilerInline => '[spoiler]',
-      MarkKind.link => '[',
-      MarkKind.textColor => '[color=${m.attr ?? ''}]',
-      MarkKind.bgColor => '[bgcolor=${m.attr ?? ''}]',
-      MarkKind.size => '[size=${m.attr ?? ''}]',
+/// HTML 样式标签名(小写):`<tag>…</tag>`。
+String? _htmlTagNameFor(MarkKind kind) => switch (kind) {
+      MarkKind.smallStyle => 'small',
+      MarkKind.bigStyle => 'big',
+      MarkKind.markStyle => 'mark',
+      MarkKind.superscript => 'sup',
+      MarkKind.subscript => 'sub',
+      MarkKind.monospaceStyle => 'kbd',
+      _ => null,
     };
 
-String _closeTag(MarkSpan m, {required bool htmlEmphasis}) =>
-    switch (m.kind) {
-      MarkKind.strong => htmlEmphasis ? '</strong>' : '**',
-      MarkKind.em => htmlEmphasis ? '</em>' : '*',
-      MarkKind.inlineCode => '`',
-      MarkKind.underline => '[/u]',
-      MarkKind.lineThrough => '~~',
-      MarkKind.spoilerInline => '[/spoiler]',
-      MarkKind.link => '](${m.attr ?? ''})',
-      MarkKind.textColor => '[/color]',
-      MarkKind.bgColor => '[/bgcolor]',
-      MarkKind.size => '[/size]',
-    };
+String _openTag(MarkSpan m, {required bool htmlEmphasis}) {
+  final tag = _htmlTagNameFor(m.kind);
+  if (tag != null) return '<$tag>';
+  return switch (m.kind) {
+    MarkKind.strong => htmlEmphasis ? '<strong>' : '**',
+    MarkKind.em => htmlEmphasis ? '<em>' : '*',
+    MarkKind.inlineCode => '`',
+    MarkKind.underline => '[u]',
+    MarkKind.lineThrough => '~~',
+    MarkKind.spoilerInline => '[spoiler]',
+    MarkKind.link => '[',
+    MarkKind.textColor => '[color=${m.attr ?? ''}]',
+    MarkKind.bgColor => '[bgcolor=${m.attr ?? ''}]',
+    MarkKind.size => '[size=${m.attr ?? ''}]',
+    _ => '',
+  };
+}
+
+String _closeTag(MarkSpan m, {required bool htmlEmphasis}) {
+  final tag = _htmlTagNameFor(m.kind);
+  if (tag != null) return '</$tag>';
+  return switch (m.kind) {
+    MarkKind.strong => htmlEmphasis ? '</strong>' : '**',
+    MarkKind.em => htmlEmphasis ? '</em>' : '*',
+    MarkKind.inlineCode => '`',
+    MarkKind.underline => '[/u]',
+    MarkKind.lineThrough => '~~',
+    MarkKind.spoilerInline => '[/spoiler]',
+    MarkKind.link => '](${m.attr ?? ''})',
+    MarkKind.textColor => '[/color]',
+    MarkKind.bgColor => '[/bgcolor]',
+    MarkKind.size => '[/size]',
+    _ => '',
+  };
+}
 
 /// 是否存在交错区间(a.start < b.start < a.end < b.end)。
 ///

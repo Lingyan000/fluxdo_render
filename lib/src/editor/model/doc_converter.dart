@@ -67,12 +67,9 @@ bool isEditableInline(InlineNode n) => switch (n) {
       // 颜色:mark 化(MarkKind.textColor/bgColor),内容照常可编辑 ——
       // 不放行的话带色的整行会被岛化成只读,光标直接消失。
       ColoredRun(:final children) => children.every(isEditableInline),
-      StyledRun(:final kind, :final children) => switch (kind) {
-          InlineStyleKind.underline ||
-          InlineStyleKind.lineThrough =>
-            children.every(isEditableInline),
-          _ => false,
-        },
+      // 其余样式标签(sup/sub/mark/small/big/kbd)同 underline/lineThrough
+      // 一样 mark 化,内容照常可编辑。
+      StyledRun(:final children) => children.every(isEditableInline),
       _ => false,
     };
 

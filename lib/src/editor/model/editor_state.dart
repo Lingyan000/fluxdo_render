@@ -181,30 +181,51 @@ class _RevealedRule {
 /// 字面分割线:三个及以上的 `-` / `*` / `_`,整行别无他物。
 final RegExp _ruleLiteralRe = RegExp(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$');
 
-String _markOpenTagStr(MarkKind kind) => switch (kind) {
-      MarkKind.strong => '**',
-      MarkKind.em => '*',
-      MarkKind.inlineCode => '`',
-      MarkKind.underline => '[u]',
-      MarkKind.lineThrough => '~~',
-      MarkKind.spoilerInline => '[spoiler]',
-      MarkKind.link => '[',
-      // 颜色系/字号不参与显形(见 EditableTextContent.markAtBoundary)
-      MarkKind.textColor || MarkKind.bgColor || MarkKind.size => '',
+/// HTML 样式标签名(小写):`<tag>…</tag>`。
+String? _htmlTagNameFor(MarkKind kind) => switch (kind) {
+      MarkKind.smallStyle => 'small',
+      MarkKind.bigStyle => 'big',
+      MarkKind.markStyle => 'mark',
+      MarkKind.superscript => 'sup',
+      MarkKind.subscript => 'sub',
+      MarkKind.monospaceStyle => 'kbd',
+      _ => null,
     };
 
-String _markCloseTagStr(MarkKind kind) => switch (kind) {
-      MarkKind.strong => '**',
-      MarkKind.em => '*',
-      MarkKind.inlineCode => '`',
-      MarkKind.underline => '[/u]',
-      MarkKind.lineThrough => '~~',
-      MarkKind.spoilerInline => '[/spoiler]',
-      MarkKind.link => ']',
-      MarkKind.textColor => '[/color]',
-      MarkKind.bgColor => '[/bgcolor]',
-      MarkKind.size => '[/size]',
-    };
+String _markOpenTagStr(MarkKind kind) {
+  final tag = _htmlTagNameFor(kind);
+  if (tag != null) return '<$tag>';
+  return switch (kind) {
+    MarkKind.strong => '**',
+    MarkKind.em => '*',
+    MarkKind.inlineCode => '`',
+    MarkKind.underline => '[u]',
+    MarkKind.lineThrough => '~~',
+    MarkKind.spoilerInline => '[spoiler]',
+    MarkKind.link => '[',
+    // 颜色系/字号不参与显形(见 EditableTextContent.markAtBoundary)
+    MarkKind.textColor || MarkKind.bgColor || MarkKind.size => '',
+    _ => '',
+  };
+}
+
+String _markCloseTagStr(MarkKind kind) {
+  final tag = _htmlTagNameFor(kind);
+  if (tag != null) return '</$tag>';
+  return switch (kind) {
+    MarkKind.strong => '**',
+    MarkKind.em => '*',
+    MarkKind.inlineCode => '`',
+    MarkKind.underline => '[/u]',
+    MarkKind.lineThrough => '~~',
+    MarkKind.spoilerInline => '[/spoiler]',
+    MarkKind.link => ']',
+    MarkKind.textColor => '[/color]',
+    MarkKind.bgColor => '[/bgcolor]',
+    MarkKind.size => '[/size]',
+    _ => '',
+  };
+}
 
 /// 颜色系/字号开标记的正则(值用户可改 → 长度不固定,不能定长前缀比对)。
 /// 提到顶层常量:[_openTagLenAt] 在光标进出标记边界时反复调用,

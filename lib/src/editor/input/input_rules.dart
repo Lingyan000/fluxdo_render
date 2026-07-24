@@ -82,6 +82,13 @@ InputRuleOutcome tryApplyInputRules(
     if (tail != InputRuleOutcome.none) return tail;
     return _tryBbcodeMarkOpenRules(state, block, sel.extent.offset);
   }
+  if (typedChar == '>') {
+    // HTML 样式标签(`<small>`/`<big>`/`<mark>`/`<sup>`/`<sub>`/`<kbd>`),
+    // 同 BBCode 无 attr 版三种顺序全支持。
+    var tail = _tryHtmlMarkRules(state, block, sel.extent.offset);
+    if (tail != InputRuleOutcome.none) return tail;
+    return _tryHtmlMarkOpenRules(state, block, sel.extent.offset);
+  }
   // 光标后紧跟闭定界符:先打好 `****` 再回中间填内容的场景(收尾定
   // 界符不是最后敲的,上面的 $ 锚定规则永远不会命中)—— 把光标后的
   // 闭定界符拼上再匹配,补齐"实时渲染"预期。
@@ -90,7 +97,10 @@ InputRuleOutcome tryApplyInputRules(
   // 同理,BBCode 版:先打好 `[size=150][/size]`(内容留空)再回中间敲
   // 内容 —— 每敲一个字都要重判,因为敲的字符本身不是触发字符(不是
   // `]`),前面几条规则的字符白名单派发不到这里。
-  return _tryBbcodeInsidePairRules(state, block, sel.extent.offset);
+  final bbTail = _tryBbcodeInsidePairRules(state, block, sel.extent.offset);
+  if (bbTail != InputRuleOutcome.none) return bbTail;
+  // 同理,HTML 标签版。
+  return _tryHtmlInsidePairRules(state, block, sel.extent.offset);
 }
 
 // ---------------------------------------------------------------------
@@ -516,6 +526,141 @@ InputRuleOutcome _tryBbcodeInsidePairRules(
     if (contentText.isEmpty ||
         contentText.contains('\n') ||
         contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openAt,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// (开标签, mark, 闭标签)。HTML 样式标签 —— 读端早就支持
+/// (InlineStyleKind.small/big/mark/superscript/subscript/monospace),
+/// 编辑态此前没有触发规则,手打字面标签不会即时渲染。
+const List<(String, MarkKind, String)> _htmlMarkTags = [
+  ('<small>', MarkKind.smallStyle, '</small>'),
+  ('<big>', MarkKind.bigStyle, '</big>'),
+  ('<mark>', MarkKind.markStyle, '</mark>'),
+  ('<sup>', MarkKind.superscript, '</sup>'),
+  ('<sub>', MarkKind.subscript, '</sub>'),
+  ('<kbd>', MarkKind.monospaceStyle, '</kbd>'),
+];
+
+/// `<small>x</small>` 等收尾 `>` 触发。
+InputRuleOutcome _tryHtmlMarkRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final before = block.content.text.substring(0, caret);
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+    if (!before.endsWith(closeTag)) continue;
+    final beforeClose = before.substring(0, before.length - closeTag.length);
+    final openAt = beforeClose.lastIndexOf(openTag);
+    if (openAt < 0) continue;
+    final contentText = beforeClose.substring(openAt + openTag.length);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('<') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openAt,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 补打 HTML **开**标签触发:右边已经有配对的闭标签。
+InputRuleOutcome _tryHtmlMarkOpenRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+
+  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+    final openStart = caret - openTag.length;
+    if (openStart < 0 || !text.startsWith(openTag, openStart)) continue;
+
+    final rest = text.substring(caret);
+    final nl = rest.indexOf('\n');
+    final line = nl < 0 ? rest : rest.substring(0, nl);
+    final closeAt = line.indexOf(closeTag);
+    if (closeAt <= 0) continue;
+    final contentText = line.substring(0, closeAt);
+    if (contentText.contains('<') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openStart,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+      caretAtEnd: false,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 光标后紧跟 HTML 闭标签的"填内容"匹配:`<small>|</small>` 这种先打
+/// 好整对空标签、再回中间敲内容的写法。同 [_tryBbcodeInsidePairRules]。
+InputRuleOutcome _tryHtmlInsidePairRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+  final before = text.substring(0, caret);
+
+  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+    if (!text.startsWith(closeTag, caret)) continue;
+    final openAt = before.lastIndexOf(openTag);
+    if (openAt < 0) continue;
+    final contentText = before.substring(openAt + openTag.length);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('<') ||
         contentText.startsWith(' ') ||
         contentText.endsWith(' ')) {
       continue;
