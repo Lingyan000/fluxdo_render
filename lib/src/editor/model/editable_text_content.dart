@@ -545,10 +545,22 @@ class EditableTextContent {
     return node;
   }
 
+  /// 字号极小(≤ [_hiddenSizeThreshold])时编辑态视为"隐藏标记":夹到
+  /// 一个仍可读的小尺寸(而不是变全透明/宽度塌陷),配合
+  /// [EditableParagraph] 的 badge 描边框,让用户看得出"这段有隐藏内容"
+  /// 且能点进去编辑,不是无提示地变成一段视觉正常的文字。
+  static const double hiddenSizeThreshold = 0.15;
+
+  /// 隐藏标记态的编辑态可读尺寸(小于正常字号但不到不可读程度)。
+  static const double hiddenSizeEditingScale = 0.6;
+
   /// 字号 mark → SizedRun。
   ///
-  /// **编辑态夹下限 1 倍**:`[size=0]` 真按 0 倍画在编辑器里就是隐形的、
-  /// 根本没法编辑(用户明确要求"最小为正常大小、最大不限制")。上限不夹。
+  /// **编辑态夹下限**:`[size=0]`(或极小值)真按原值画在编辑器里就是
+  /// 隐形/挤成一条缝的,根本没法编辑。夹到 [hiddenSizeEditingScale] 而
+  /// 非直接钳成 1 倍 —— 视觉上明显偏小,加上 badge 描边框,一眼能看出
+  /// 这是"隐藏内容"而不是普通文字。非隐藏范围(> 阈值)的缩放不夹,
+  /// 用户设的正常倍数(哪怕 <1)照原样画。
   /// 阅读端([forEditing] = false)不夹,原样对齐网页端。
   /// 注意夹的只是**渲染**;raw 由 mark 的 attr 决定,发出去仍是原值。
   static InlineNode _applySizeMark(
@@ -558,7 +570,8 @@ class EditableTextContent {
   }) {
     final scale = parsePct(pct);
     if (scale == null) return node;
-    final effective = forEditing && scale < 1.0 ? 1.0 : scale;
+    final effective =
+        forEditing && scale <= hiddenSizeThreshold ? hiddenSizeEditingScale : scale;
     return SizedRun(scale: effective, children: [node]);
   }
 

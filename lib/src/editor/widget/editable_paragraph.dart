@@ -24,7 +24,8 @@ import '../../render/image_handler.dart' show ImageContentBuilder;
 import '../../render/list_item_layout.dart';
 import '../../render/selectable_text_box.dart';
 import '../../selection/projection.dart';
-import '../model/editable_text_content.dart' show MarkKind;
+import '../model/editable_text_content.dart'
+    show EditableTextContent, MarkKind;
 import '../model/editor_state.dart';
 
 class EditableParagraph extends StatefulWidget {
@@ -240,6 +241,30 @@ class _EditableParagraphState extends State<EditableParagraph> {
       );
     }
 
+    // 极小字号([size=0] 等)编辑态标识:实线描边框,提示"这段内容被
+    // 缩到隐藏了"——光标不在区间内时容易忽略过去,补一个视觉标记
+    // (光标移到边界会自动展开成字面 [size=0]…[/size],见 mark reveal)。
+    final hiddenSizeSpans = [
+      for (final m in block.content.marks)
+        if (m.kind == MarkKind.size &&
+            (EditableTextContent.parsePct(m.attr) ?? 1.0) <= 0.15)
+          TextRange(start: m.start, end: m.end),
+    ];
+    if (hiddenSizeSpans.isNotEmpty) {
+      final scheme = Theme.of(context).colorScheme;
+      text = CustomPaint(
+        painter: _SpoilerDecorPainter(
+          paragraphGetter: _findParagraph,
+          projectionGetter: () => _result?.projection,
+          ranges: hiddenSizeSpans,
+          fillColor: scheme.errorContainer.withValues(alpha: 0.18),
+          borderColor: scheme.error.withValues(alpha: 0.6),
+          dashed: false,
+        ),
+        child: text,
+      );
+    }
+
     Widget boxed = SelectableTextBox(
       projectionGetter: () => _ensureResult().projection,
       documentOrder: widget.documentOrder,
@@ -351,6 +376,7 @@ class _SpoilerDecorPainter extends CustomPainter {
     required this.ranges,
     required this.fillColor,
     required this.borderColor,
+    this.dashed = true,
   });
 
   final RenderParagraph? Function() paragraphGetter;
@@ -361,6 +387,9 @@ class _SpoilerDecorPainter extends CustomPainter {
 
   final Color fillColor;
   final Color borderColor;
+
+  /// false = 实线框(用于极小字号标记,与剧透虚线框区分语义)。
+  final bool dashed;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -390,7 +419,11 @@ class _SpoilerDecorPainter extends CustomPainter {
           const Radius.circular(3),
         );
         canvas.drawRRect(rect, fill);
-        _drawDashedRRect(canvas, rect, border);
+        if (dashed) {
+          _drawDashedRRect(canvas, rect, border);
+        } else {
+          canvas.drawRRect(rect, border);
+        }
       }
     }
   }
@@ -413,5 +446,6 @@ class _SpoilerDecorPainter extends CustomPainter {
   bool shouldRepaint(covariant _SpoilerDecorPainter oldDelegate) =>
       !listEquals(oldDelegate.ranges, ranges) ||
       oldDelegate.fillColor != fillColor ||
-      oldDelegate.borderColor != borderColor;
+      oldDelegate.borderColor != borderColor ||
+      oldDelegate.dashed != dashed;
 }
