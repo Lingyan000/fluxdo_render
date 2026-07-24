@@ -384,6 +384,11 @@ InputRuleOutcome _tryBbcodeOpenRules(
 const List<(String, MarkKind, String)> _bbcodeMarkTags = [
   ('[u]', MarkKind.underline, '[/u]'),
   ('[spoiler]', MarkKind.spoilerInline, '[/spoiler]'),
+  // b/i/s 真实 Discourse 支持(cook 出 strong/em/s,在消毒白名单里),
+  // 复用已有 MarkKind,同 markdown ** 定界符殊途同归。
+  ('[b]', MarkKind.strong, '[/b]'),
+  ('[i]', MarkKind.em, '[/i]'),
+  ('[s]', MarkKind.lineThrough, '[/s]'),
 ];
 
 /// `[u]x[/u]` / `[spoiler]x[/spoiler]` 收尾 `]` 触发。
