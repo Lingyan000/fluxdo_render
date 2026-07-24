@@ -222,6 +222,31 @@ void main() {
       final s = empty();
       expect(type(s, '[size=150][a][/size]'), InputRuleOutcome.none);
     });
+
+    test('先打闭标记、光标挪回来补开标记(任意顺序)', () {
+      // 先打好 "大[/size]",光标停在 "大" 之前,再补 "[size=150]"
+      final s = empty();
+      s.insertText('大[/size]');
+      s.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: first(s).id, offset: 0)));
+      expect(type(s, '[size=150]'), InputRuleOutcome.applied);
+      final b = first(s);
+      expect(b.content.text, '大');
+      expect(b.content.marks.single,
+          const MarkSpan(start: 0, end: 1, kind: MarkKind.size, attr: '150'));
+      expect(s.selection!.extent.offset, 0, reason: '光标停内容首(补开标记后原地)');
+    });
+
+    test('先打闭标记再补开标记:color/bgcolor 同理', () {
+      final s = empty();
+      s.insertText('红字[/color]');
+      s.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: first(s).id, offset: 0)));
+      expect(type(s, '[color=#f00]'), InputRuleOutcome.applied);
+      final mark = first(s).content.marks.single;
+      expect(mark.kind, MarkKind.textColor);
+      expect(mark.attr, '#f00');
+    });
   });
 
   group('填内容匹配(先打定界符再回中间填字)', () {

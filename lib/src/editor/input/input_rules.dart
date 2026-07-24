@@ -71,7 +71,11 @@ InputRuleOutcome tryApplyInputRules(
     return _tryOpenDelimRules(state, block, sel.extent.offset);
   }
   if (typedChar == ']') {
-    return _tryBbcodeAttrRules(state, block, sel.extent.offset);
+    final tail = _tryBbcodeAttrRules(state, block, sel.extent.offset);
+    if (tail != InputRuleOutcome.none) return tail;
+    // 先打闭标记、光标挪回来补开标记(`x[size=150]` 场景),同
+    // _tryOpenDelimRules 的顺序无关设计。
+    return _tryBbcodeOpenRules(state, block, sel.extent.offset);
   }
   // 光标后紧跟闭定界符:先打好 `****` 再回中间填内容的场景(收尾定
   // 界符不是最后敲的,上面的 $ 锚定规则永远不会命中)—— 把光标后的
@@ -274,6 +278,68 @@ InputRuleOutcome _tryBbcodeAttrRules(
       contentLength: contentText.length,
       kind: kind,
       attr: attr,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// (开标记正则, mark, 闭标记)。开标记值可变长,单独一张表 —— 用于
+/// "先打闭标记、光标挪回来补开标记" 场景([_tryBbcodeOpenRules])。
+final List<(RegExp, MarkKind, String)> _bbcodeOpenRules = [
+  (RegExp(r'\[size=(\d{1,4})\]$'), MarkKind.size, '[/size]'),
+  (RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]$'), MarkKind.textColor, '[/color]'),
+  (
+    RegExp(r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]$'),
+    MarkKind.bgColor,
+    '[/bgcolor]',
+  ),
+];
+
+/// 补打 BBCode **开**标记触发:右边已经有配对的闭标记
+/// (`x[size=150]大[/size]` 这种"先打后半截、再回来补前半截"的写法)。
+/// 同 [_tryOpenDelimRules],开/闭标记不等长需要分开处理。
+InputRuleOutcome _tryBbcodeOpenRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+  final before = text.substring(0, caret);
+
+  for (final (openRe, kind, closeTag) in _bbcodeOpenRules) {
+    final openM = openRe.firstMatch(before);
+    if (openM == null) continue;
+    final openStart = openM.start;
+    final openTag = openM.group(0)!;
+
+    final rest = text.substring(caret);
+    final nl = rest.indexOf('\n');
+    final line = nl < 0 ? rest : rest.substring(0, nl);
+    final closeAt = line.indexOf(closeTag);
+    if (closeAt <= 0) continue; // 没有闭标记 / 内容为空
+    final contentText = line.substring(0, closeAt);
+    if (contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openStart,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
+      attr: openM.group(1),
+      // 光标本来就在开标记之后(内容首),别甩到尾巴上
+      caretAtEnd: false,
     );
     return InputRuleOutcome.applied;
   }
