@@ -247,6 +247,32 @@ void main() {
       expect(mark.kind, MarkKind.textColor);
       expect(mark.attr, '#f00');
     });
+
+    test('[u]x[/u] → underline;[spoiler]x[/spoiler] → spoilerInline', () {
+      var s = empty();
+      expect(type(s, '[u]下划线[/u]'), InputRuleOutcome.applied);
+      var b = first(s);
+      expect(b.content.text, '下划线');
+      expect(b.content.marks.single,
+          const MarkSpan(start: 0, end: 3, kind: MarkKind.underline));
+
+      s = empty();
+      expect(type(s, '[spoiler]剧透[/spoiler]'), InputRuleOutcome.applied);
+      b = first(s);
+      expect(b.content.text, '剧透');
+      expect(b.content.marks.single.kind, MarkKind.spoilerInline);
+    });
+
+    test('[u]/[spoiler] 先打闭标记再补开标记(任意顺序)', () {
+      final s = empty();
+      s.insertText('剧透[/spoiler]');
+      s.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: first(s).id, offset: 0)));
+      expect(type(s, '[spoiler]'), InputRuleOutcome.applied);
+      final b = first(s);
+      expect(b.content.text, '剧透');
+      expect(b.content.marks.single.kind, MarkKind.spoilerInline);
+    });
   });
 
   group('填内容匹配(先打定界符再回中间填字)', () {
