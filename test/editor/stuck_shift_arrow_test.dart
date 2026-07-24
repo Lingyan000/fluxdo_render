@@ -108,8 +108,8 @@ void main() {
     });
 
     // 注:「Ctrl 抬起后立刻按 Enter」不写断言 —— 上方 _isSyntheticModifiedKey
-    // 的 250ms 补偿窗口会**有意**把它仍算作 Ctrl+Enter(那是 Win+V 注入
-    // 序列的补偿),属既有设计,不是本次改动引入。
+    // 的补偿窗口(2s)会**有意**把它仍算作 Ctrl+Enter(那是 Win+V 注入
+    // 序列 / Windows 假 KeyUp 的补偿),属既有设计,不是本次改动引入。
 
 
     test('Ctrl 按下过但已抬起且超出补偿窗口 → Enter 必须当普通回车', () async {
@@ -118,7 +118,7 @@ void main() {
       // 回车/Shift+回车/Ctrl+回车**全部把帖子发出去**。
       send(ctrlDown());
       send(ctrlUp());
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
       final before = state.blocks.length;
       send(enterDown());
       expect(state.blocks.length, before + 1,
@@ -128,7 +128,7 @@ void main() {
     test('primaryModifierHeld 不因历史按下而永久为真', () async {
       send(ctrlDown());
       send(ctrlUp());
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
       expect(primaryModifierHeld(enterDown()), isFalse);
     });
 

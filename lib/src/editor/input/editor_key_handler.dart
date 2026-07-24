@@ -222,7 +222,7 @@ KeyEventResult handleEditorKeyEvent(
 //   实有修饰键压制了字符 —— 中文输入法下拼音 `v` 也带 character,不命中;
 // - 主修饰键刚按下过(_modifierWindow 内):Win+V 的注入序列里 Ctrl 按下
 //   紧挨着 V,而普通打字前不会有这个前缀。
-const Duration _modifierWindow = Duration(milliseconds: 250);
+const Duration _modifierWindow = Duration(milliseconds: 2000);
 DateTime? _lastModifierDownAt;
 
 // ---------------------------------------------------------------------
@@ -269,8 +269,9 @@ bool _shiftHeld(KeyEvent event, HardwareKeyboard pressed) =>
 /// 假的「已抬起」(见上方 Win+V 注释),导致 `primary` 为 false ——
 /// Ctrl+Enter 于是被当成普通回车:内核 `splitBlock()` 分一段、宿主的软
 /// 换行再插一个,真机表现为**按一次换两行**,而且发不出去。
-/// 既有的 [_isSyntheticModifiedKey] 只覆盖 250ms 窗口,按住 Ctrl 稍久
-/// 再敲 Enter 就失效。
+/// 既有的 [_isSyntheticModifiedKey] 只覆盖 [_modifierWindow] 窗口,按住
+/// Ctrl 太久(超过窗口)再敲 Enter 就失效——2026-07-24 实测 250ms 太短,
+/// 日常操作很容易超过,已放宽到 2s。
 ///
 /// 所以这里取**析取**(任一为真即认):宁可多认一次 Ctrl(最坏是少插一个
 /// 换行),也不能漏认(漏认会毁掉正在写的内容)。Shift 那条相反,取合取。
