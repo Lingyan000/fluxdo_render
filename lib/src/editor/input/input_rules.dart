@@ -555,6 +555,16 @@ const List<(String, MarkKind, String)> _htmlMarkTags = [
   ('<sup>', MarkKind.superscript, '</sup>'),
   ('<sub>', MarkKind.subscript, '</sub>'),
   ('<kbd>', MarkKind.monospaceStyle, '</kbd>'),
+  // 读端(paragraph_parser.dart)已有的简化映射,同 ins→underline /
+  // del→lineThrough / samp|tt→monospace(对齐 kbd)/ cite|dfn|var→em
+  // (浏览器默认都是斜体)保持一致——复用既有 MarkKind,不新增渲染类型。
+  ('<ins>', MarkKind.underline, '</ins>'),
+  ('<del>', MarkKind.lineThrough, '</del>'),
+  ('<samp>', MarkKind.monospaceStyle, '</samp>'),
+  ('<tt>', MarkKind.monospaceStyle, '</tt>'),
+  ('<cite>', MarkKind.em, '</cite>'),
+  ('<dfn>', MarkKind.em, '</dfn>'),
+  ('<var>', MarkKind.em, '</var>'),
 ];
 
 /// `<small>x</small>` 等收尾 `>` 触发。

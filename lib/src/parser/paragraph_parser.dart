@@ -2150,7 +2150,9 @@ class ParagraphParser {
       _collectInlineFromAnyNode(child, children, nextImageIndex);
     }
     switch (tag) {
-      case 'em' || 'i':
+      case 'em' || 'i' || 'cite' || 'dfn' || 'var':
+        // cite/dfn/var 浏览器默认都是斜体,简化并入 em(同 ins→underline/
+        // del→lineThrough 的既有简化思路)。
         out.add(EmRun(children: List.unmodifiable(children)));
       case 'strong' || 'b':
         out.add(StrongRun(children: List.unmodifiable(children)));
@@ -2518,6 +2520,7 @@ class ParagraphParser {
     'em', 'i', 'strong', 'b', 'br', 'a', 'code', 'img', 'span',
     'ins', 'del', 's', 'strike', 'sup', 'sub', // diff / 上下标
     'u', 'small', 'big', 'mark', 'kbd', 'samp', 'tt', // 行内样式(对齐 fwfh)
+    'cite', 'dfn', 'var', // 简化并入 em(浏览器默认都是斜体)
   };
 
   bool _isInlineTag(String tag) => _inlineTags.contains(tag);
