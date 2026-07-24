@@ -54,6 +54,12 @@ enum MarkKind {
 
   /// 背景色 `[bgcolor=#rrggbb]…[/bgcolor]`(ColoredRun.background)。
   bgColor,
+
+  /// 字号 `[size=N]…[/size]`(SizedRun.scale)。attr 存百分比字符串
+  /// (`_pct`/`parsePct`,如 `150`)。做成 mark 而非留给 SizedRun 岛化,
+  /// 同 textColor 的理由 —— 岛不可编辑,mark 化后一行内可以混多个不同
+  /// size 区间,逐字正常编辑。
+  size,
 }
 
 /// 一段样式区间 `[start, end)`(扁平文本坐标)。
@@ -272,10 +278,11 @@ class EditableTextContent {
           // ProseMirror image 是 inline:true 一等行内节点)
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
-        case SizedRun(:final children):
-          // 正常链路走不到:doc_converter 已把含 [size] 的段落整体岛化。
-          // 这里只作防御兜底(同其他白名单外节点),摊平子节点不丢字。
-          _flattenInto(children, buf, marks, atoms, activeKinds);
+        case SizedRun(:final scale, :final children):
+          // 字号 → 带 attr 的 mark(见 MarkKind.size 注释:岛化不可编辑,
+          // mark 化后一行内可以混多个不同 size 区间)。
+          _flattenInto(children, buf, marks, atoms,
+              [...activeKinds, (MarkKind.size, _pct(scale))]);
         case ColoredRun(:final color, :final background, :final children):
           // 颜色 → 带 attr 的 mark(见 MarkKind.textColor 注释:岛化会
           // 让整行变只读、光标消失)
@@ -381,6 +388,7 @@ class EditableTextContent {
       String? href;
       String? fgHex;
       String? bgHex;
+      String? sizePct;
       for (final m in marks) {
         if (m.start > s || m.end < e) continue;
         switch (m.kind) {
@@ -390,6 +398,8 @@ class EditableTextContent {
             fgHex ??= m.attr;
           case MarkKind.bgColor:
             bgHex ??= m.attr;
+          case MarkKind.size:
+            sizePct ??= m.attr;
           default:
             break;
         }
@@ -407,7 +417,8 @@ class EditableTextContent {
           forEditing: forEditing,
           editingLinkColor: editingLinkColor,
           fgHex: fgHex,
-          bgHex: bgHex);
+          bgHex: bgHex,
+          sizePct: sizePct);
       if (markerColor != null &&
           markerRanges.any((r) => r.$1 <= s && r.$2 >= e)) {
         node = ColoredRun(color: markerColor, children: [node]);
@@ -481,6 +492,7 @@ class EditableTextContent {
     Color? editingLinkColor,
     String? fgHex,
     String? bgHex,
+    String? sizePct,
   }) {
     InlineNode node;
     if (kinds.contains(MarkKind.inlineCode)) {
@@ -513,9 +525,16 @@ class EditableTextContent {
           children: [node],
         );
       }
-      return _applyColorMarks(node, kinds, fgHex, bgHex);
+      node = _applyColorMarks(node, kinds, fgHex, bgHex);
+      if (kinds.contains(MarkKind.size)) {
+        node = _applySizeMark(node, sizePct, forEditing: forEditing);
+      }
+      return node;
     }
     node = _applyColorMarks(node, kinds, fgHex, bgHex);
+    if (kinds.contains(MarkKind.size)) {
+      node = _applySizeMark(node, sizePct, forEditing: forEditing);
+    }
     // link/spoiler 包最外(阅读端 <a>/<span class=spoiler> 里嵌样式的形态)
     if (kinds.contains(MarkKind.link)) {
       node = LinkRun(href: href ?? '', children: [node]);
@@ -871,6 +890,7 @@ class EditableTextContent {
     final open = switch (mark.kind) {
       MarkKind.textColor => '[color=${mark.attr ?? ''}]',
       MarkKind.bgColor => '[bgcolor=${mark.attr ?? ''}]',
+      MarkKind.size => '[size=${mark.attr ?? ''}]',
       _ => _markOpenTag(mark.kind),
     };
     final close = mark.kind == MarkKind.link
@@ -905,6 +925,7 @@ class EditableTextContent {
     final openRe = switch (kind) {
       MarkKind.textColor => _colorOpenRe,
       MarkKind.bgColor => _bgColorOpenRe,
+      MarkKind.size => _sizeOpenRe,
       _ => null,
     };
     if (openRe != null) {
@@ -978,6 +999,9 @@ final RegExp _linkCloseRe = RegExp(r'\]\(([^)]*)\)');
 final RegExp _colorOpenRe = RegExp(r'\[color=([^\]]*)\]');
 final RegExp _bgColorOpenRe = RegExp(r'\[bgcolor=([^\]]*)\]');
 
+/// 字号开标记(值用户可改 → 正则,不能定长比对)。
+final RegExp _sizeOpenRe = RegExp(r'\[size=([^\]]*)\]');
+
 /// mark 开标记。
 String _markOpenTag(MarkKind kind) => switch (kind) {
       MarkKind.strong => '**',
@@ -988,7 +1012,7 @@ String _markOpenTag(MarkKind kind) => switch (kind) {
       MarkKind.spoilerInline => '[spoiler]',
       MarkKind.link => '[',
       // 不参与显形(见 markAtBoundary),给个空串保 switch 穷尽
-      MarkKind.textColor || MarkKind.bgColor => '',
+      MarkKind.textColor || MarkKind.bgColor || MarkKind.size => '',
     };
 
 /// mark 闭标记。
@@ -1002,4 +1026,5 @@ String _markCloseTag(MarkKind kind) => switch (kind) {
       MarkKind.link => ']',
       MarkKind.textColor => '[/color]',
       MarkKind.bgColor => '[/bgcolor]',
+      MarkKind.size => '[/size]',
     };

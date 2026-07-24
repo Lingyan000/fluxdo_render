@@ -205,6 +205,9 @@ String _serializeListRun(List<TextBlock> run) {
 /// lineThrough;inlineCode 独占由 toInlines 语义保证,这里同优先级处理即可)。
 const _markOrder = [
   MarkKind.spoilerInline,
+  // size 包在颜色外层(与 toInlines._wrapPiece 的包裹顺序一致:先套色
+  // 再套字号,size 最外)
+  MarkKind.size,
   // 颜色包在 link 外层:cook 实测 `[color=…][…](url)[/color]` 可解析,
   // 反过来 link 里嵌 color 会让锚文本被 BBCode 切碎
   MarkKind.bgColor,
@@ -228,6 +231,7 @@ String _openTag(MarkSpan m, {required bool htmlEmphasis}) =>
       MarkKind.link => '[',
       MarkKind.textColor => '[color=${m.attr ?? ''}]',
       MarkKind.bgColor => '[bgcolor=${m.attr ?? ''}]',
+      MarkKind.size => '[size=${m.attr ?? ''}]',
     };
 
 String _closeTag(MarkSpan m, {required bool htmlEmphasis}) =>
@@ -241,6 +245,7 @@ String _closeTag(MarkSpan m, {required bool htmlEmphasis}) =>
       MarkKind.link => '](${m.attr ?? ''})',
       MarkKind.textColor => '[/color]',
       MarkKind.bgColor => '[/bgcolor]',
+      MarkKind.size => '[/size]',
     };
 
 /// 是否存在交错区间(a.start < b.start < a.end < b.end)。

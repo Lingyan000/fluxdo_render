@@ -189,8 +189,8 @@ String _markOpenTagStr(MarkKind kind) => switch (kind) {
       MarkKind.lineThrough => '~~',
       MarkKind.spoilerInline => '[spoiler]',
       MarkKind.link => '[',
-      // 颜色系不参与显形(见 EditableTextContent.markAtBoundary)
-      MarkKind.textColor || MarkKind.bgColor => '',
+      // 颜色系/字号不参与显形(见 EditableTextContent.markAtBoundary)
+      MarkKind.textColor || MarkKind.bgColor || MarkKind.size => '',
     };
 
 String _markCloseTagStr(MarkKind kind) => switch (kind) {
@@ -203,17 +203,20 @@ String _markCloseTagStr(MarkKind kind) => switch (kind) {
       MarkKind.link => ']',
       MarkKind.textColor => '[/color]',
       MarkKind.bgColor => '[/bgcolor]',
+      MarkKind.size => '[/size]',
     };
 
-/// 颜色系开标记的正则(色值用户可改 → 长度不固定,不能定长前缀比对)。
+/// 颜色系/字号开标记的正则(值用户可改 → 长度不固定,不能定长前缀比对)。
 /// 提到顶层常量:[_openTagLenAt] 在光标进出标记边界时反复调用,
 /// 现编正则纯属浪费。
 final RegExp _colorOpenTagRe = RegExp(r'\[color=([^\]]*)\]');
 final RegExp _bgColorOpenTagRe = RegExp(r'\[bgcolor=([^\]]*)\]');
+final RegExp _sizeOpenTagRe = RegExp(r'\[size=([^\]]*)\]');
 
 RegExp? _openTagReFor(MarkKind kind) => switch (kind) {
       MarkKind.textColor => _colorOpenTagRe,
       MarkKind.bgColor => _bgColorOpenTagRe,
+      MarkKind.size => _sizeOpenTagRe,
       _ => null,
     };
 

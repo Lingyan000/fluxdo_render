@@ -48,22 +48,28 @@ void main() {
     });
   });
 
-  group('编辑端:整段岛化成块(与分割线同款)', () {
-    test('不进白名单 —— 靠岛化成块', () {
-      expect(isEditableInline(const SizedRun(scale: 0, children: [])), isFalse);
+  group('编辑端:mark 化(与 color 同款,不再岛化)', () {
+    test('进白名单 —— mark 化,内容照常可编辑', () {
+      expect(isEditableInline(const SizedRun(scale: 0, children: [])), isTrue);
     });
 
-    test('含 size 的段落 → IslandBlock(块,不是文字)', () {
+    test('含 size 的段落 → TextBlock(可编辑,不是块)', () {
       var n = 0;
       final doc = blockNodesToDoc(
         [para('<p>前<span style="font-size:150%">大</span>后</p>')],
         () => 'e_${n++}',
       );
-      expect(doc.single, isA<IslandBlock>(),
-          reason: '整段成块:双击/回车进去改源码,与分割线一致');
+      expect(doc.single, isA<TextBlock>(),
+          reason: 'mark 化后一行可以混多个 size 区间,正常逐字编辑');
+      final block = doc.single as TextBlock;
+      expect(block.content.text, '前大后');
+      final sizeMark = block.content.marks.singleWhere(
+        (m) => m.kind == MarkKind.size,
+      );
+      expect(sizeMark.attr, '150');
     });
 
-    test('岛序列化写回 BBCode,内容不丢', () {
+    test('序列化写回 BBCode,内容不丢', () {
       var n = 0;
       final doc = blockNodesToDoc(
         [para('<p>前<span style="font-size:0%">隐</span>后</p>')],
