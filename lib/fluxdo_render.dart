@@ -14,6 +14,7 @@ export 'src/chunk/html_chunker.dart';
 export 'src/config/render_config.dart';
 export 'src/dev/fixtures_index.dart';
 export 'src/dev/fixtures_index.g.dart';
+export 'src/flatten/flatten_cache.dart';
 export 'src/flatten/inline_flattener.dart';
 export 'src/node/node.dart';
 export 'src/parser/arrow_ligature.dart';
@@ -23,6 +24,10 @@ export 'src/render/emoji_handler.dart';
 export 'src/render/footnote_handler.dart';
 export 'src/render/iframe_handler.dart';
 export 'src/render/audio_handler.dart';
+export 'src/render/cached_paragraph_text.dart'
+    show ParagraphLayoutCache, CachedParagraphText;
+export 'src/render/paragraph_warmup.dart'
+    show ParagraphWarmup, ParagraphWarmupProbe, WarmupContext;
 export 'src/render/video_handler.dart';
 export 'src/render/image_handler.dart';
 export 'src/render/inline_span_text.dart';

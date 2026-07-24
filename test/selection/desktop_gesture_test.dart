@@ -1,6 +1,5 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/node/inline_node.dart';
 import 'package:fluxdo_render/src/render/inline_span_text.dart';
@@ -10,6 +9,8 @@ import 'package:fluxdo_render/src/selection/selection_geometry.dart';
 import 'package:fluxdo_render/src/selection/selection_gesture_layer.dart';
 import 'package:fluxdo_render/src/selection/selection_registry.dart';
 import 'package:fluxdo_render/src/selection/selection_scope.dart';
+
+import '../test_text_finders.dart';
 
 void main() {
   Widget host(SelectionController c, List<InlineNode> inlines) {
@@ -62,7 +63,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     final topLeft = para.localToGlobal(Offset.zero);
     final start = topLeft + const Offset(5, 8);
     final end = topLeft + Offset(para.size.width - 5, 8);
@@ -87,7 +88,7 @@ void main() {
     final c = SelectionController(SelectionRegistry());
     await tester.pumpWidget(host(c, const [TextRun('Hello world')]));
     await tester.pumpAndSettle();
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     final p = para.localToGlobal(Offset.zero) + const Offset(10, 8);
 
     // 双击(consecutiveTapCount=2 → 选词)
@@ -110,7 +111,7 @@ void main() {
       TextRun('AAAAA BBBBB CCCCC DDDDD EEEEE FFFFF GGGGG'),
     ]));
     await tester.pumpAndSettle();
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     final o = para.localToGlobal(Offset.zero);
     final mid = o + Offset(para.size.width * 0.4, 8);
     final right = o + Offset(para.size.width * 0.7, 8);

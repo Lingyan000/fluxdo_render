@@ -452,6 +452,12 @@ class ImageRun extends InlineNode {
     this.previewImageIndex,
     this.origWidth,
     this.origHeight,
+    this.srcset = const [],
+    this.dominantColor,
+    this.base62Sha1,
+    this.naturalWidth,
+    this.naturalHeight,
+    this.fileSizeText,
   });
 
   /// 完整图片 URL(parser 不做任何重写;含 upload:// 短链时由主项目解析)。
@@ -520,6 +526,38 @@ class ImageRun extends InlineNode {
   /// raw 里声明的原始高度(`|WxH` 的 H,未乘 scale)。同 [origWidth]。
   final double? origHeight;
 
+  /// `img[srcset]` 的候选档位(Discourse responsive images 契约:
+  /// `"主src, url 1.5x, url 2x"`,首项无描述符 = 1x)。空列表 = 无 srcset。
+  ///
+  /// 主项目按设备 dpr 选档(浏览器语义:scale ≥ dpr 的最小档,不足取
+  /// 最大档);parser 只结构化,不做选择。
+  final List<ImageSrcsetCandidate> srcset;
+
+  /// `img[data-dominant-color]`,6 位十六进制主色(如 `"E8F0D5"`)。
+  ///
+  /// Discourse 官方唯一的加载占位语义(web 端加载中即此纯色背景;
+  /// data-small-upload LQIP 已废弃)。原样保存,颜色转换是渲染层的事。
+  final String? dominantColor;
+
+  /// `img[data-base62-sha1]`,上传文件的稳定标识(可拼
+  /// `/uploads/short-url/<base62>.<ext>`)。跨 URL 变体(CDN/原图/
+  /// optimized)恒定,主项目用作画廊去重 / Hero key。
+  final String? base62Sha1;
+
+  /// 原图像素宽(lightbox `.informations` 的 `"1686×128 15.7 KB"` 解析;
+  /// 非 lightbox 或解析失败 → null)。
+  ///
+  /// 与 [origWidth] 不同:那是**编辑器 raw 声明尺寸**(scale 反推),
+  /// 这是**服务端原图实际尺寸**。二者来源互斥(预览态无 .informations,
+  /// baked 态无 scale 控件),刻意分字段避免语义混流。
+  final double? naturalWidth;
+
+  /// 原图像素高。同 [naturalWidth]。
+  final double? naturalHeight;
+
+  /// `.informations` 的人类可读文件大小(如 `"15.7 KB"`),查看器展示用。
+  final String? fileSizeText;
+
   /// 换 alt / lightboxUrl / 尺寸 / 缩放档,其余字段保持。
   /// alt 非空 String(默认 ''):传 '' = 清空,null = 不改,无 sentinel 歧义。
   /// 缩放档切换用法:`copyWith(scale: 75, width: origW*0.75, ...)`,
@@ -545,6 +583,39 @@ class ImageRun extends InlineNode {
         previewImageIndex: previewImageIndex,
         origWidth: origWidth ?? this.origWidth,
         origHeight: origHeight ?? this.origHeight,
+        srcset: srcset,
+        dominantColor: dominantColor,
+        base62Sha1: base62Sha1,
+        naturalWidth: naturalWidth,
+        naturalHeight: naturalHeight,
+        fileSizeText: fileSizeText,
+      );
+
+  /// lightbox 包装解析专用:一次带上 anchor 侧的全部契约字段。
+  ImageRun withLightboxMeta({
+    String? lightboxUrl,
+    double? naturalWidth,
+    double? naturalHeight,
+    String? fileSizeText,
+  }) =>
+      ImageRun(
+        src: src,
+        alt: alt,
+        width: width,
+        height: height,
+        indexInPost: indexInPost,
+        lightboxUrl: lightboxUrl ?? this.lightboxUrl,
+        origSrc: origSrc,
+        scale: scale,
+        previewImageIndex: previewImageIndex,
+        origWidth: origWidth,
+        origHeight: origHeight,
+        srcset: srcset,
+        dominantColor: dominantColor,
+        base62Sha1: base62Sha1,
+        naturalWidth: naturalWidth ?? this.naturalWidth,
+        naturalHeight: naturalHeight ?? this.naturalHeight,
+        fileSizeText: fileSizeText ?? this.fileSizeText,
       );
 
   @override
@@ -562,17 +633,61 @@ class ImageRun extends InlineNode {
           scale == other.scale &&
           previewImageIndex == other.previewImageIndex &&
           origWidth == other.origWidth &&
-          origHeight == other.origHeight;
+          origHeight == other.origHeight &&
+          listEquals(srcset, other.srcset) &&
+          dominantColor == other.dominantColor &&
+          base62Sha1 == other.base62Sha1 &&
+          naturalWidth == other.naturalWidth &&
+          naturalHeight == other.naturalHeight &&
+          fileSizeText == other.fileSizeText;
 
   @override
-  int get hashCode => Object.hash(src, alt, width, height, indexInPost,
-      lightboxUrl, origSrc, scale, previewImageIndex, origWidth, origHeight);
+  int get hashCode => Object.hash(
+      src,
+      alt,
+      width,
+      height,
+      indexInPost,
+      lightboxUrl,
+      origSrc,
+      scale,
+      previewImageIndex,
+      origWidth,
+      origHeight,
+      Object.hashAll(srcset),
+      dominantColor,
+      base62Sha1,
+      naturalWidth,
+      naturalHeight,
+      fileSizeText);
 
   @override
   String toString() =>
       'ImageRun(#$indexInPost $src'
       '${width == null ? "" : ", ${width}x$height"}'
       '${lightboxUrl == null ? "" : ", lightbox=$lightboxUrl"})';
+}
+
+/// [ImageRun.srcset] 的单个候选:URL + 像素密度倍率(`1.5x` → 1.5)。
+@immutable
+class ImageSrcsetCandidate {
+  const ImageSrcsetCandidate({required this.url, required this.scale});
+
+  final String url;
+  final double scale;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImageSrcsetCandidate &&
+          url == other.url &&
+          scale == other.scale;
+
+  @override
+  int get hashCode => Object.hash(url, scale);
+
+  @override
+  String toString() => '$url ${scale}x';
 }
 
 /// `<span class="spoiler">` 行内剧透,默认遮蔽,点击展开。

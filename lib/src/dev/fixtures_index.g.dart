@@ -681,8 +681,9 @@ parser 改:lightbox 走 pendingInlines 流,两张图 + LineBreakRun 合并
   FixtureEntry(
     relativePath: r'''image/lightbox_wrapper.html''',
     html: r'''<p><strong>段落 1。</strong></p>
-<p><div class="lightbox-wrapper"><a class="lightbox" href="https://cdn.example.com/original/4X/d/1/e/abcdef.png" data-download-href="/uploads/short-url/xyz.png?dl=1" title="d5112e737a71778e6de420459be91f92" rel="noopener nofollow ugc"><img src="https://cdn.example.com/optimized/4X/d/1/e/abcdef_2_690x52.png" alt="d5112e737a71778e6de420459be91f92" data-base62-sha1="xyz" width="690" height="52"><div class="meta"><svg class="fa d-icon d-icon-far-image svg-icon" aria-hidden="true"><use href="#far-image"></use></svg><span class="filename">d5112e737a71778e6de420459be91f92</span><span class="informations">1686×128 15.7 KB</span><svg class="fa d-icon d-icon-discourse-expand svg-icon" aria-hidden="true"><use href="#discourse-expand"></use></svg></div></a></div></p>
+<p><div class="lightbox-wrapper"><a class="lightbox" href="https://cdn.example.com/original/4X/d/1/e/abcdef.png" data-download-href="/uploads/short-url/xyz.png?dl=1" title="d5112e737a71778e6de420459be91f92" rel="noopener nofollow ugc"><img src="https://cdn.example.com/optimized/4X/d/1/e/abcdef_2_690x52.png" alt="d5112e737a71778e6de420459be91f92" data-base62-sha1="xyz" width="690" height="52" srcset="https://cdn.example.com/optimized/4X/d/1/e/abcdef_2_690x52.png, https://cdn.example.com/optimized/4X/d/1/e/abcdef_2_1035x78.png 1.5x, https://cdn.example.com/optimized/4X/d/1/e/abcdef_2_1380x104.png 2x" data-dominant-color="E8F0D5"><div class="meta"><svg class="fa d-icon d-icon-far-image svg-icon" aria-hidden="true"><use href="#far-image"></use></svg><span class="filename">d5112e737a71778e6de420459be91f92</span><span class="informations">1686×128 15.7 KB</span><svg class="fa d-icon d-icon-discourse-expand svg-icon" aria-hidden="true"><use href="#discourse-expand"></use></svg></div></a></div></p>
 <p><strong>段落 2,图片之后。</strong></p>
+
 ''',
     notes: r'''Discourse cooked 把上传图包成 lightbox-wrapper:
   div.lightbox-wrapper > a.lightbox(href=原图) > img(src=缩略图) +
@@ -692,6 +693,12 @@ HTML5 不允许 p 含 div,package:html 会自动闭合 p,所以 wrapper 实际
   1. 识别 div.lightbox-wrapper
   2. 提 img 的 src (缩略图) + a 的 href (原图,填 lightboxUrl)
   3. .meta 子树不进 textContent(否则会显示 filename + 尺寸 KB 文字)
+  4. 契约字段全提取(2026-07 按官方 cooked_processor_mixin 补):
+     srcset(1x/1.5x/2x 档位)→ ImageRun.srcset;
+     data-dominant-color → dominantColor(官方唯一加载占位);
+     data-base62-sha1 → base62Sha1(稳定标识);
+     .informations "1686×128 15.7 KB" → naturalWidth/Height(原图
+     尺寸,img width/height 是显示尺寸)+ fileSizeText。
 没修之前:全靠 fallback textContent 把 .meta 文字渲染成 "filename 尺寸 KB"。''',
     source: r'''https://example.com/t/sample/1/img6''',
     edgeCase: true,

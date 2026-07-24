@@ -312,12 +312,13 @@ class SelectionHandlesController {
     Rect lineBoundaries =
         Rect.fromLTRB(fieldBounds.left, caret.top, fieldBounds.right, caret.bottom);
     final pos = _dragDocPosition;
-    final paragraph = pos == null ? null : controller.registry.byId(pos.blockId)?.paragraph;
-    if (paragraph != null && paragraph.attached && paragraph.hasSize) {
-      final tl = paragraph.localToGlobal(Offset.zero);
+    final geometry =
+        pos == null ? null : controller.registry.byId(pos.blockId)?.geometry;
+    if (geometry != null && geometry.isLive) {
+      final tl = geometry.renderBox.localToGlobal(Offset.zero);
       if (tl.dx.isFinite && tl.dy.isFinite) {
         lineBoundaries = Rect.fromLTRB(
-            tl.dx, caret.top, tl.dx + paragraph.size.width, caret.bottom);
+            tl.dx, caret.top, tl.dx + geometry.renderBox.size.width, caret.bottom);
       }
     }
 

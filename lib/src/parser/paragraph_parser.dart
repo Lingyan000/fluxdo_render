@@ -1302,8 +1302,39 @@ class ParagraphParser {
     final run = _imageRunFromImg(img, nextImageIndex);
     if (run == null) return null;
     final lightboxUrl = aEl.attributes['href']?.trim();
-    if (lightboxUrl == null || lightboxUrl.isEmpty) return run;
-    return run.copyWith(lightboxUrl: lightboxUrl);
+    final info = _parseInformations(aEl);
+    if ((lightboxUrl == null || lightboxUrl.isEmpty) && info == null) {
+      return run;
+    }
+    return run.withLightboxMeta(
+      lightboxUrl:
+          (lightboxUrl == null || lightboxUrl.isEmpty) ? null : lightboxUrl,
+      naturalWidth: info?.width,
+      naturalHeight: info?.height,
+      fileSizeText: info?.sizeText,
+    );
+  }
+
+  /// 解析 lightbox `.meta > .informations` 的原图信息(Discourse 契约:
+  /// `"1686×128 15.7 KB"` = 原图 W×H + 人类可读大小;`add_lightbox!` 用
+  /// `×`(U+00D7)连接)。img 的 width/height 是**显示尺寸**,原图尺寸
+  /// 只有这里有。解析失败静默 null(容错)。
+  static ({double? width, double? height, String? sizeText})?
+      _parseInformations(dom.Element aEl) {
+    final text = aEl.querySelector('.informations')?.text.trim() ?? '';
+    if (text.isEmpty) return null;
+    final match =
+        RegExp(r'^(\d+)\s*[×x]\s*(\d+)\s*(.*)$').firstMatch(text);
+    if (match == null) return null;
+    final w = double.tryParse(match.group(1)!);
+    final h = double.tryParse(match.group(2)!);
+    final size = match.group(3)?.trim();
+    if (w == null && h == null) return null;
+    return (
+      width: w,
+      height: h,
+      sizeText: (size == null || size.isEmpty) ? null : size,
+    );
   }
 
   /// 解析 `<figure>` 容器为 BlockNode 序列(对齐 legacy fwfh `figure`+`figcaption`
@@ -1386,9 +1417,13 @@ class ParagraphParser {
       }
     }
     if (run == null) {
-      final src = _srcsetFirstUrl(pictureEl);
-      if (src != null) {
-        run = ImageRun(src: src, indexInPost: nextImageIndex());
+      final candidates = _pictureSourceSrcset(pictureEl);
+      if (candidates.isNotEmpty) {
+        run = ImageRun(
+          src: candidates.first.url,
+          indexInPost: nextImageIndex(),
+          srcset: candidates,
+        );
       }
     }
     if (run == null) return const [];
@@ -1450,12 +1485,16 @@ class ParagraphParser {
         consumed.add(img);
       }
     }
-    // 4) 只有 <picture><source> 无任何 img 的兜底:取首个 source srcset
+    // 4) 只有 <picture><source> 无任何 img 的兜底:取 source srcset 全档
     if (images.isEmpty) {
       for (final pic in figureEl.querySelectorAll('picture')) {
-        final src = _srcsetFirstUrl(pic);
-        if (src != null) {
-          images.add(ImageRun(src: src, indexInPost: nextImageIndex()));
+        final candidates = _pictureSourceSrcset(pic);
+        if (candidates.isNotEmpty) {
+          images.add(ImageRun(
+            src: candidates.first.url,
+            indexInPost: nextImageIndex(),
+            srcset: candidates,
+          ));
         }
       }
     }
@@ -1488,6 +1527,8 @@ class ParagraphParser {
     final w = double.tryParse(img.attributes['width'] ?? '');
     final h = double.tryParse(img.attributes['height'] ?? '');
     final controls = _imageControlsOf(img);
+    final dominant = img.attributes['data-dominant-color']?.trim();
+    final base62 = img.attributes['data-base62-sha1']?.trim();
     return ImageRun(
       src: src,
       alt: alt,
@@ -1499,7 +1540,41 @@ class ParagraphParser {
       previewImageIndex: controls?.imageIndex,
       origWidth: controls?.origWidth,
       origHeight: controls?.origHeight,
+      srcset: _parseSrcset(img.attributes['srcset']),
+      dominantColor:
+          (dominant == null || dominant.isEmpty) ? null : dominant,
+      base62Sha1: (base62 == null || base62.isEmpty) ? null : base62,
     );
+  }
+
+  /// 解析 srcset 属性为候选列表(Discourse responsive images 契约:
+  /// `"主src, url 1.5x, url 2x"`,首项无描述符 = 1x)。
+  ///
+  /// 只认 `Nx` 密度描述符;`Nw` 宽度描述符(Discourse 不产)按序退化为
+  /// 无档位(scale 递增占位),保证仍能按"越靠后越大"取档。
+  static List<ImageSrcsetCandidate> _parseSrcset(String? raw) {
+    final srcset = raw?.trim() ?? '';
+    if (srcset.isEmpty) return const [];
+    final out = <ImageSrcsetCandidate>[];
+    for (final part in srcset.split(',')) {
+      final candidate = part.trim();
+      if (candidate.isEmpty) continue;
+      final pieces = candidate.split(RegExp(r'\s+'));
+      final url = pieces.first.trim();
+      if (url.isEmpty) continue;
+      double scale = 1.0;
+      if (pieces.length > 1) {
+        final desc = pieces[1].toLowerCase();
+        if (desc.endsWith('x')) {
+          scale = double.tryParse(desc.substring(0, desc.length - 1)) ?? 1.0;
+        } else {
+          // Nw 等非密度描述符:按出现序给递增档位,保底可用。
+          scale = out.isEmpty ? 1.0 : out.last.scale + 0.5;
+        }
+      }
+      out.add(ImageSrcsetCandidate(url: url, scale: scale));
+    }
+    return List.unmodifiable(out);
   }
 
   /// 从 img 的 `span.image-wrapper` 祖先里找兄弟 `span.button-wrapper`,
@@ -1547,17 +1622,11 @@ class ParagraphParser {
     );
   }
 
-  /// 取 `<picture>` 内首个 `<source srcset>` 的首个候选 URL。
-  /// srcset 形如 `"a.png 1x, b.png 2x"` / `"a.png 480w, b.png 800w"` →
-  /// 取第一段逗号前、首个空白前的 URL。无 source/srcset 返回 null。
-  String? _srcsetFirstUrl(dom.Element pictureEl) {
+  /// 取 `<picture>` 内首个 `<source srcset>` 的候选档位列表(结构化,
+  /// 保留倍率描述符)。无 source/srcset 返回空列表。
+  List<ImageSrcsetCandidate> _pictureSourceSrcset(dom.Element pictureEl) {
     final source = pictureEl.querySelector('source');
-    final srcset = source?.attributes['srcset']?.trim() ?? '';
-    if (srcset.isEmpty) return null;
-    final firstCandidate = srcset.split(',').first.trim();
-    if (firstCandidate.isEmpty) return null;
-    final url = firstCandidate.split(RegExp(r'\s+')).first.trim();
-    return url.isEmpty ? null : url;
+    return _parseSrcset(source?.attributes['srcset']);
   }
 
   /// figcaption 文本 → 居中小字 ParagraphNode(对齐浏览器图注视觉:0.833x +
@@ -2260,30 +2329,10 @@ class ParagraphParser {
           ));
         } else {
           // 普通内容图片走 ImageRun(主项目注入 builder)。
-          // 客户端 cook 预览形态(src=transparent.png + data-orig-src=
-          // upload://):src 还原为短链,origSrc 供 markdown 序列化写回;
-          // 兄弟 button-wrapper 控件里提取缩放档(见 _imageControlsOf)。
-          var imgSrc = src;
-          final origSrc = el.attributes['data-orig-src']?.trim();
-          if (origSrc != null && origSrc.startsWith('upload://')) {
-            imgSrc = origSrc;
-          }
-          final alt = el.attributes['alt']?.trim() ?? '';
-          final w = double.tryParse(el.attributes['width'] ?? '');
-          final h = double.tryParse(el.attributes['height'] ?? '');
-          final controls = _imageControlsOf(el);
-          out.add(ImageRun(
-            src: imgSrc,
-            alt: alt,
-            width: w,
-            height: h,
-            indexInPost: nextImageIndex(),
-            origSrc: (origSrc == null || origSrc.isEmpty) ? null : origSrc,
-            scale: controls?.scale,
-            previewImageIndex: controls?.imageIndex,
-            origWidth: controls?.origWidth,
-            origHeight: controls?.origHeight,
-          ));
+          // 统一走 _imageRunFromImg:短链还原/缩放控件/srcset/
+          // dominant-color/base62 等契约字段一处提取,防两处漂移。
+          final run = _imageRunFromImg(el, nextImageIndex);
+          if (run != null) out.add(run);
         }
       case 'picture':
         // 行内 <picture>(罕见,出现在 <p> 内):children 已在上方按 el.nodes

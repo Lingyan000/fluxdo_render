@@ -76,8 +76,8 @@ class _HighlightPainter extends CustomPainter {
     // 双块(如分块重建/回收的瞬态),只有 _live 里的那个画高亮(与命中测试用的
     // 同一个)→ 杜绝「另一段也亮」的重影。
     if (!identical(registry.byId(handle.id), handle)) return;
-    final paragraph = handle.paragraph;
-    if (paragraph == null) return;
+    final geometry = handle.geometry;
+    if (geometry == null) return;
 
     // 找本块在选区里的渲染偏移区间。
     final ranges = expandSelection(registry, selection);
@@ -96,7 +96,7 @@ class _HighlightPainter extends CustomPainter {
     // box 时整条会逐步变高;max 让行高恒定,扩选不跳变。
     // 跨行不误并:max 让相邻行 box 紧贴(非重叠),mergeSelectionBoxesByLine 的
     // 「重叠过半」阈值挡住(实测窄宽 5 行 → 仍 5 个独立矩形,不合并)。
-    final boxes = paragraph.getBoxesForSelection(
+    final boxes = geometry.getBoxesForSelection(
       TextSelection(baseOffset: mine.start, extentOffset: mine.end),
       boxHeightStyle: BoxHeightStyle.max,
     );

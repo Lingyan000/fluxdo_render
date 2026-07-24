@@ -41,14 +41,14 @@ class SelectionExporter {
     //    外接框 / toolbar 定位崩。
     final globalRects = <Rect>[];
     for (final r in ranges) {
-      final p = registry.byId(r.id)?.paragraph;
-      if (p == null) continue;
-      final boxes = p.getBoxesForSelection(
+      final g = registry.byId(r.id)?.geometry;
+      if (g == null) continue;
+      final boxes = g.getBoxesForSelection(
         TextSelection(baseOffset: r.start, extentOffset: r.end),
       );
       for (final b in boxes) {
-        final tl = p.localToGlobal(Offset(b.left, b.top));
-        final br = p.localToGlobal(Offset(b.right, b.bottom));
+        final tl = g.renderBox.localToGlobal(Offset(b.left, b.top));
+        final br = g.renderBox.localToGlobal(Offset(b.right, b.bottom));
         if (!tl.dx.isFinite ||
             !tl.dy.isFinite ||
             !br.dx.isFinite ||
@@ -122,32 +122,32 @@ class SelectionExporter {
     // 找首个**可见**range(其首 box 左下 = start)。
     _BoxAnchor? startAnchor;
     for (final r in ranges) {
-      final p = registry.byId(r.id)?.paragraph;
-      if (p == null) continue;
-      final boxes = p.getBoxesForSelection(
+      final g = registry.byId(r.id)?.geometry;
+      if (g == null) continue;
+      final boxes = g.getBoxesForSelection(
         TextSelection(baseOffset: r.start, extentOffset: r.end),
       );
       if (boxes.isEmpty) continue;
       final fb = boxes.first;
-      final g = p.localToGlobal(Offset(fb.left, fb.bottom));
-      if (!g.dx.isFinite || !g.dy.isFinite) continue; // 离屏保活块 NaN → 跳过
-      startAnchor = _BoxAnchor(global: g, lineHeight: fb.bottom - fb.top);
+      final gp = g.renderBox.localToGlobal(Offset(fb.left, fb.bottom));
+      if (!gp.dx.isFinite || !gp.dy.isFinite) continue; // 离屏保活块 NaN → 跳过
+      startAnchor = _BoxAnchor(global: gp, lineHeight: fb.bottom - fb.top);
       break;
     }
 
     // 找末个**可见**range(其末 box 右下 = end)。
     _BoxAnchor? endAnchor;
     for (final r in ranges.reversed) {
-      final p = registry.byId(r.id)?.paragraph;
-      if (p == null) continue;
-      final boxes = p.getBoxesForSelection(
+      final g = registry.byId(r.id)?.geometry;
+      if (g == null) continue;
+      final boxes = g.getBoxesForSelection(
         TextSelection(baseOffset: r.start, extentOffset: r.end),
       );
       if (boxes.isEmpty) continue;
       final lb = boxes.last;
-      final g = p.localToGlobal(Offset(lb.right, lb.bottom));
-      if (!g.dx.isFinite || !g.dy.isFinite) continue; // 离屏保活块 NaN → 跳过
-      endAnchor = _BoxAnchor(global: g, lineHeight: lb.bottom - lb.top);
+      final gp = g.renderBox.localToGlobal(Offset(lb.right, lb.bottom));
+      if (!gp.dx.isFinite || !gp.dy.isFinite) continue; // 离屏保活块 NaN → 跳过
+      endAnchor = _BoxAnchor(global: gp, lineHeight: lb.bottom - lb.top);
       break;
     }
 

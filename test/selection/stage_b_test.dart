@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/node/inline_node.dart';
 import 'package:fluxdo_render/src/render/inline_span_text.dart';
@@ -8,6 +7,8 @@ import 'package:fluxdo_render/src/selection/selection_geometry.dart';
 import 'package:fluxdo_render/src/selection/selection_registry.dart';
 import 'package:fluxdo_render/src/selection/selection_range.dart';
 import 'package:fluxdo_render/src/selection/selection_scope.dart';
+
+import '../test_text_finders.dart';
 
 void main() {
   Widget host(SelectionController c, List<List<InlineNode>> paragraphs) {
@@ -151,7 +152,7 @@ void main() {
     // 两段都该贡献高亮矩形
     expect(data!.globalRects.length, greaterThanOrEqualTo(2));
     // 外接框应跨两段(高度 > 单段)
-    final para = tester.allRenderObjects.whereType<RenderParagraph>().first;
+    final para = textGeometryAt(tester).renderBox;
     expect(data.globalBounds.height, greaterThan(para.size.height));
   });
 }

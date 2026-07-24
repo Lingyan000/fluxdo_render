@@ -223,4 +223,72 @@ void main() {
       expect(imgs[1].indexInPost, 1);
     });
   });
+
+  group('Discourse 契约字段(srcset/dominant-color/base62/informations)', () {
+    ImageRun firstImage(List<BlockNode> nodes) =>
+        collectImageRuns(nodes).first;
+
+    test('srcset 解析为档位列表(首项 1x,描述符 1.5x/2x)', () {
+      final result = parser.parse(
+        '<p><img src="a_690.png" '
+        'srcset="a_690.png, a_1035.png 1.5x, a_1380.png 2x"></p>',
+      );
+      final img = firstImage(result);
+      expect(img.srcset, hasLength(3));
+      expect(img.srcset[0].url, 'a_690.png');
+      expect(img.srcset[0].scale, 1.0);
+      expect(img.srcset[1].scale, 1.5);
+      expect(img.srcset[2].url, 'a_1380.png');
+      expect(img.srcset[2].scale, 2.0);
+    });
+
+    test('无 srcset 时为空列表', () {
+      final result = parser.parse('<p><img src="a.png"></p>');
+      expect(firstImage(result).srcset, isEmpty);
+    });
+
+    test('data-dominant-color / data-base62-sha1 提取', () {
+      final result = parser.parse(
+        '<p><img src="a.png" data-dominant-color="E8F0D5" '
+        'data-base62-sha1="xyz123"></p>',
+      );
+      final img = firstImage(result);
+      expect(img.dominantColor, 'E8F0D5');
+      expect(img.base62Sha1, 'xyz123');
+    });
+
+    test('lightbox .informations 解析原图尺寸与文件大小', () {
+      final result = parser.parse(
+        '<div class="lightbox-wrapper">'
+        '<a class="lightbox" href="https://e.com/original/x.png">'
+        '<img src="https://e.com/optimized/x_690x52.png" width="690" height="52">'
+        '<div class="meta">'
+        '<span class="filename">x.png</span>'
+        '<span class="informations">1686×128 15.7 KB</span>'
+        '</div></a></div>',
+      );
+      final img = firstImage(result);
+      expect(img.lightboxUrl, 'https://e.com/original/x.png');
+      expect(img.naturalWidth, 1686);
+      expect(img.naturalHeight, 128);
+      expect(img.fileSizeText, '15.7 KB');
+      // 显示尺寸与原图尺寸分离
+      expect(img.width, 690);
+      expect(img.height, 52);
+    });
+
+    test('informations 缺失/畸形时静默 null 不炸', () {
+      final result = parser.parse(
+        '<div class="lightbox-wrapper">'
+        '<a class="lightbox" href="https://e.com/o.png">'
+        '<img src="https://e.com/t.png">'
+        '<div class="meta"><span class="informations">not-a-size</span></div>'
+        '</a></div>',
+      );
+      final img = firstImage(result);
+      expect(img.lightboxUrl, 'https://e.com/o.png');
+      expect(img.naturalWidth, isNull);
+      expect(img.fileSizeText, isNull);
+    });
+  });
 }

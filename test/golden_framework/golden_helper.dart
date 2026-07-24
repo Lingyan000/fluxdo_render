@@ -68,7 +68,23 @@ void testGolden(
                 // 能 settle,不超时),golden 才稳定。
                 data: MediaQuery.of(context).copyWith(disableAnimations: true),
                 child: SingleChildScrollView(
-                  child: FluxdoRender(cookedHtml: fixture.html),
+                  child: FluxdoRender(
+                    cookedHtml: fixture.html,
+                    // 确定性 emoji:固定尺寸色块(契约形态 —— builder 按
+                    // size 出图,即生产主流)。不注入时离线环境 Image 必
+                    // 失败 → fallback 胶囊,胶囊宽度依赖字体/文案,且打破
+                    // 「emoji 占位 = size」契约 —— 直绘岛按契约占位,
+                    // RichText 按胶囊真实宽占位,双路径 golden 永远对不上。
+                    // golden 要验证的是同形态下的排版一致性,不是兜底伪影。
+                    emojiImageBuilder: (ctx, emoji, size) => Container(
+                      width: size,
+                      height: size,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF888888),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
