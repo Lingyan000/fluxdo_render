@@ -494,10 +494,12 @@ class InlineFlattener {
           color: const Color(0xFF000000),
           background: Paint()..color = const Color(0xFFFFFF00),
         ),
-      // kbd/samp/tt:fwfh 默认仅等宽字体(无边框/底色)。
-      InlineStyleKind.monospace => const TextStyle(
+      // kbd/samp/tt:浏览器默认渲染的"键帽"底色(fwfh 原只给字体,不带底色;
+      // 改成贴近浏览器 UA 样式的浅灰底,视觉上才认得出是键位)。
+      InlineStyleKind.monospace => TextStyle(
           fontFamily: 'FiraCode',
-          fontFamilyFallback: ['monospace', 'Menlo', 'Courier'],
+          fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
+          backgroundColor: const Color(0xFFE8E8E8),
         ),
       // sup/sub 已在上面处理,这里不会到。
       InlineStyleKind.superscript ||
