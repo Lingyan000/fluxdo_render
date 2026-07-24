@@ -85,7 +85,12 @@ InputRuleOutcome tryApplyInputRules(
   // 光标后紧跟闭定界符:先打好 `****` 再回中间填内容的场景(收尾定
   // 界符不是最后敲的,上面的 $ 锚定规则永远不会命中)—— 把光标后的
   // 闭定界符拼上再匹配,补齐"实时渲染"预期。
-  return _tryInsidePairRules(state, block, sel.extent.offset);
+  final pairTail = _tryInsidePairRules(state, block, sel.extent.offset);
+  if (pairTail != InputRuleOutcome.none) return pairTail;
+  // 同理,BBCode 版:先打好 `[size=150][/size]`(内容留空)再回中间敲
+  // 内容 —— 每敲一个字都要重判,因为敲的字符本身不是触发字符(不是
+  // `]`),前面几条规则的字符白名单派发不到这里。
+  return _tryBbcodeInsidePairRules(state, block, sel.extent.offset);
 }
 
 // ---------------------------------------------------------------------
@@ -301,6 +306,18 @@ final List<(RegExp, MarkKind, String)> _bbcodeOpenRules = [
   ),
 ];
 
+/// 同 [_bbcodeOpenRules],但不 `$` 锚定 —— 给 [_tryBbcodeInsidePairRules]
+/// 在 `before` 串**中间**找开标记用(锚定版只能匹配到串尾)。
+final List<(RegExp, MarkKind, String)> _bbcodeOpenPatterns = [
+  (RegExp(r'\[size=(\d{1,4})\]'), MarkKind.size, '[/size]'),
+  (RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]'), MarkKind.textColor, '[/color]'),
+  (
+    RegExp(r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]'),
+    MarkKind.bgColor,
+    '[/bgcolor]',
+  ),
+];
+
 /// 补打 BBCode **开**标记触发:右边已经有配对的闭标记
 /// (`x[size=150]大[/size]` 这种"先打后半截、再回来补前半截"的写法)。
 /// 同 [_tryOpenDelimRules],开/闭标记不等长需要分开处理。
@@ -435,6 +452,83 @@ InputRuleOutcome _tryBbcodeMarkOpenRules(
       contentLength: contentText.length,
       kind: kind,
       caretAtEnd: false,
+    );
+    return InputRuleOutcome.applied;
+  }
+  return InputRuleOutcome.none;
+}
+
+/// 光标后紧跟 BBCode 闭标记的"填内容"匹配:`[size=150]|[/size]` 这种
+/// 先打好整对空标记、再回中间敲内容的写法。同 [_tryInsidePairRules],
+/// 但要覆盖 attr 版(size/color/bgcolor)和无 attr 版(u/spoiler)。
+///
+/// 每敲一个内容字符都要重判 —— 敲的字符本身不是 `]`,派发不到前面
+/// 那几条收尾规则,只能靠这条兜底(挂在 [tryApplyInputRules] 末尾,
+/// 对所有非特殊字符都会跑一次)。
+InputRuleOutcome _tryBbcodeInsidePairRules(
+  EditorState state,
+  TextBlock block,
+  int caret,
+) {
+  final text = block.content.text;
+  if (caret <= 0 || caret >= text.length) return InputRuleOutcome.none;
+  if (block.content.marksAt(caret).contains(MarkKind.inlineCode)) {
+    return InputRuleOutcome.none;
+  }
+  final before = text.substring(0, caret);
+
+  // attr 版:size/color/bgcolor。[_bbcodeOpenRules] 是 `$` 锚定的(给
+  // "刚打完开标记,光标就在后面"那条规则用),这里要在 `before` 中间
+  // 找,不能锚在串尾 —— 用不锚定的版本,取离光标最近(最后)的一个。
+  for (final (openRe, kind, closeTag) in _bbcodeOpenPatterns) {
+    if (!text.startsWith(closeTag, caret)) continue;
+    final matches = openRe.allMatches(before);
+    if (matches.isEmpty) continue;
+    final openM = matches.last;
+    final contentText = before.substring(openM.end);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openM.start,
+      delimLength: closeTag.length,
+      openLength: openM.end - openM.start,
+      contentLength: contentText.length,
+      kind: kind,
+      attr: openM.group(1),
+    );
+    return InputRuleOutcome.applied;
+  }
+
+  // 无 attr 版:u/spoiler
+  for (final (openTag, kind, closeTag) in _bbcodeMarkTags) {
+    if (!text.startsWith(closeTag, caret)) continue;
+    final openAt = before.lastIndexOf(openTag);
+    if (openAt < 0) continue;
+    final contentText = before.substring(openAt + openTag.length);
+    if (contentText.isEmpty ||
+        contentText.contains('\n') ||
+        contentText.contains('[') ||
+        contentText.startsWith(' ') ||
+        contentText.endsWith(' ')) {
+      continue;
+    }
+
+    state.sealHistory();
+    state.applyInlineInputRule(
+      block.id,
+      matchStart: openAt,
+      delimLength: closeTag.length,
+      openLength: openTag.length,
+      contentLength: contentText.length,
+      kind: kind,
     );
     return InputRuleOutcome.applied;
   }

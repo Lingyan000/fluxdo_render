@@ -273,6 +273,38 @@ void main() {
       expect(b.content.text, '剧透');
       expect(b.content.marks.single.kind, MarkKind.spoilerInline);
     });
+
+    test('真机常见操作:先打空标记对 [size=150][/size],光标移回中间逐字敲内容', () {
+      // 真实 bug 复现(见 IME 日志):用户先把 [size=150][/size] 打完
+      // (中间空着),再把光标挪回两个标记中间,逐字敲 "大字"。此时
+      // 触发字符是内容本身,不是 `]`,前面几条按字符派发的规则都够
+      // 不着,得靠 _tryBbcodeInsidePairRules 兜底。
+      final s = empty();
+      s.insertText('[size=150][/size]');
+      s.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: first(s).id, offset: 10)));
+      expect(type(s, '大'), InputRuleOutcome.applied);
+      final b = first(s);
+      expect(b.content.text, '大');
+      expect(b.content.marks.single,
+          const MarkSpan(start: 0, end: 1, kind: MarkKind.size, attr: '150'));
+    });
+
+    test('先打空标记对再填内容:color/bgcolor/u/spoiler 同理', () {
+      var s = empty();
+      s.insertText('[color=#f00][/color]');
+      s.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: first(s).id, offset: 12)));
+      type(s, '红');
+      expect(first(s).content.marks.single.kind, MarkKind.textColor);
+
+      s = empty();
+      s.insertText('[u][/u]');
+      s.updateSelection(EditorSelection.collapsed(
+          EditorPosition(blockId: first(s).id, offset: 3)));
+      type(s, '线');
+      expect(first(s).content.marks.single.kind, MarkKind.underline);
+    });
   });
 
   group('填内容匹配(先打定界符再回中间填字)', () {
