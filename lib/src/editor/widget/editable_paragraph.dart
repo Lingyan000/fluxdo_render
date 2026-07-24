@@ -191,8 +191,18 @@ class _EditableParagraphState extends State<EditableParagraph> {
     // (行高由图撑,输入文字不改行高,caret 走 editingCaretRectIn 的
     // 行盒校正);无图段落维持强制(M1 光标稳定性:空段=满段=恒定行高,
     // emoji/mention/date 原子都不超行高,不受影响)。
+    //
+    // [size] 大字号同理要放开:钳成裸字体高度后,放大字号的实际渲染高度
+    // 超出行盒但没被布局撑开,首行会顶穿到宿主标题栏(真机复现:
+    // [size=300] 起首字压住"回复话题"标题)。只要段内有 size mark(scale
+    // != 1)就放开,不区分放大/缩小 —— 缩小时同理不该被强制拉到裸字体高。
     final hasImageAtom =
         block.content.atoms.values.any((a) => a is ImageRun);
+    final hasSizedText = block.content.marks.any((m) {
+      if (m.kind != MarkKind.size) return false;
+      final scale = EditableTextContent.parsePct(m.attr);
+      return scale != null && scale != 1.0;
+    });
 
     Widget text = KeyedSubtree(
       key: _textKey,
@@ -204,7 +214,7 @@ class _EditableParagraphState extends State<EditableParagraph> {
         result.span,
         strutStyle: StrutStyle.fromTextStyle(
           style,
-          forceStrutHeight: !hasImageAtom,
+          forceStrutHeight: !hasImageAtom && !hasSizedText,
         ),
       ),
     );
