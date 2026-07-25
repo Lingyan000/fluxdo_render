@@ -12,7 +12,7 @@ library;
 
 import 'dart:ui' as ui show BoxHeightStyle;
 
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:flutter/gestures.dart'
     show
         LongPressGestureRecognizer,
@@ -1578,7 +1578,19 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       if (!mounted || ticket != _pasteTicket) return;
     }
 
-    if (fragment != null && fragment.isNotEmpty) {
+    if (kDebugMode) {
+      final before = widget.state.blocks.length;
+      final kinds = fragment?.map((b) => b.runtimeType).toList();
+      if (fragment != null && fragment.isNotEmpty) {
+        widget.state.pasteBlocks(fragment);
+      } else {
+        widget.state.pastePlainText(text);
+      }
+      debugPrint(
+        '[FluxdoEditor] paste "${text.split('\n').first}" '
+        'fragKinds=$kinds blocks $before→${widget.state.blocks.length}',
+      );
+    } else if (fragment != null && fragment.isNotEmpty) {
       widget.state.pasteBlocks(fragment);
     } else {
       widget.state.pastePlainText(text);

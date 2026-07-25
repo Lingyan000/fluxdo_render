@@ -251,7 +251,20 @@ void _trackShift(KeyEvent event) {
 }
 
 bool _shiftHeld(KeyEvent event, HardwareKeyboard pressed) =>
-    pressed.isShiftPressed && _localShiftDown;
+    pressed.isShiftPressed &&
+    _localShiftDown &&
+    _physicalHeld(pressed, PhysicalKeyboardKey.shiftLeft, PhysicalKeyboardKey.shiftRight);
+
+// 注:曾尝试给 primary(Ctrl/Cmd)也加一条 physicalKeysPressed 析取兜底,
+// 实测直接翻车——Windows 上 Ctrl+V 松开 Ctrl 后 physicalKeysPressed 会
+// 滞留一小段时间没清干净,导致粘贴后紧接着敲的纯 Enter 被误判成
+// Ctrl+Enter,两层因为「这是发送快捷键不能碰」而让路,回车穿透给平台
+// IME 兜底插入,表现为「粘贴后回车多插一行」。physical 状态在这台平台上
+// 和 logical 状态一样不可信,不能当独立信号源。只留 Shift 这条**合取**
+// (收紧误判、不引入新误判),primary 的判据维持原样。
+
+bool _physicalHeld(HardwareKeyboard pressed, PhysicalKeyboardKey a, PhysicalKeyboardKey b) =>
+    pressed.physicalKeysPressed.contains(a) || pressed.physicalKeysPressed.contains(b);
 
 /// 本地看到的主修饰键是否按下(**仅用于诊断/保留,不参与 primary 判定**)。
 ///
@@ -276,13 +289,20 @@ bool _shiftHeld(KeyEvent event, HardwareKeyboard pressed) =>
 /// 所以这里取**析取**(任一为真即认):宁可多认一次 Ctrl(最坏是少插一个
 /// 换行),也不能漏认(漏认会毁掉正在写的内容)。Shift 那条相反,取合取。
 void _trackModifierDown(KeyEvent event, {required bool isMac}) {
-  if (event is! KeyDownEvent) return;
   final k = event.logicalKey;
   final isPrimaryModifier = isMac
       ? (k == LogicalKeyboardKey.metaLeft || k == LogicalKeyboardKey.metaRight)
       : (k == LogicalKeyboardKey.controlLeft ||
           k == LogicalKeyboardKey.controlRight);
-  if (isPrimaryModifier) _lastModifierDownAt = DateTime.now();
+  if (!isPrimaryModifier) return;
+  if (event is KeyDownEvent) _lastModifierDownAt = DateTime.now();
+  // 真实收到过 Ctrl/Cmd 的抬起(比如 Ctrl+V 粘贴完正常松开 Ctrl)→ 窗口
+  // 立即作废,不能让"2 秒前按过 Ctrl"继续污染之后敲的纯 Enter。实测:
+  // 粘贴链接(Ctrl+V)后紧接着按纯 Enter,被窗口误判成 Ctrl+Enter,内核
+  // splitBlock + 宿主软换行都因「不能碰发送快捷键」让路,回车穿透给平台
+  // IME 兜底插入,表现为「粘贴后回车多插一行」——这条 KeyUp 是真实的
+  // (不同于 Win+V 那种合成抬起),收到就该立刻清空窗口。
+  if (event is KeyUpEvent) _lastModifierDownAt = null;
 }
 
 /// 本次按键是否**产出了可打印字符**。
@@ -305,8 +325,12 @@ bool _producedPrintable(KeyEvent event) {
 /// 漏用它的实测后果:宿主 `_handleEnterAsSoftBreak` 的判据是
 /// `soft == shift`,Shift 卡住时「回车=软换行」被反转成分段 —— 用户设置
 /// 了「回车不空行」,回车却插出空行。
-bool shiftModifierHeld() =>
-    HardwareKeyboard.instance.isShiftPressed && _localShiftDown;
+bool shiftModifierHeld() {
+  final pressed = HardwareKeyboard.instance;
+  return pressed.isShiftPressed &&
+      _localShiftDown &&
+      _physicalHeld(pressed, PhysicalKeyboardKey.shiftLeft, PhysicalKeyboardKey.shiftRight);
+}
 
 /// 主修饰键(Windows/Linux 的 Ctrl、macOS 的 Cmd)是否按下 —— **权威判定**。
 ///
