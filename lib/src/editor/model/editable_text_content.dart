@@ -711,8 +711,27 @@ class EditableTextContent {
   }
 
   /// 替换 `[start, end)` 为 [replacement](IME composing 更新的主路径)。
-  EditableTextContent replace(int start, int end, String replacement) =>
-      delete(start, end).insert(start, replacement);
+  /// 替换 `[start, end)` 为 [replacement]。
+  ///
+  /// **覆盖整个被替换区间的 mark 延续到替换文本**(主流编辑器语义:
+  /// 全选一段粗体后打字仍是粗体)。没有这条,「插入剧透 → 占位文字被
+  /// 整选 → 直接打字」会因 delete+insert 在区间边界不延续样式而把
+  /// spoiler mark 丢掉,打出来的是普通文字。用原始 span(含 attr)
+  /// 重建而非只记 kind,链接 href/颜色值不丢。
+  EditableTextContent replace(int start, int end, String replacement) {
+    final carried = (start < end && replacement.isNotEmpty)
+        ? [
+            for (final m in marks)
+              if (m.start <= start && m.end >= end) m,
+          ]
+        : const <MarkSpan>[];
+    var out = delete(start, end).insert(start, replacement);
+    for (final m in carried) {
+      out = out.applyMark(start, start + replacement.length, m.kind,
+          attr: m.attr);
+    }
+    return out;
+  }
 
   /// 在 [offset] 处切成两半(回车分段)。
   (EditableTextContent before, EditableTextContent after) split(int offset) {
