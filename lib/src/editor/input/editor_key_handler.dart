@@ -349,6 +349,21 @@ void debugResetModifierState() {
   _lastModifierDownAt = null;
 }
 
+/// 喂修饰键自跟踪状态(宿主层非编辑器焦点场景用)。
+///
+/// [primaryModifierHeld] 的补偿窗口原本只由 [handleEditorKeyEvent] 喂
+/// (编辑器有焦点时才走到),焦点在标题输入框等纯 TextField 上时窗口
+/// 收不到 Ctrl 按下,长时间使用后 HardwareKeyboard 逻辑状态失同步就
+/// 没有任何兜底。宿主的提交快捷键拦截层对**每个**按键事件调一次本函数
+/// (幂等,与编辑器内的跟踪重复调用无害),让窗口在全页面范围内有效。
+void observeModifierKeyEvent(KeyEvent event) {
+  _trackShift(event);
+  _trackModifierDown(
+    event,
+    isMac: defaultTargetPlatform == TargetPlatform.macOS,
+  );
+}
+
 bool primaryModifierHeld(KeyEvent event) {
   final isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final pressed = HardwareKeyboard.instance;
