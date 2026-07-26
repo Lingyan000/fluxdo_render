@@ -1510,6 +1510,34 @@ Color _brandColorFor(LazyVideoProvider p) => switch (p) {
 
 /// 子包内置懒加载视频缩略图卡片(主项目不注入 lazyVideoBuilder 时的
 /// fallback)。
+/// 表格列分隔线:按列宽累计位置画竖线,画满行高。
+/// 替代「IntrinsicHeight 等高拉伸 + 格子左边框」的双测量方案。
+class _TableColumnSeparatorPainter extends CustomPainter {
+  const _TableColumnSeparatorPainter({
+    required this.columnWidths,
+    required this.color,
+  });
+
+  final List<double> columnWidths;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    var x = 0.0;
+    for (var col = 0; col < columnWidths.length - 1; col++) {
+      x += columnWidths[col];
+      canvas.drawLine(Offset(x + 0.5, 0), Offset(x + 0.5, size.height), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_TableColumnSeparatorPainter old) =>
+      old.color != color || !identical(old.columnWidths, columnWidths);
+}
+
 class _LazyVideoThumbnailCard extends StatelessWidget {
   const _LazyVideoThumbnailCard({required this.node, required this.onTap});
   final LazyVideoNode node;
@@ -3167,9 +3195,17 @@ class _TableWidget extends StatelessWidget {
                 bottom: BorderSide(color: borderColor, width: 1),
               ),
       ),
-      child: IntrinsicHeight(
+      // 列分隔线由行级 painter 统一画(行高即最高格,竖线画满行高)。
+      // 此前用 IntrinsicHeight + stretch 让各格等高、靠格子自己的左边框
+      // 拼出分隔线 —— IntrinsicHeight 每行多一遍干跑布局(双测量),
+      // 滚到表格 chunk 的物化帧明显偏重;改行级绘制后单遍布局,视觉不变。
+      child: CustomPaint(
+        foregroundPainter: _TableColumnSeparatorPainter(
+          columnWidths: columnWidths,
+          color: borderColor,
+        ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (var col = 0; col < node.columnCount; col++)
               _buildCell(
@@ -3178,7 +3214,6 @@ class _TableWidget extends StatelessWidget {
                 col < row.length ? row[col] : null,
                 columnWidths[col],
                 borderColor,
-                isLeftBorder: col > 0,
                 isHeaderRow: isHeader,
               ),
           ],
@@ -3193,18 +3228,10 @@ class _TableWidget extends StatelessWidget {
     TableCellData? cell,
     double width,
     Color borderColor, {
-    required bool isLeftBorder,
     required bool isHeaderRow,
   }) {
     return Container(
       width: width,
-      decoration: isLeftBorder
-          ? BoxDecoration(
-              border: Border(
-                left: BorderSide(color: borderColor, width: 1),
-              ),
-            )
-          : null,
       padding: _kTableCellPadding,
       child: cell == null
           ? const SizedBox.shrink()

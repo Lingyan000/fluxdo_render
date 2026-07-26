@@ -212,7 +212,83 @@ class HtmlChunker {
   }
 
   /// chunk 开头是否是松散 inline 流(跳过纯空白文本)。
+  ///
+  /// 快路径:纯字符串判定,零 DOM 解析 —— 此前这里对每个 chunk 的 html
+  /// **重新 parseFragment 一遍**只为看首节点类型,长帖分块的 DOM 解析
+  /// 成本近乎翻倍,全压在长帖首建帧。歧义情形(注释节点等)才回退。
   static bool _startsInlineFlow(String html) {
+    var i = 0;
+    while (i < html.length && _isWhitespace(html.codeUnitAt(i))) {
+      i++;
+    }
+    if (i >= html.length) return false;
+    if (html.codeUnitAt(i) != 0x3C /* < */) return true; // 首节点是文本
+    // 注释/CDATA/doctype:交给 DOM 兜底
+    if (html.startsWith('<!', i)) return _startsInlineFlowSlow(html);
+    final tagEnd = html.indexOf('>', i);
+    if (tagEnd < 0) return _startsInlineFlowSlow(html);
+    final openTag = html.substring(i, tagEnd + 1);
+    final tag = _tagNameOf(openTag);
+    if (tag == null) return _startsInlineFlowSlow(html);
+    if (tag == 'br') return true;
+    if (tag == 'div') {
+      // div 只有 lightbox/lb-spacer 两种算 inline 流,class 就在开标签里
+      return openTag.contains('lightbox-wrapper') ||
+          openTag.contains('lb-spacer');
+    }
+    return _inlineFlowTags.contains(tag);
+  }
+
+  /// chunk 结尾是否是松散 inline 流(跳过纯空白文本)。
+  ///
+  /// 快路径同 [_startsInlineFlow];结尾侧 `</div>` 等需要回看配对开标签
+  /// 的情形直接回退 DOM 判定。
+  static bool _endsInlineFlow(String html) {
+    var i = html.length - 1;
+    while (i >= 0 && _isWhitespace(html.codeUnitAt(i))) {
+      i--;
+    }
+    if (i < 0) return false;
+    if (html.codeUnitAt(i) != 0x3E /* > */) return true; // 尾节点是文本
+    final tagStart = html.lastIndexOf('<', i);
+    if (tagStart < 0) return _endsInlineFlowSlow(html);
+    final lastTag = html.substring(tagStart, i + 1);
+    if (lastTag.startsWith('</')) {
+      final tag = _tagNameOf(lastTag);
+      if (tag == null) return _endsInlineFlowSlow(html);
+      // </div> 是否 inline 流取决于配对开标签的 class,回退 DOM
+      if (tag == 'div') return _endsInlineFlowSlow(html);
+      return _inlineFlowTags.contains(tag);
+    }
+    // 以开/自闭合标签收尾:void 元素(br/img/wbr)是 inline 流;
+    // 其余(未闭合标签/注释)歧义,回退 DOM
+    final tag = _tagNameOf(lastTag);
+    if (tag == 'br' || tag == 'img' || tag == 'wbr') return true;
+    return _endsInlineFlowSlow(html);
+  }
+
+  static bool _isWhitespace(int codeUnit) =>
+      codeUnit == 0x20 || codeUnit == 0x09 || codeUnit == 0x0A ||
+      codeUnit == 0x0D;
+
+  /// `<tag ...>` / `</tag>` 里的小写标签名;不是合法标签形态返回 null。
+  static String? _tagNameOf(String tagText) {
+    var i = 1;
+    if (i < tagText.length && tagText.codeUnitAt(i) == 0x2F /* / */) i++;
+    final start = i;
+    while (i < tagText.length) {
+      final c = tagText.codeUnitAt(i);
+      final isAlnum = (c >= 0x61 && c <= 0x7A) ||
+          (c >= 0x41 && c <= 0x5A) ||
+          (c >= 0x30 && c <= 0x39);
+      if (!isAlnum) break;
+      i++;
+    }
+    if (i == start) return null;
+    return tagText.substring(start, i).toLowerCase();
+  }
+
+  static bool _startsInlineFlowSlow(String html) {
     final nodes = html_parser.parseFragment(html).nodes;
     for (final n in nodes) {
       if (n is dom.Text) {
@@ -224,8 +300,7 @@ class HtmlChunker {
     return false;
   }
 
-  /// chunk 结尾是否是松散 inline 流(跳过纯空白文本)。
-  static bool _endsInlineFlow(String html) {
+  static bool _endsInlineFlowSlow(String html) {
     final nodes = html_parser.parseFragment(html).nodes;
     for (final n in nodes.reversed) {
       if (n is dom.Text) {
