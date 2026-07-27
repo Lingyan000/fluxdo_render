@@ -16,7 +16,6 @@ import 'package:html/parser.dart' as html_parser;
 import 'dart:ui' show TextAlign, Color;
 
 import '../node/node.dart';
-import 'arrow_ligature.dart';
 
 class ParagraphParser {
   ParagraphParser();
@@ -2575,11 +2574,12 @@ class ParagraphParser {
     }
   }
 
-  /// 散文文本 → TextRun,顺手做 ASCII 箭头连字(`->` → `→`)。
+  /// 散文文本 → TextRun。
   ///
-  /// **只用于散文**:行内代码走 InlineCodeRun、代码块走 CodeBlockNode,
-  /// 都不经过这里,所以代码里的 `->` 不会被改坏。
-  static TextRun _proseText(String text) => TextRun(applyArrowLigatures(text));
+  /// 不做任何文本改写:视觉表现以 cooked 为准(站点开 typographer 时
+  /// `a -> b` 在 cook 阶段就已转成 `a → b`),客户端再替换属于冗余,
+  /// 且会在编辑往返时把用户 raw 里的 `->` 永久改写。
+  static TextRun _proseText(String text) => TextRun(text);
 
   /// 已支持的 inline 标签集合。
   static const _inlineTags = {
