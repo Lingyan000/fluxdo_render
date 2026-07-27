@@ -84,8 +84,18 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
             default:
               walk(children);
           }
-        case LinkRun(:final children):
-          walk(children);
+        case LinkRun(:final children, :final hashtagRef):
+          // hashtag 渲染成 1 个 WidgetSpan 药丸 → 原子投影(投影文本用
+          // `#ref`,与 cooked 里的锚文本一致,引用/复制能匹配上)。
+          if (hashtagRef != null) {
+            final label = concatLogical(children).trim();
+            addPlaceholder(
+              label.startsWith('#') ? label : '#$label',
+              ProjectionKind.hashtag,
+            );
+          } else {
+            walk(children);
+          }
         case ColoredRun(:final children):
           // 纯 TextSpan 着色,偏移连续 → 递归(同 Em/Strong)。
           walk(children);
