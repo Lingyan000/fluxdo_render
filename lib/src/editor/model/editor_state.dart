@@ -1231,25 +1231,61 @@ class EditorState extends ChangeNotifier {
   // input rules(markdown 快捷语法,input_rules.dart 调用)
   // -----------------------------------------------------------------
 
-  /// 块级规则应用:删块首 [markerLength] 个标记字符 + [transform] 换
-  /// 块属性,光标落到内容起点(=0)。独立 undo 步(undo 回到字面文本)。
+  /// 块级规则应用:删标记字符 + [transform] 换块属性,光标落到内容起点。
+  /// 独立 undo 步(undo 回到字面文本)。
+  ///
+  /// [lineStart]:标记所在**软行**的行首偏移(input_rules 计算)。0 =
+  /// 块首,整块转换(原语义);> 0 = 软换行段内的第二行起 —— 块在该处
+  /// 分裂:行首前的内容(去掉分隔的 '\n')留在原块,当前软行起的内容
+  /// 成为新块并应用 [transform],光标落新块起点。
   void applyBlockInputRule(
     String blockId, {
     required int markerLength,
+    int lineStart = 0,
     required TextBlock Function(TextBlock) transform,
   }) {
     final i = indexOfBlock(blockId);
     if (i < 0) return;
     final block = _blocks[i];
     if (block is! TextBlock) return;
-    final len = markerLength.clamp(0, block.content.length);
+    if (lineStart <= 0) {
+      final len = markerLength.clamp(0, block.content.length);
+      final newBlocks = [..._blocks];
+      newBlocks[i] = transform(
+        block.copyWith(content: block.content.delete(0, len)),
+      );
+      _commit(
+        newBlocks,
+        EditorSelection.collapsed(EditorPosition(blockId: blockId, offset: 0)),
+        groupWithPrevious: false,
+      );
+      sealHistory();
+      return;
+    }
+    // 软行触发:块分裂。lineStart-1 处必是 '\n'(input_rules 的行首定义)。
+    if (lineStart > block.content.length) return;
+    final markerEnd =
+        (lineStart + markerLength).clamp(lineStart, block.content.length);
+    final (head, tail) = block.content.split(lineStart);
+    final newId = _nextId();
     final newBlocks = [..._blocks];
-    newBlocks[i] = transform(
-      block.copyWith(content: block.content.delete(0, len)),
+    // 去掉 head 尾部的软换行分隔符(它只是两行的分隔,分裂后不该留)。
+    newBlocks[i] = block.copyWith(
+      content: head.delete(head.length - 1, head.length),
+    );
+    newBlocks.insert(
+      i + 1,
+      transform(
+        TextBlock(
+          id: newId,
+          content: tail.delete(0, markerEnd - lineStart),
+          containers: block.containers,
+        ),
+      ),
     );
     _commit(
       newBlocks,
-      EditorSelection.collapsed(EditorPosition(blockId: blockId, offset: 0)),
+      EditorSelection.collapsed(EditorPosition(blockId: newId, offset: 0)),
       groupWithPrevious: false,
     );
     sealHistory();

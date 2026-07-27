@@ -82,6 +82,44 @@ void main() {
     });
   });
 
+  group('隐藏内容阈值(编辑态夹下限)', () {
+    List<InlineNode> editInlines(String html) {
+      var n = 0;
+      final doc = blockNodesToDoc([para(html)], () => 'e_${n++}');
+      return (doc.single as TextBlock).content.toInlines(forEditing: true);
+    }
+
+    test('[size=15] 恰在阈值上,是合法 15% 字号,不当隐藏内容', () {
+      final run = editInlines(
+              '<p><span style="font-size:15%">小字</span></p>')
+          .whereType<SizedRun>()
+          .single;
+      expect(run.scale, 0.15, reason: '判定是严格小于阈值,0.15 原样渲染');
+    });
+
+    test('[size=0] 低于阈值,编辑态夹到可读小尺寸', () {
+      final run = editInlines(
+              '<p><span style="font-size:0%">隐</span></p>')
+          .whereType<SizedRun>()
+          .single;
+      expect(run.scale, EditableTextContent.hiddenSizeEditingScale);
+    });
+
+    test('阅读态不夹(forEditing=false 原样)', () {
+      var n = 0;
+      final doc = blockNodesToDoc(
+        [para('<p><span style="font-size:0%">隐</span></p>')],
+        () => 'e_${n++}',
+      );
+      final run = (doc.single as TextBlock)
+          .content
+          .toInlines()
+          .whereType<SizedRun>()
+          .single;
+      expect(run.scale, 0.0);
+    });
+  });
+
   group('序列化写回 BBCode', () {
     test('size=0 往返', () {
       final p = para('<p><span style="font-size:0%">收到请回复123</span></p>');

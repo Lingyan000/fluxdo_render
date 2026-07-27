@@ -387,8 +387,9 @@ class EditableTextContent {
   /// [forEditing]:编辑段落渲染模式。spoilerInline/link **不包装**为
   /// SpoilerRun/LinkRun(前者是 WidgetSpan 粒子遮罩会破坏文本编辑,
   /// 后者的 TapGestureRecognizer 会抢编辑器手势),改用纯 TextSpan 视觉
-  /// 替代:spoiler=淡灰底纹(内容可见可编辑,对齐官方 rich editor 光标
-  /// 内显形语义的简化),link=[editingLinkColor] 字色 + 下划线。
+  /// 替代:spoiler=淡灰底纹(内容可见可编辑,对齐官方 rich editor 的
+  /// spoiler-blurred decoration 思路的简化),link=[editingLinkColor]
+  /// 字色 + 下划线。
   List<InlineNode> toInlines({
     bool forEditing = false,
     Color? editingLinkColor,
@@ -607,7 +608,7 @@ class EditableTextContent {
     return node;
   }
 
-  /// 字号极小(≤ [_hiddenSizeThreshold])时编辑态视为"隐藏标记":夹到
+  /// 字号极小(< [hiddenSizeThreshold])时编辑态视为"隐藏标记":夹到
   /// 一个仍可读的小尺寸(而不是变全透明/宽度塌陷),配合
   /// [EditableParagraph] 的 badge 描边框,让用户看得出"这段有隐藏内容"
   /// 且能点进去编辑,不是无提示地变成一段视觉正常的文字。
@@ -621,7 +622,9 @@ class EditableTextContent {
   /// **编辑态夹下限**:`[size=0]`(或极小值)真按原值画在编辑器里就是
   /// 隐形/挤成一条缝的,根本没法编辑。夹到 [hiddenSizeEditingScale] 而
   /// 非直接钳成 1 倍 —— 视觉上明显偏小,加上 badge 描边框,一眼能看出
-  /// 这是"隐藏内容"而不是普通文字。非隐藏范围(> 阈值)的缩放不夹,
+  /// 这是"隐藏内容"而不是普通文字。非隐藏范围(≥ 阈值)的缩放不夹 ——
+  /// **判定是严格小于**:`[size=15]` 恰为 0.15 倍,是用户合法设置的
+  /// 15% 字号,不是隐藏内容,不能误伤。
   /// 用户设的正常倍数(哪怕 <1)照原样画。
   /// 阅读端([forEditing] = false)不夹,原样对齐网页端。
   /// 注意夹的只是**渲染**;raw 由 mark 的 attr(原文)决定,发出去仍是原值。
@@ -633,7 +636,7 @@ class EditableTextContent {
     final scale = parsePct(pct);
     if (scale == null) return node;
     final effective =
-        forEditing && scale <= hiddenSizeThreshold ? hiddenSizeEditingScale : scale;
+        forEditing && scale < hiddenSizeThreshold ? hiddenSizeEditingScale : scale;
     return SizedRun(scale: effective, pctRaw: pct, children: [node]);
   }
 

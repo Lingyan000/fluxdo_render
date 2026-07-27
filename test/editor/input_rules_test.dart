@@ -126,6 +126,67 @@ void main() {
       expect(first(s).isHeading, isFalse);
       expect(first(s).content.text, '# ', reason: 'undo 回到字面标记');
     });
+
+    group('软换行段内的软行行首触发(块分裂)', () {
+      test('软换行后第二行打 "- " → 前文留原块,新块是列表项', () {
+        final s = empty();
+        s.insertText('第一行');
+        s.insertText('\n');
+        expect(type(s, '- '), InputRuleOutcome.applied);
+        expect(s.blocks, hasLength(2), reason: '软换行处分裂成两块');
+        final head = s.blocks[0] as TextBlock;
+        final tail = s.blocks[1] as TextBlock;
+        expect(head.content.text, '第一行', reason: '分隔的 \\n 不留');
+        expect(head.isParagraph, isTrue);
+        expect(tail.isListItem, isTrue);
+        expect(tail.content.text, '', reason: '标记已删');
+        expect(s.selection!.extent.blockId, tail.id);
+        expect(s.selection!.extent.offset, 0);
+      });
+
+      test('软行行首打 "# " → 标题;"> " → 引用', () {
+        var s = empty();
+        s.insertText('a\n');
+        expect(type(s, '## '), InputRuleOutcome.applied);
+        expect((s.blocks[1] as TextBlock).headingLevel, 2);
+
+        s = empty();
+        s.insertText('a\n');
+        expect(type(s, '> '), InputRuleOutcome.applied);
+        expect((s.blocks[1] as TextBlock).containers.single,
+            isA<QuoteFrame>());
+      });
+
+      test('软行行中打标记不触发', () {
+        final s = empty();
+        s.insertText('a\nb');
+        expect(type(s, '- '), InputRuleOutcome.none,
+            reason: '光标前的软行内已有内容');
+      });
+
+      test('hr/callout 是整块换岛语义,只认真正的块首,软行不触发', () {
+        var s = empty();
+        s.insertText('a\n');
+        expect(type(s, '--- '), InputRuleOutcome.none,
+            reason: 'hrRequest 会清整块,软行触发会吞掉前文');
+        expect(first(s).content.text, 'a\n--- ');
+
+        s = empty();
+        s.insertText('a\n');
+        expect(type(s, '[!note] '), InputRuleOutcome.none);
+      });
+
+      test('软行触发的 undo 一步回到分裂前的字面文本', () {
+        final s = empty();
+        s.insertText('第一行');
+        s.insertText('\n');
+        type(s, '- ');
+        expect(s.blocks, hasLength(2));
+        s.undo();
+        expect(s.blocks, hasLength(1));
+        expect(first(s).content.text, '第一行\n- ');
+      });
+    });
   });
 
   group('行内规则', () {
