@@ -373,6 +373,8 @@ class EditorState extends ChangeNotifier {
   // 事务提交
   // -----------------------------------------------------------------
 
+  /// 唯一的文档快照替换出口(imeReplace 也走这里,无旁路):
+  /// [composing] 透传给状态(IME 预编辑标记;非 IME 事务默认清空)。
   void _commit(
     List<EditorBlock> newBlocks,
     EditorSelection? newSelection, {
@@ -561,7 +563,6 @@ class EditorState extends ChangeNotifier {
       return;
     }
 
-    _recordHistory(groupWithPrevious: true);
     var content = block.content.replace(safeStart, safeEnd, replacement);
     // pending marks:替换起点命中锚点(打字第一个字符)时施加。
     // composing 进行中保留 pending(候选切换会反复 replace 同区间)。
@@ -581,13 +582,14 @@ class EditorState extends ChangeNotifier {
     }
     final newBlocks = [..._blocks];
     newBlocks[i] = block.copyWith(content: content);
-    _blocks = List.unmodifiable(newBlocks);
-    _docRevision++;
-    _selection = _clampSelection(EditorSelection.collapsed(
-      EditorPosition(blockId: blockId, offset: caretOffset),
-    ));
-    _composing = composing;
-    notifyListeners();
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(
+        EditorPosition(blockId: blockId, offset: caretOffset),
+      ),
+      groupWithPrevious: true,
+      composing: composing,
+    );
   }
 
   /// 删除当前选区(跨块支持;孤岛按端点四象限归一)。
