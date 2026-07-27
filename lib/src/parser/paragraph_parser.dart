@@ -417,7 +417,8 @@ class ParagraphParser {
                       node, calloutAttr, nextId, nextImageIndex));
                 } else {
                   final callout =
-                      _tryParseCallout(node, nextId, nextImageIndex);
+                      _tryParseCalloutFromClass(node, nextId, nextImageIndex) ??
+                          _tryParseCallout(node, nextId, nextImageIndex);
                   if (callout != null) {
                     out.add(callout);
                   } else {
@@ -472,7 +473,7 @@ class ParagraphParser {
                   if (text.trim().isNotEmpty) {
                     out.add(ParagraphNode(
                       id: nextId(),
-                      inlines: List.unmodifiable([TextRun(text)]),
+                      inlines: List.unmodifiable([_proseText(text)]),
                     ));
                   }
                 }
@@ -577,7 +578,7 @@ class ParagraphParser {
                 if (text.trim().isNotEmpty) {
                   out.add(ParagraphNode(
                     id: nextId(),
-                    inlines: List.unmodifiable([TextRun(text)]),
+                    inlines: List.unmodifiable([_proseText(text)]),
                   ));
                 }
             }
@@ -585,7 +586,7 @@ class ParagraphParser {
         case dom.Text():
           final text = _collapseWs(node.text);
           if (text.trim().isNotEmpty) {
-            pendingInlines.add(TextRun(text));
+            pendingInlines.add(_proseText(text));
           }
         // 其他节点类型(注释 / 文档类型等)忽略
       }
@@ -1081,6 +1082,71 @@ class ParagraphParser {
   /// - children:
   ///   - 首段 `<br>` 后的剩余 inline → 一个新 ParagraphNode(若非空)
   ///   - 首段之后的所有兄弟节点 → 递归 _parseBlocks
+  /// discourse-obsidian-callouts 服务端渲染的真实 cooked 结构(优先于文本
+  /// 标记识别):`<blockquote class="callout [is-collapsible] [is-collapsed]"
+  /// data-callout-type="TYPE">` + `<div class="callout-title">` (含
+  /// `.callout-icon` svg + `.callout-title-inner` 标题) + `<div
+  /// class="callout-content">` 正文。插件在服务端把 `[!type]` 文本标记整体
+  /// 替换成了这个结构,不再保留原始 `[!type]` 文本 —— 旧的 [_tryParseCallout]
+  /// 只认得客户端 cook() 未跑该转换前的裸文本形态,对这种真实结构永远 return
+  /// null,导致真实帖子里的 callout 全部退化成普通 BlockquoteNode。
+  CalloutNode? _tryParseCalloutFromClass(
+    dom.Element blockquoteEl,
+    String Function() nextId,
+    int Function() nextImageIndex,
+  ) {
+    if (!blockquoteEl.classes.contains('callout')) return null;
+    final typeRaw =
+        (blockquoteEl.attributes['data-callout-type'] ?? '').trim().toLowerCase();
+    if (typeRaw.isEmpty) return null;
+
+    final bool? foldable = blockquoteEl.classes.contains('is-collapsible')
+        ? !blockquoteEl.classes.contains('is-collapsed')
+        : null;
+
+    dom.Element? titleEl;
+    dom.Element? contentEl;
+    for (final c in blockquoteEl.children) {
+      if (c.classes.contains('callout-title')) {
+        titleEl = c;
+      } else if (c.classes.contains('callout-content')) {
+        contentEl = c;
+      }
+    }
+
+    List<InlineNode>? titleInlines;
+    String? title;
+    final titleInnerEl = titleEl?.querySelector('.callout-title-inner');
+    if (titleInnerEl != null) {
+      final inls = <InlineNode>[];
+      for (final n in titleInnerEl.nodes) {
+        _collectInlineFromAnyNode(n, inls, nextImageIndex);
+      }
+      _normalizeWhitespace(inls);
+      if (inls.isNotEmpty) {
+        titleInlines = List.unmodifiable(inls);
+        title = titleInnerEl.text.trim();
+        if (title.isEmpty) title = null;
+      }
+    }
+
+    final children = contentEl == null
+        ? const <BlockNode>[]
+        : _parseBlocks(contentEl.nodes, nextId, nextImageIndex,
+            keepBlankEdges: true);
+
+    return CalloutNode(
+      id: nextId(),
+      kind: CalloutKind.fromType(typeRaw),
+      typeRaw: typeRaw,
+      title: title,
+      titleInlines: titleInlines,
+      foldable: foldable,
+      children: children,
+      chunkPos: _blockquoteChunkPos(blockquoteEl),
+    );
+  }
+
   CalloutNode? _tryParseCallout(
     dom.Element blockquoteEl,
     String Function() nextId,
@@ -1638,7 +1704,7 @@ class ParagraphParser {
       inlines: List.unmodifiable([
         StyledRun(
           kind: InlineStyleKind.small,
-          children: List.unmodifiable([TextRun(caption)]),
+          children: List.unmodifiable([_proseText(caption)]),
         ),
       ]),
       textAlign: TextAlign.center,
@@ -2149,7 +2215,9 @@ class ParagraphParser {
       _collectInlineFromAnyNode(child, children, nextImageIndex);
     }
     switch (tag) {
-      case 'em' || 'i':
+      case 'em' || 'i' || 'cite' || 'dfn' || 'var':
+        // cite/dfn/var 浏览器默认都是斜体,简化并入 em(同 ins→underline/
+        // del→lineThrough 的既有简化思路)。
         out.add(EmRun(children: List.unmodifiable(children)));
       case 'strong' || 'b':
         out.add(StrongRun(children: List.unmodifiable(children)));
@@ -2455,16 +2523,44 @@ class ParagraphParser {
         // fwfh 默认渲染 style 里的着色;Discourse [color]/[bgcolor] BBCode 产出)。
         // 解析不出颜色但带 style(如仅 font-size)→ 仍记诊断,让对齐守护暴露
         // 这块未实现的内联 CSS。
+        //
+        // **CSS 原文必须原样保留**(colorRaw/backgroundRaw/pctRaw):服务端
+        // bbcode-color 插件把 `[color=X]` 的 X 逐字放进 style,用户写
+        // `red`/`#F00` 时 cooked 里就是这两个原文。编辑序列化写回时任何
+        // 规范化(小写化 / red→hex)都会让往返门禁 cook 比对失配,整帖
+        // 降级源码模式。Color 解析产物只用于渲染取色。
         final style = el.attributes['style'];
         if (style != null) {
-          final fg = _parseCssColor(_cssProp(style, 'color'));
-          final bg = _parseCssColor(_cssProp(style, 'background-color'));
+          final fgRaw = _cssProp(style, 'color');
+          final bgRaw = _cssProp(style, 'background-color');
+          final fg = _parseCssColor(fgRaw);
+          final bg = _parseCssColor(bgRaw);
+          // 字号:Discourse [size=N] BBCode → `font-size:N%`。与着色可同时
+          // 出现在一个 span 上,所以先套字号再套颜色(顺序不影响语义)。
+          final fontSizeRaw = _cssProp(style, 'font-size');
+          final scale = _parseCssFontScale(fontSizeRaw);
+          var inner = children;
+          if (scale != null) {
+            inner = [
+              SizedRun(
+                scale: scale,
+                pctRaw: _pctRawOf(fontSizeRaw!),
+                children: List.unmodifiable(children),
+              ),
+            ];
+          }
           if (fg != null || bg != null) {
             out.add(ColoredRun(
               color: fg,
               background: bg,
-              children: List.unmodifiable(children),
+              colorRaw: fg == null ? null : fgRaw,
+              backgroundRaw: bg == null ? null : bgRaw,
+              children: List.unmodifiable(inner),
             ));
+            return;
+          }
+          if (scale != null) {
+            out.addAll(inner);
             return;
           }
           _recordUnhandled('span[style]');
@@ -2487,7 +2583,7 @@ class ParagraphParser {
       case dom.Text():
         final text = _collapseWs(node.text);
         if (text.isNotEmpty) {
-          out.add(TextRun(text));
+          out.add(_proseText(text));
         }
       case dom.Element():
         _collectInline(node, out, nextImageIndex);
@@ -2495,11 +2591,19 @@ class ParagraphParser {
     }
   }
 
+  /// 散文文本 → TextRun。
+  ///
+  /// 不做任何文本改写:视觉表现以 cooked 为准(站点开 typographer 时
+  /// `a -> b` 在 cook 阶段就已转成 `a → b`),客户端再替换属于冗余,
+  /// 且会在编辑往返时把用户 raw 里的 `->` 永久改写。
+  static TextRun _proseText(String text) => TextRun(text);
+
   /// 已支持的 inline 标签集合。
   static const _inlineTags = {
     'em', 'i', 'strong', 'b', 'br', 'a', 'code', 'img', 'span',
     'ins', 'del', 's', 'strike', 'sup', 'sub', // diff / 上下标
     'u', 'small', 'big', 'mark', 'kbd', 'samp', 'tt', // 行内样式(对齐 fwfh)
+    'cite', 'dfn', 'var', // 简化并入 em(浏览器默认都是斜体)
   };
 
   bool _isInlineTag(String tag) => _inlineTags.contains(tag);
@@ -2537,9 +2641,37 @@ class ParagraphParser {
     return null;
   }
 
+  /// 解析 `font-size` → 相对父字号的倍数。
+  ///
+  /// 只认**百分比**:Discourse 的 `[size=N]` BBCode 产出就是 `font-size:N%`
+  /// (实测 `[size=0]`→`0%`、`[size=150]`→`150%`)。绝对单位(px/em/rem…)
+  /// 语义不是"相对父级倍数",这里不认,交回 `_recordUnhandled` 暴露。
+  /// `0%` 合法(= 视觉隐藏,与网页端一致);负数/解析失败 → null。
+  static double? _parseCssFontScale(String? raw) {
+    if (raw == null) return null;
+    final s = raw.trim();
+    if (!s.endsWith('%')) return null;
+    final n = double.tryParse(s.substring(0, s.length - 1).trim());
+    if (n == null || n < 0) return null;
+    return n / 100.0;
+  }
+
+  /// `font-size:N%` 里 N 的**原文**(`[size=N]` 的 N,服务端插件原样透传)。
+  /// 只在 [_parseCssFontScale] 已判定合法后调用;写回 raw 时逐字保留,
+  /// 见 ColoredRun.colorRaw 的门禁理由。
+  static String _pctRawOf(String raw) {
+    final s = raw.trim();
+    return s.substring(0, s.length - 1).trim();
+  }
+
   /// 解析 CSS 颜色字符串 → [Color](对齐 fwfh:hex 3/4/6/8 位 + rgb()/rgba()
   /// + 完整命名色 + transparent)。`inherit`/`currentcolor` 等无具体值 → null
   /// (不覆盖父级色)。解析失败 → null。
+  ///
+  /// 公开静态入口:编辑器 mark attr 存 CSS 原文(`red`/`#F00`…),渲染
+  /// 取色时用同一套解析(单一事实源,勿在编辑层重抄色表)。
+  static Color? parseCssColor(String? raw) => _parseCssColor(raw);
+
   static Color? _parseCssColor(String? raw) {
     if (raw == null) return null;
     final s = raw.trim().toLowerCase();

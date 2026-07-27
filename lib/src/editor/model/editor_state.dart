@@ -31,6 +31,7 @@ import 'package:flutter/foundation.dart';
 import '../../node/node.dart';
 import 'editable_text_content.dart';
 import 'editor_block.dart';
+import 'inline_markdown_parser.dart';
 import 'markdown_serializer.dart';
 
 export 'editor_block.dart';
@@ -145,6 +146,12 @@ class EditorState extends ChangeNotifier {
   List<EditorBlock> _blocks;
   List<EditorBlock> get blocks => _blocks;
 
+  /// [InputRuleOutcome.calloutRequest] 命中时临时存放匹配到的 callout
+  /// 类型(如 "note")。触发规则那一刻就把标记文本清空了,视图层收到
+  /// outcome 时已经读不到原始 `[!note]` 字面量,靠这个字段带过去；
+  /// 视图层读取后必须清空,一次性消费。
+  String? pendingCalloutType;
+
   /// 文档修订号:每次 [_blocks] 快照替换 +1(选区/composing 变化不计)。
   /// 视图层用它区分「编辑引发的光标移动」(瞬时贴上)与「纯导航」(滑行)。
   int get docRevision => _docRevision;
@@ -176,6 +183,24 @@ class EditorState extends ChangeNotifier {
 
   int _idCounter = 0;
   String _nextId() => 'e_${_idCounter++}';
+
+  /// 待自动进入编辑态的岛块 id(插入代码块/公式后把光标送进去 ——
+  /// 否则用户打完 ``` 回车,光标停在岛外面,还得再点一下)。
+  /// 由岛组件消费一次即清空。
+  String? _pendingIslandEdit;
+
+  /// 请求 [blockId] 岛插入后自动进入编辑态。
+  void requestIslandEdit(String blockId) {
+    _pendingIslandEdit = blockId;
+    notifyListeners();
+  }
+
+  /// 岛组件取用编辑请求(取到即清,不重复触发)。
+  bool consumeIslandEditRequest(String blockId) {
+    if (_pendingIslandEdit != blockId) return false;
+    _pendingIslandEdit = null;
+    return true;
+  }
 
   // -----------------------------------------------------------------
   // 查询
@@ -782,6 +807,39 @@ class EditorState extends ChangeNotifier {
     ));
   }
 
+  /// 回车是否插**软换行**(段内 `\n` → cook 成 `<br>`)而非新建块。
+  ///
+  /// 宿主偏好,硬件按键链与 IME 两条回车路径共用(见 [insertNewline])。
+  /// 默认 false = 保持"回车即分块"的历史语义,由宿主显式打开。
+  ///
+  /// 背景:块间序列化用 `\n\n`,cook 成两个 `<p>`,行距比 Discourse
+  /// 网页版 composer(回车插单个 `\n`)明显大。
+  bool enterInsertsSoftBreak = false;
+
+  /// 回车的统一入口:按 [enterInsertsSoftBreak] 决定软换行还是分块。
+  ///
+  /// 列表项、标题、容器内的块始终分块 —— 前两者要接着开下一条 / 退出
+  /// 标题,软换行没有意义;容器内(引用/剧透/…)必须走 splitBlock,
+  /// 因为"回车退出容器"的逐级弹出只写在 splitBlock 里 —— 若软换行只
+  /// insertText('\n'),光标会被永远困在容器最后一个非空段里,回车多少
+  /// 次都出不去(容器内软换行本身对 BBCode/blockquote 序列化也没意义)。
+  void insertNewline() {
+    if (!enterInsertsSoftBreak) {
+      splitBlock();
+      return;
+    }
+    final sel = _selection;
+    final block = sel == null ? null : textBlockById(sel.extent.blockId);
+    if (block == null ||
+        block.isListItem ||
+        block.isHeading ||
+        block.containers.isNotEmpty) {
+      splitBlock();
+      return;
+    }
+    insertText('\n');
+  }
+
   /// 光标处回车分块(属性感知,语义表见计划)。
   void splitBlock() {
     final sel = _selection;
@@ -1173,25 +1231,61 @@ class EditorState extends ChangeNotifier {
   // input rules(markdown 快捷语法,input_rules.dart 调用)
   // -----------------------------------------------------------------
 
-  /// 块级规则应用:删块首 [markerLength] 个标记字符 + [transform] 换
-  /// 块属性,光标落到内容起点(=0)。独立 undo 步(undo 回到字面文本)。
+  /// 块级规则应用:删标记字符 + [transform] 换块属性,光标落到内容起点。
+  /// 独立 undo 步(undo 回到字面文本)。
+  ///
+  /// [lineStart]:标记所在**软行**的行首偏移(input_rules 计算)。0 =
+  /// 块首,整块转换(原语义);> 0 = 软换行段内的第二行起 —— 块在该处
+  /// 分裂:行首前的内容(去掉分隔的 '\n')留在原块,当前软行起的内容
+  /// 成为新块并应用 [transform],光标落新块起点。
   void applyBlockInputRule(
     String blockId, {
     required int markerLength,
+    int lineStart = 0,
     required TextBlock Function(TextBlock) transform,
   }) {
     final i = indexOfBlock(blockId);
     if (i < 0) return;
     final block = _blocks[i];
     if (block is! TextBlock) return;
-    final len = markerLength.clamp(0, block.content.length);
+    if (lineStart <= 0) {
+      final len = markerLength.clamp(0, block.content.length);
+      final newBlocks = [..._blocks];
+      newBlocks[i] = transform(
+        block.copyWith(content: block.content.delete(0, len)),
+      );
+      _commit(
+        newBlocks,
+        EditorSelection.collapsed(EditorPosition(blockId: blockId, offset: 0)),
+        groupWithPrevious: false,
+      );
+      sealHistory();
+      return;
+    }
+    // 软行触发:块分裂。lineStart-1 处必是 '\n'(input_rules 的行首定义)。
+    if (lineStart > block.content.length) return;
+    final markerEnd =
+        (lineStart + markerLength).clamp(lineStart, block.content.length);
+    final (head, tail) = block.content.split(lineStart);
+    final newId = _nextId();
     final newBlocks = [..._blocks];
-    newBlocks[i] = transform(
-      block.copyWith(content: block.content.delete(0, len)),
+    // 去掉 head 尾部的软换行分隔符(它只是两行的分隔,分裂后不该留)。
+    newBlocks[i] = block.copyWith(
+      content: head.delete(head.length - 1, head.length),
+    );
+    newBlocks.insert(
+      i + 1,
+      transform(
+        TextBlock(
+          id: newId,
+          content: tail.delete(0, markerEnd - lineStart),
+          containers: block.containers,
+        ),
+      ),
     );
     _commit(
       newBlocks,
-      EditorSelection.collapsed(EditorPosition(blockId: blockId, offset: 0)),
+      EditorSelection.collapsed(EditorPosition(blockId: newId, offset: 0)),
       groupWithPrevious: false,
     );
     sealHistory();
@@ -1199,18 +1293,81 @@ class EditorState extends ChangeNotifier {
 
   /// 行内规则应用:`[matchStart, matchStart+delim+content+delim)` 区间,
   /// 删两侧定界符、对内容施加 [kind],光标落内容尾。独立 undo 步。
+  /// `![alt](src)` input rule:整段字面换成图片原子。
+  void applyImageInputRule(
+    String blockId, {
+    required int start,
+    required int end,
+    required InlineNode image,
+  }) {
+    final i = indexOfBlock(blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    if (end > block.content.length) return;
+    final content = block.content.delete(start, end).insertAtom(start, image);
+    final newBlocks = [..._blocks];
+    newBlocks[i] = block.copyWith(content: content);
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(
+        EditorPosition(blockId: blockId, offset: start + 1),
+      ),
+      groupWithPrevious: false,
+    );
+  }
+
+  /// `[文字](href)` input rule:留下文字,href 进 link mark 的 attr。
+  void applyLinkInputRule(
+    String blockId, {
+    required int start,
+    required int end,
+    required String label,
+    required String href,
+  }) {
+    final i = indexOfBlock(blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    if (end > block.content.length) return;
+    final content = block.content
+        .delete(start, end)
+        .insert(start, label)
+        .applyMark(start, start + label.length, MarkKind.link, attr: href);
+    final newBlocks = [..._blocks];
+    newBlocks[i] = block.copyWith(content: content);
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(
+        EditorPosition(blockId: blockId, offset: start + label.length),
+      ),
+      groupWithPrevious: false,
+    );
+  }
+
   void applyInlineInputRule(
     String blockId, {
     required int matchStart,
     required int delimLength,
     required int contentLength,
     required MarkKind kind,
+    /// 光标落在内容尾(默认,对应"刚打完闭定界符")还是内容首。
+    ///
+    /// 补打**开**定界符时光标本来就在内容首,甩到尾巴上等于替用户跳一次
+    /// 光标 —— 那不是他的意图。
+    bool caretAtEnd = true,
+    /// 开定界符长度(不传则同 [delimLength],对称定界符如 `**`/`~~`)。
+    /// BBCode 属性标记(`[size=150]`/`[/size]`)开闭不等长,需要分开传。
+    int? openLength,
+    /// mark 附加值(color/size 的色值/百分比),同 [MarkSpan.attr]。
+    String? attr,
   }) {
     final i = indexOfBlock(blockId);
     if (i < 0) return;
     final block = _blocks[i];
     if (block is! TextBlock) return;
-    final contentStart = matchStart + delimLength;
+    final openLen = openLength ?? delimLength;
+    final contentStart = matchStart + openLen;
     final contentEnd = contentStart + contentLength;
     final matchEnd = contentEnd + delimLength;
     if (matchEnd > block.content.length) return;
@@ -1223,13 +1380,17 @@ class EditorState extends ChangeNotifier {
       matchStart,
       matchStart + contentLength,
       kind,
+      attr: attr,
     );
     final newBlocks = [..._blocks];
     newBlocks[i] = block.copyWith(content: content);
     _commit(
       newBlocks,
       EditorSelection.collapsed(
-        EditorPosition(blockId: blockId, offset: matchStart + contentLength),
+        EditorPosition(
+          blockId: blockId,
+          offset: caretAtEnd ? matchStart + contentLength : matchStart,
+        ),
       ),
       groupWithPrevious: false,
     );
@@ -1443,12 +1604,42 @@ class EditorState extends ChangeNotifier {
     final paras = sanitized.split('\n\n');
     var n = 0;
     pasteBlocks([
-      for (final p in paras)
-        TextBlock(
-          id: 'p_${n++}',
-          content: EditableTextContent(text: p),
-        ),
+      for (final p in paras) _paragraphFromMarkdown('p_${n++}', p),
     ]);
+  }
+
+  /// 一段纯文本 → 块:行首块级标记(`# `/`- `/`1. `/`> `)转结构,
+  /// 正文走轻量行内解析(`**加粗**` 不该原样躺成字面星号)。
+  static TextBlock _paragraphFromMarkdown(String id, String source) {
+    var body = source;
+    var quoted = false;
+    if (body.startsWith('> ')) {
+      body = body.substring(2);
+      quoted = true;
+    }
+    final heading = RegExp(r'^(#{1,6}) ').firstMatch(body);
+    final bullet = RegExp(r'^[-*] ').firstMatch(body);
+    final ordered = RegExp(r'^(\d{1,9})[.)] ').firstMatch(body);
+    final marker = heading ?? bullet ?? ordered;
+    if (marker != null) body = body.substring(marker.group(0)!.length);
+
+    var block = TextBlock(id: id, content: parseInlineMarkdown(body));
+    if (heading != null) {
+      block = block.asHeading(heading.group(1)!.length);
+    } else if (bullet != null) {
+      block = block.asListItem(ordered: false);
+    } else if (ordered != null) {
+      block = block.asListItem(
+        ordered: true,
+        listStart: int.tryParse(ordered.group(1)!) ?? 1,
+      );
+    }
+    if (quoted) {
+      block = block.copyWith(
+        containers: [QuoteFrame(groupId: nextFrameGroupId())],
+      );
+    }
+    return block;
   }
 
   /// 片段块重发 id(粘贴片段可能来自本文档自身的复制,原 id 会碰撞)。
@@ -1630,7 +1821,6 @@ class EditorState extends ChangeNotifier {
     EditorPosition? next;
 
     if (block is IslandBlock) {
-      // 岛端点上移动:跨到另一侧邻块。
       if (direction < 0) {
         next = _positionBefore(i);
       } else {
@@ -1655,7 +1845,7 @@ class EditorState extends ChangeNotifier {
       } else if (i > 0) {
         final prev = _blocks[i - 1];
         if (prev is IslandBlock && !extend) {
-          // 一步 = 整选岛(两段式)
+          // 岛两段式:第一步整选,再按一步才落到另一侧。
           _selectIsland(prev.id);
           return;
         }

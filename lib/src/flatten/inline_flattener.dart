@@ -306,6 +306,15 @@ class InlineFlattener {
           children:
               _build(children, p, inheritedRecognizer: inheritedRecognizer),
         ),
+      // 字号缩放(`[size=N]` → `font-size:N%`):用 fontSize 的**相对倍数**
+      // 表达,对齐网页端 —— 0 倍即视觉隐藏,不夹上下限。
+      SizedRun(:final scale, :final children) => TextSpan(
+          // 基准取块的实际基础字号(emojiBaseSize 即 baseStyle.fontSize),
+          // 比 DefaultTextStyle 准;嵌套 size 以块基准计算,属可接受边界。
+          style: TextStyle(fontSize: p.emojiBaseSize * scale),
+          children:
+              _build(children, p, inheritedRecognizer: inheritedRecognizer),
+        ),
       LineBreakRun() => TextSpan(
           text: '\n',
           recognizer: inheritedRecognizer,
@@ -485,7 +494,8 @@ class InlineFlattener {
           color: const Color(0xFF000000),
           background: Paint()..color = const Color(0xFFFFFF00),
         ),
-      // kbd/samp/tt:fwfh 默认仅等宽字体(无边框/底色)。
+      // kbd/samp/tt:等宽字体,不带底色(fwfh/legacy 同款只给字体;
+      // 硬编码浅灰底在深色主题下是刺眼白块,阅读端视觉变更须单独拍板)。
       InlineStyleKind.monospace => const TextStyle(
           fontFamily: 'FiraCode',
           fontFamilyFallback: ['monospace', 'Menlo', 'Courier'],

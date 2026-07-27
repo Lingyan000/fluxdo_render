@@ -24,6 +24,7 @@ import 'dart:ui' show Color;
 import 'package:flutter/foundation.dart';
 
 import '../../node/inline_node.dart';
+import '../../parser/paragraph_parser.dart' show ParagraphParser;
 
 /// 原子哨兵字符(U+FFFC OBJECT REPLACEMENT CHARACTER)。
 const String kAtomChar = '\uFFFC';
@@ -41,14 +42,64 @@ enum MarkKind {
   /// decoration 思路的简化版)。
   spoilerInline,
 
-  /// 链接 `[text](href)`(LinkRun)。唯一带 attr(href)的 mark ——
-  /// 见 [MarkSpan.attr]。编辑态蓝色下划线,不可点(编辑器语义)。
+  /// 链接 `[text](href)`(LinkRun)。带 attr(href)—— 见 [MarkSpan.attr]。
+  /// 编辑态蓝色下划线,不可点(编辑器语义)。
   link,
+
+  /// 前景色 `[color=X]…[/color]`(ColoredRun.color)。attr 存 **X 的 CSS
+  /// 原文**(`red` / `#F00` / `#ff0000` …,服务端 bbcode-color 插件原样
+  /// 透传进 style)—— 序列化逐字写回才能过往返门禁,渲染取色时才 parse。
+  ///
+  /// 做成 mark 而不是留给 ColoredRun 岛化,是因为岛是**不可编辑**的:
+  /// 打完一句带色的话整行会变成只读岛、光标直接消失(实测复现)。
+  /// 做成 mark 后文字照常可编辑,颜色只是区间样式。
+  textColor,
+
+  /// 背景色 `[bgcolor=#rrggbb]…[/bgcolor]`(ColoredRun.background)。
+  bgColor,
+
+  /// 字号 `[size=N]…[/size]`(SizedRun.scale)。attr 存百分比字符串
+  /// (`_pct`/`parsePct`,如 `150`)。做成 mark 而非留给 SizedRun 岛化,
+  /// 同 textColor 的理由 —— 岛不可编辑,mark 化后一行内可以混多个不同
+  /// size 区间,逐字正常编辑。
+  size,
+
+  /// 其余 HTML 样式标签(`<small>`/`<big>`/`<mark>`/`<sup>`/`<sub>`/
+  /// `<kbd>`)→ StyledRun(InlineStyleKind.X)。同 underline 一样纯样式、
+  /// 无 attr,mark 化道理相同。
+  smallStyle,
+  bigStyle,
+  markStyle,
+  superscript,
+  subscript,
+  monospaceStyle,
 }
+
+/// [MarkKind] ↔ [InlineStyleKind] 双向映射(纯样式类,无 attr 的那六个)。
+InlineStyleKind? _styleKindFor(MarkKind kind) => switch (kind) {
+      MarkKind.smallStyle => InlineStyleKind.small,
+      MarkKind.bigStyle => InlineStyleKind.big,
+      MarkKind.markStyle => InlineStyleKind.mark,
+      MarkKind.superscript => InlineStyleKind.superscript,
+      MarkKind.subscript => InlineStyleKind.subscript,
+      MarkKind.monospaceStyle => InlineStyleKind.monospace,
+      _ => null,
+    };
+
+MarkKind? _markKindFor(InlineStyleKind kind) => switch (kind) {
+      InlineStyleKind.underline => MarkKind.underline,
+      InlineStyleKind.lineThrough => MarkKind.lineThrough,
+      InlineStyleKind.small => MarkKind.smallStyle,
+      InlineStyleKind.big => MarkKind.bigStyle,
+      InlineStyleKind.mark => MarkKind.markStyle,
+      InlineStyleKind.superscript => MarkKind.superscript,
+      InlineStyleKind.subscript => MarkKind.subscript,
+      InlineStyleKind.monospace => MarkKind.monospaceStyle,
+    };
 
 /// 一段样式区间 `[start, end)`(扁平文本坐标)。
 ///
-/// [attr]:mark 的附加值(目前仅 [MarkKind.link] 的 href)。同 kind
+/// [attr]:mark 的附加值([MarkKind.link] 的 href、颜色系的色值)。同 kind
 /// 不同 attr 的区间**不合并**(两个不同链接相邻仍是两个链接)。
 @immutable
 class MarkSpan {
@@ -134,6 +185,41 @@ class EditableTextContent {
   static String sanitizeText(String input) =>
       input.contains(kAtomChar) ? input.replaceAll(kAtomChar, '') : input;
 
+  /// Color → `#rrggbb`(mark attr 存这个形态,与序列化口径一致)。
+  static String _hex(Color c) =>
+      '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+  /// 倍数 → 百分比字符串(`1.5` → `150`;整数不写小数点,与 raw 口径一致)。
+  ///
+  /// `scale * 100` 是浮点乘法,`0.07 * 100` 会算出 `7.000000000000001`
+  /// 这类脏值(0-400 里有几十个 N 中招),直接 `'$v'` 就把脏值写进 raw。
+  /// 与最近整数差在浮点误差量级(1e-6)内的按整数写。
+  static String _pct(double scale) {
+    final v = scale * 100;
+    final rounded = v.round();
+    if ((v - rounded).abs() < 1e-6) return rounded.toString();
+    return '$v';
+  }
+
+  /// 百分比字符串 → 倍数(`150` → `1.5`);解析不出返回 null。
+  static double? parsePct(String? v) {
+    if (v == null) return null;
+    final n = double.tryParse(v.trim());
+    return (n == null || n < 0) ? null : n / 100.0;
+  }
+
+  /// `#rgb` / `#rrggbb` → Color;解析不出返回 null。
+  static Color? parseHex(String? v) {
+    if (v == null) return null;
+    var h = v.trim();
+    if (!h.startsWith('#')) return null;
+    h = h.substring(1);
+    if (h.length == 3) h = h.split('').map((c) => '$c$c').join();
+    if (h.length != 6) return null;
+    final n = int.tryParse(h, radix: 16);
+    return n == null ? null : Color(0xFF000000 | n);
+  }
+
   /// [offset] 处(其后)的字符是否原子。
   bool isAtomAt(int offset) => atoms.containsKey(offset);
 
@@ -190,11 +276,7 @@ class EditableTextContent {
             sanitizeText(text),
           );
         case StyledRun(:final kind, :final children):
-          final mapped = switch (kind) {
-            InlineStyleKind.underline => MarkKind.underline,
-            InlineStyleKind.lineThrough => MarkKind.lineThrough,
-            _ => null,
-          };
+          final mapped = _markKindFor(kind);
           _flattenInto(
             children,
             buf,
@@ -233,9 +315,32 @@ class EditableTextContent {
           // ProseMirror image 是 inline:true 一等行内节点)
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
+        case SizedRun(:final scale, :final pctRaw, :final children):
+          // 字号 → 带 attr 的 mark(见 MarkKind.size 注释:岛化不可编辑,
+          // mark 化后一行内可以混多个不同 size 区间)。attr 优先存 cooked
+          // 里的原文(pctRaw),程序化构造(pctRaw=null)才按 scale 计算。
+          _flattenInto(children, buf, marks, atoms,
+              [...activeKinds, (MarkKind.size, pctRaw ?? _pct(scale))]);
+        case ColoredRun(
+            :final color,
+            :final background,
+            :final colorRaw,
+            :final backgroundRaw,
+            :final children
+          ):
+          // 颜色 → 带 attr 的 mark(见 MarkKind.textColor 注释:岛化会
+          // 让整行变只读、光标消失)。attr 优先存 CSS 原文(colorRaw/
+          // backgroundRaw,`red`/`#F00` 等逐字保留),程序化构造才写 hex。
+          // 只有原文没有 Color(取色失败)也照样成 mark —— 渲染降级无色,
+          // 但序列化必须把原文写回。
+          _flattenInto(children, buf, marks, atoms, [
+            ...activeKinds,
+            if (background != null || backgroundRaw != null)
+              (MarkKind.bgColor, backgroundRaw ?? _hex(background!)),
+            if (color != null || colorRaw != null)
+              (MarkKind.textColor, colorRaw ?? _hex(color!)),
+          ]);
         // ---- 白名单外(防御降级,正常链路由 doc_converter 拦截岛化) ----
-        case ColoredRun(:final children):
-          _flattenInto(children, buf, marks, atoms, activeKinds);
         case FootnoteRefRun():
         case ClickCountRun():
         case MathInlineRun():
@@ -282,8 +387,9 @@ class EditableTextContent {
   /// [forEditing]:编辑段落渲染模式。spoilerInline/link **不包装**为
   /// SpoilerRun/LinkRun(前者是 WidgetSpan 粒子遮罩会破坏文本编辑,
   /// 后者的 TapGestureRecognizer 会抢编辑器手势),改用纯 TextSpan 视觉
-  /// 替代:spoiler=淡灰底纹(内容可见可编辑,对齐官方 rich editor 光标
-  /// 内显形语义的简化),link=[editingLinkColor] 字色 + 下划线。
+  /// 替代:spoiler=淡灰底纹(内容可见可编辑,对齐官方 rich editor 的
+  /// spoiler-blurred decoration 思路的简化),link=[editingLinkColor]
+  /// 字色 + 下划线。
   List<InlineNode> toInlines({
     bool forEditing = false,
     Color? editingLinkColor,
@@ -322,10 +428,36 @@ class EditableTextContent {
       };
       // link href:覆盖片段的 link mark 的 attr(同帧唯一)
       String? href;
+      // 颜色/字号:同 kind 多个区间覆盖同一片段时(嵌套
+      // `[color=red]a[color=blue]b[/color]c[/color]`),取**最窄**覆盖
+      // 区间的 attr —— CSS 内层胜语义(内层 span 的 style 覆盖外层)。
+      String? fgHex;
+      String? bgHex;
+      String? sizePct;
+      var fgW = -1, bgW = -1, szW = -1;
       for (final m in marks) {
-        if (m.kind == MarkKind.link && m.start <= s && m.end >= e) {
-          href = m.attr;
-          break;
+        if (m.start > s || m.end < e) continue;
+        final w = m.end - m.start;
+        switch (m.kind) {
+          case MarkKind.link:
+            href ??= m.attr;
+          case MarkKind.textColor:
+            if (fgW < 0 || w < fgW) {
+              fgW = w;
+              fgHex = m.attr;
+            }
+          case MarkKind.bgColor:
+            if (bgW < 0 || w < bgW) {
+              bgW = w;
+              bgHex = m.attr;
+            }
+          case MarkKind.size:
+            if (szW < 0 || w < szW) {
+              szW = w;
+              sizePct = m.attr;
+            }
+          default:
+            break;
         }
       }
       if (piece == kAtomChar) {
@@ -338,10 +470,53 @@ class EditableTextContent {
         continue;
       }
       out.add(_wrapPiece(piece, kinds, href,
-          forEditing: forEditing, editingLinkColor: editingLinkColor));
+          forEditing: forEditing,
+          editingLinkColor: editingLinkColor,
+          fgHex: fgHex,
+          bgHex: bgHex,
+          sizePct: sizePct));
     }
-    return out;
+    return _applyOnlyEmoji(out);
   }
+
+  /// Discourse 大表情语义:整段**只有** emoji(空白不算内容)且不超过
+  /// [_maxOnlyEmoji] 个 → 全部标 isOnlyEmoji(渲染 32dp);超了则全部
+  /// 普通尺寸。规则与 cook 引擎实测一致:
+  /// `:a:`→1 大 / `:a: :a: :a:`→3 全大 / 4 个→全不大。
+  ///
+  /// 放在 [toInlines] 里而不是只放导出路径,是因为编辑器实时渲染
+  /// (editable_paragraph)和导出(doc_converter)走的是同一个出口 ——
+  /// 只在导出侧标记会导致"刚插入的 emoji 是小的,切到源码再切回来才
+  /// 变大"(实测复现)。
+  static List<InlineNode> _applyOnlyEmoji(List<InlineNode> out) {
+    var emojiCount = 0;
+    for (final n in out) {
+      if (n is EmojiRun) {
+        emojiCount++;
+        continue;
+      }
+      // 纯空白的文本片段不算内容;其余任何节点都让本段不再是"只有表情"
+      if (n is TextRun && n.text.trim().isEmpty) continue;
+      return out;
+    }
+    if (emojiCount == 0) return out;
+    final large = emojiCount <= _maxOnlyEmoji;
+    var changed = false;
+    final result = [
+      for (final n in out)
+        if (n is EmojiRun && n.isOnlyEmoji != large)
+          () {
+            changed = true;
+            return EmojiRun(name: n.name, url: n.url, isOnlyEmoji: large);
+          }()
+        else
+          n,
+    ];
+    return changed ? result : out;
+  }
+
+  /// 超过这个数量就不再算大表情(对齐 Discourse)。
+  static const int _maxOnlyEmoji = 3;
 
   static InlineNode _wrapAtom(
     InlineNode atom,
@@ -366,6 +541,9 @@ class EditableTextContent {
     String? href, {
     required bool forEditing,
     Color? editingLinkColor,
+    String? fgHex,
+    String? bgHex,
+    String? sizePct,
   }) {
     InlineNode node;
     if (kinds.contains(MarkKind.inlineCode)) {
@@ -379,6 +557,18 @@ class EditableTextContent {
           (forEditing && kinds.contains(MarkKind.link))) {
         // 编辑态 link 借下划线样式(真 LinkRun 的 recognizer 会抢手势)
         node = StyledRun(kind: InlineStyleKind.underline, children: [node]);
+      }
+      for (final k in const [
+        MarkKind.smallStyle,
+        MarkKind.bigStyle,
+        MarkKind.markStyle,
+        MarkKind.superscript,
+        MarkKind.subscript,
+        MarkKind.monospaceStyle,
+      ]) {
+        if (kinds.contains(k)) {
+          node = StyledRun(kind: _styleKindFor(k)!, children: [node]);
+        }
       }
       if (kinds.contains(MarkKind.em)) {
         node = EmRun(children: [node]);
@@ -398,7 +588,15 @@ class EditableTextContent {
           children: [node],
         );
       }
+      node = _applyColorMarks(node, kinds, fgHex, bgHex);
+      if (kinds.contains(MarkKind.size)) {
+        node = _applySizeMark(node, sizePct, forEditing: forEditing);
+      }
       return node;
+    }
+    node = _applyColorMarks(node, kinds, fgHex, bgHex);
+    if (kinds.contains(MarkKind.size)) {
+      node = _applySizeMark(node, sizePct, forEditing: forEditing);
     }
     // link/spoiler 包最外(阅读端 <a>/<span class=spoiler> 里嵌样式的形态)
     if (kinds.contains(MarkKind.link)) {
@@ -408,6 +606,61 @@ class EditableTextContent {
       node = SpoilerRun(children: [node]);
     }
     return node;
+  }
+
+  /// 字号极小(< [hiddenSizeThreshold])时编辑态视为"隐藏标记":夹到
+  /// 一个仍可读的小尺寸(而不是变全透明/宽度塌陷),配合
+  /// [EditableParagraph] 的 badge 描边框,让用户看得出"这段有隐藏内容"
+  /// 且能点进去编辑,不是无提示地变成一段视觉正常的文字。
+  static const double hiddenSizeThreshold = 0.15;
+
+  /// 隐藏标记态的编辑态可读尺寸(小于正常字号但不到不可读程度)。
+  static const double hiddenSizeEditingScale = 0.6;
+
+  /// 字号 mark → SizedRun。
+  ///
+  /// **编辑态夹下限**:`[size=0]`(或极小值)真按原值画在编辑器里就是
+  /// 隐形/挤成一条缝的,根本没法编辑。夹到 [hiddenSizeEditingScale] 而
+  /// 非直接钳成 1 倍 —— 视觉上明显偏小,加上 badge 描边框,一眼能看出
+  /// 这是"隐藏内容"而不是普通文字。非隐藏范围(≥ 阈值)的缩放不夹 ——
+  /// **判定是严格小于**:`[size=15]` 恰为 0.15 倍,是用户合法设置的
+  /// 15% 字号,不是隐藏内容,不能误伤。
+  /// 用户设的正常倍数(哪怕 <1)照原样画。
+  /// 阅读端([forEditing] = false)不夹,原样对齐网页端。
+  /// 注意夹的只是**渲染**;raw 由 mark 的 attr(原文)决定,发出去仍是原值。
+  static InlineNode _applySizeMark(
+    InlineNode node,
+    String? pct, {
+    required bool forEditing,
+  }) {
+    final scale = parsePct(pct);
+    if (scale == null) return node;
+    final effective =
+        forEditing && scale < hiddenSizeThreshold ? hiddenSizeEditingScale : scale;
+    return SizedRun(scale: effective, pctRaw: pct, children: [node]);
+  }
+
+  /// 颜色 mark → ColoredRun(前景/背景可同时存在,合成一个节点)。
+  ///
+  /// attr 是 CSS 原文(`red`/`#F00`…)—— 渲染取色走 parser 的完整 CSS
+  /// 色解析;解析失败时不上色(渲染降级),但原文仍带在 Run 上,
+  /// 序列化写回不丢。
+  static InlineNode _applyColorMarks(
+    InlineNode node,
+    Set<MarkKind> kinds,
+    String? fgHex,
+    String? bgHex,
+  ) {
+    final fgRaw = kinds.contains(MarkKind.textColor) ? fgHex : null;
+    final bgRaw = kinds.contains(MarkKind.bgColor) ? bgHex : null;
+    if (fgRaw == null && bgRaw == null) return node;
+    return ColoredRun(
+      color: ParagraphParser.parseCssColor(fgRaw),
+      background: ParagraphParser.parseCssColor(bgRaw),
+      colorRaw: fgRaw,
+      backgroundRaw: bgRaw,
+      children: [node],
+    );
   }
 
   // -----------------------------------------------------------------
@@ -493,8 +746,27 @@ class EditableTextContent {
   }
 
   /// 替换 `[start, end)` 为 [replacement](IME composing 更新的主路径)。
-  EditableTextContent replace(int start, int end, String replacement) =>
-      delete(start, end).insert(start, replacement);
+  /// 替换 `[start, end)` 为 [replacement]。
+  ///
+  /// **覆盖整个被替换区间的 mark 延续到替换文本**(主流编辑器语义:
+  /// 全选一段粗体后打字仍是粗体)。没有这条,「插入剧透 → 占位文字被
+  /// 整选 → 直接打字」会因 delete+insert 在区间边界不延续样式而把
+  /// spoiler mark 丢掉,打出来的是普通文字。用原始 span(含 attr)
+  /// 重建而非只记 kind,链接 href/颜色值不丢。
+  EditableTextContent replace(int start, int end, String replacement) {
+    final carried = (start < end && replacement.isNotEmpty)
+        ? [
+            for (final m in marks)
+              if (m.start <= start && m.end >= end) m,
+          ]
+        : const <MarkSpan>[];
+    var out = delete(start, end).insert(start, replacement);
+    for (final m in carried) {
+      out = out.applyMark(start, start + replacement.length, m.kind,
+          attr: m.attr);
+    }
+    return out;
+  }
 
   /// 在 [offset] 处切成两半(回车分段)。
   (EditableTextContent before, EditableTextContent after) split(int offset) {

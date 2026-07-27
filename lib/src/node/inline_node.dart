@@ -137,13 +137,28 @@ class StyledRun extends InlineNode {
 /// [color] 与 [background] 至少一个非 null(parser 解析不出颜色时不建本节点)。
 @immutable
 class ColoredRun extends InlineNode {
-  const ColoredRun({this.color, this.background, required this.children});
+  const ColoredRun({
+    this.color,
+    this.background,
+    this.colorRaw,
+    this.backgroundRaw,
+    required this.children,
+  });
 
   /// 字色(`color`),无则 null。
   final Color? color;
 
   /// 背景色(`background-color`),无则 null。
   final Color? background;
+
+  /// `color` 的 CSS 原文(如 `red` / `#F00`)。服务端 bbcode-color 插件把
+  /// `[color=X]` 的 X 原样放进 style,序列化写回必须逐字保留原文 ——
+  /// 任何规范化(小写化 / `red`→hex)都会让往返门禁失配整帖降级。
+  /// null = 非解析来源(编辑器程序化构造),写回退化成 [color] 的 hex。
+  final String? colorRaw;
+
+  /// `background-color` 的 CSS 原文,同 [colorRaw]。
+  final String? backgroundRaw;
 
   final List<InlineNode> children;
 
@@ -154,14 +169,53 @@ class ColoredRun extends InlineNode {
           runtimeType == other.runtimeType &&
           color == other.color &&
           background == other.background &&
+          colorRaw == other.colorRaw &&
+          backgroundRaw == other.backgroundRaw &&
           listEquals(children, other.children);
 
   @override
-  int get hashCode => Object.hash(color, background, Object.hashAll(children));
+  int get hashCode => Object.hash(
+      color, background, colorRaw, backgroundRaw, Object.hashAll(children));
 
   @override
   String toString() =>
       'ColoredRun(color: $color, bg: $background, ${children.length} children)';
+}
+
+/// 字号缩放(`<span style="font-size:N%">`;Discourse `[size=N]` BBCode 产出)。
+///
+/// [scale] 是**相对父字号的倍数**(网页端语义:`[size=150]` → `150%` →
+/// 1.5;`[size=0]` → `0%` → 0 = 视觉隐藏)。阅读端对齐网页端原样生效,
+/// 不夹上下限;编辑端把它当行内原子渲染成固定块(见 doc_converter),
+/// 免得 0 倍隐形/超大撑破编辑器。
+@immutable
+class SizedRun extends InlineNode {
+  const SizedRun({required this.scale, this.pctRaw, required this.children});
+
+  /// 相对父字号的倍数(1.0 = 100%)。
+  final double scale;
+
+  /// `font-size:N%` 里 N 的原文(如 `150` / `007`)。序列化写回原样保留,
+  /// 同 [ColoredRun.colorRaw] 的门禁理由。null = 程序化构造,写回按
+  /// [scale] 计算。
+  final String? pctRaw;
+
+  final List<InlineNode> children;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SizedRun &&
+          runtimeType == other.runtimeType &&
+          scale == other.scale &&
+          pctRaw == other.pctRaw &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode => Object.hash(scale, pctRaw, Object.hashAll(children));
+
+  @override
+  String toString() => 'SizedRun(${scale}x, ${children.length} children)';
 }
 
 /// `<br>` 强制换行。
