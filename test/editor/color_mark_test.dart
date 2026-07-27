@@ -17,6 +17,15 @@ ParagraphNode _colored({Color? fg, Color? bg, String text = '红字'}) =>
       ColoredRun(color: fg, background: bg, children: [TextRun(text)]),
     ]);
 
+ParagraphNode _cooked(String html) =>
+    ParagraphParser().parse(html).first as ParagraphNode;
+
+String _roundtrip(String html) {
+  var n = 0;
+  final doc = blockNodesToDoc([_cooked(html)], () => 'e_${n++}');
+  return docToMarkdown(doc);
+}
+
 void main() {
   group('可编辑性(核心)', () {
     test('ColoredRun 在可编辑白名单里 —— 不再岛化', () {
@@ -86,6 +95,75 @@ void main() {
       final inlines = (doc.single as TextBlock).content.toInlines();
       final colored = inlines.whereType<ColoredRun>().single;
       expect(colored.color, _red);
+    });
+  });
+
+  group('attr 原样保留(往返门禁契约)', () {
+    // 服务端 bbcode-color 插件把 [color=X] 的 X 原样放进 style;门禁两侧
+    // 都是客户端 bundle(把 [color] 当字面文本)→ 序列化逐字写回 X 即过
+    // 门禁,任何规范化(小写化 / red→hex)都会失配整帖降级。
+    test('[color=red] 命名色往返字节不变', () {
+      expect(
+        _roundtrip('<p><span style="color:red">x</span></p>'),
+        '[color=red]x[/color]',
+      );
+    });
+
+    test('[color=#F00] 短 hex 大写往返字节不变', () {
+      expect(
+        _roundtrip('<p><span style="color:#F00">x</span></p>'),
+        '[color=#F00]x[/color]',
+      );
+    });
+
+    test('[color=#ff0000] 全长 hex 往返字节不变', () {
+      expect(
+        _roundtrip('<p><span style="color:#ff0000">x</span></p>'),
+        '[color=#ff0000]x[/color]',
+      );
+    });
+
+    test('[bgcolor=yellow] 往返字节不变', () {
+      expect(
+        _roundtrip('<p><span style="background-color:yellow">x</span></p>'),
+        '[bgcolor=yellow]x[/bgcolor]',
+      );
+    });
+
+    test('命名色渲染仍能取到色(toInlines 出 ColoredRun 带 Color)', () {
+      var n = 0;
+      final doc = blockNodesToDoc(
+        [_cooked('<p><span style="color:red">x</span></p>')],
+        () => 'e_${n++}',
+      );
+      final inlines = (doc.single as TextBlock).content.toInlines();
+      final colored = inlines.whereType<ColoredRun>().single;
+      expect(colored.color, const Color(0xFFFF0000));
+      expect(colored.colorRaw, 'red');
+    });
+
+    test('解析不出的色值:渲染降级无色,但原文不丢', () {
+      var n = 0;
+      final doc = blockNodesToDoc(
+        [
+          ParagraphNode(id: 'p', inlines: [
+            const ColoredRun(
+                colorRaw: 'var(--x)', children: [TextRun('x')]),
+          ])
+        ],
+        () => 'e_${n++}',
+      );
+      final block = doc.single as TextBlock;
+      expect(
+        block.content.marks
+            .singleWhere((m) => m.kind == MarkKind.textColor)
+            .attr,
+        'var(--x)',
+      );
+      final colored =
+          block.content.toInlines().whereType<ColoredRun>().single;
+      expect(colored.color, isNull, reason: '取色失败按降级,不上色');
+      expect(docToMarkdown(doc), '[color=var(--x)]x[/color]');
     });
   });
 

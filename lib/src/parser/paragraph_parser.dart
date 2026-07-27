@@ -2523,21 +2523,38 @@ class ParagraphParser {
         // fwfh 默认渲染 style 里的着色;Discourse [color]/[bgcolor] BBCode 产出)。
         // 解析不出颜色但带 style(如仅 font-size)→ 仍记诊断,让对齐守护暴露
         // 这块未实现的内联 CSS。
+        //
+        // **CSS 原文必须原样保留**(colorRaw/backgroundRaw/pctRaw):服务端
+        // bbcode-color 插件把 `[color=X]` 的 X 逐字放进 style,用户写
+        // `red`/`#F00` 时 cooked 里就是这两个原文。编辑序列化写回时任何
+        // 规范化(小写化 / red→hex)都会让往返门禁 cook 比对失配,整帖
+        // 降级源码模式。Color 解析产物只用于渲染取色。
         final style = el.attributes['style'];
         if (style != null) {
-          final fg = _parseCssColor(_cssProp(style, 'color'));
-          final bg = _parseCssColor(_cssProp(style, 'background-color'));
+          final fgRaw = _cssProp(style, 'color');
+          final bgRaw = _cssProp(style, 'background-color');
+          final fg = _parseCssColor(fgRaw);
+          final bg = _parseCssColor(bgRaw);
           // 字号:Discourse [size=N] BBCode → `font-size:N%`。与着色可同时
           // 出现在一个 span 上,所以先套字号再套颜色(顺序不影响语义)。
-          final scale = _parseCssFontScale(_cssProp(style, 'font-size'));
+          final fontSizeRaw = _cssProp(style, 'font-size');
+          final scale = _parseCssFontScale(fontSizeRaw);
           var inner = children;
           if (scale != null) {
-            inner = [SizedRun(scale: scale, children: List.unmodifiable(children))];
+            inner = [
+              SizedRun(
+                scale: scale,
+                pctRaw: _pctRawOf(fontSizeRaw!),
+                children: List.unmodifiable(children),
+              ),
+            ];
           }
           if (fg != null || bg != null) {
             out.add(ColoredRun(
               color: fg,
               background: bg,
+              colorRaw: fg == null ? null : fgRaw,
+              backgroundRaw: bg == null ? null : bgRaw,
               children: List.unmodifiable(inner),
             ));
             return;
@@ -2639,9 +2656,22 @@ class ParagraphParser {
     return n / 100.0;
   }
 
+  /// `font-size:N%` 里 N 的**原文**(`[size=N]` 的 N,服务端插件原样透传)。
+  /// 只在 [_parseCssFontScale] 已判定合法后调用;写回 raw 时逐字保留,
+  /// 见 ColoredRun.colorRaw 的门禁理由。
+  static String _pctRawOf(String raw) {
+    final s = raw.trim();
+    return s.substring(0, s.length - 1).trim();
+  }
+
   /// 解析 CSS 颜色字符串 → [Color](对齐 fwfh:hex 3/4/6/8 位 + rgb()/rgba()
   /// + 完整命名色 + transparent)。`inherit`/`currentcolor` 等无具体值 → null
   /// (不覆盖父级色)。解析失败 → null。
+  ///
+  /// 公开静态入口:编辑器 mark attr 存 CSS 原文(`red`/`#F00`…),渲染
+  /// 取色时用同一套解析(单一事实源,勿在编辑层重抄色表)。
+  static Color? parseCssColor(String? raw) => _parseCssColor(raw);
+
   static Color? _parseCssColor(String? raw) {
     if (raw == null) return null;
     final s = raw.trim().toLowerCase();

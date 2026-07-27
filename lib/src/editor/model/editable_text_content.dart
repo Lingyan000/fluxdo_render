@@ -24,6 +24,7 @@ import 'dart:ui' show Color;
 import 'package:flutter/foundation.dart';
 
 import '../../node/inline_node.dart';
+import '../../parser/paragraph_parser.dart' show ParagraphParser;
 
 /// 原子哨兵字符(U+FFFC OBJECT REPLACEMENT CHARACTER)。
 const String kAtomChar = '\uFFFC';
@@ -45,7 +46,9 @@ enum MarkKind {
   /// 编辑态蓝色下划线,不可点(编辑器语义)。
   link,
 
-  /// 前景色 `[color=#rrggbb]…[/color]`(ColoredRun.color)。attr 存色值。
+  /// 前景色 `[color=X]…[/color]`(ColoredRun.color)。attr 存 **X 的 CSS
+  /// 原文**(`red` / `#F00` / `#ff0000` …,服务端 bbcode-color 插件原样
+  /// 透传进 style)—— 序列化逐字写回才能过往返门禁,渲染取色时才 parse。
   ///
   /// 做成 mark 而不是留给 ColoredRun 岛化,是因为岛是**不可编辑**的:
   /// 打完一句带色的话整行会变成只读岛、光标直接消失(实测复现)。
@@ -312,18 +315,30 @@ class EditableTextContent {
           // ProseMirror image 是 inline:true 一等行内节点)
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
-        case SizedRun(:final scale, :final children):
+        case SizedRun(:final scale, :final pctRaw, :final children):
           // 字号 → 带 attr 的 mark(见 MarkKind.size 注释:岛化不可编辑,
-          // mark 化后一行内可以混多个不同 size 区间)。
+          // mark 化后一行内可以混多个不同 size 区间)。attr 优先存 cooked
+          // 里的原文(pctRaw),程序化构造(pctRaw=null)才按 scale 计算。
           _flattenInto(children, buf, marks, atoms,
-              [...activeKinds, (MarkKind.size, _pct(scale))]);
-        case ColoredRun(:final color, :final background, :final children):
+              [...activeKinds, (MarkKind.size, pctRaw ?? _pct(scale))]);
+        case ColoredRun(
+            :final color,
+            :final background,
+            :final colorRaw,
+            :final backgroundRaw,
+            :final children
+          ):
           // 颜色 → 带 attr 的 mark(见 MarkKind.textColor 注释:岛化会
-          // 让整行变只读、光标消失)
+          // 让整行变只读、光标消失)。attr 优先存 CSS 原文(colorRaw/
+          // backgroundRaw,`red`/`#F00` 等逐字保留),程序化构造才写 hex。
+          // 只有原文没有 Color(取色失败)也照样成 mark —— 渲染降级无色,
+          // 但序列化必须把原文写回。
           _flattenInto(children, buf, marks, atoms, [
             ...activeKinds,
-            if (background != null) (MarkKind.bgColor, _hex(background)),
-            if (color != null) (MarkKind.textColor, _hex(color)),
+            if (background != null || backgroundRaw != null)
+              (MarkKind.bgColor, backgroundRaw ?? _hex(background!)),
+            if (color != null || colorRaw != null)
+              (MarkKind.textColor, colorRaw ?? _hex(color!)),
           ]);
         // ---- 白名单外(防御降级,正常链路由 doc_converter 拦截岛化) ----
         case FootnoteRefRun():
@@ -595,7 +610,7 @@ class EditableTextContent {
   /// 这是"隐藏内容"而不是普通文字。非隐藏范围(> 阈值)的缩放不夹,
   /// 用户设的正常倍数(哪怕 <1)照原样画。
   /// 阅读端([forEditing] = false)不夹,原样对齐网页端。
-  /// 注意夹的只是**渲染**;raw 由 mark 的 attr 决定,发出去仍是原值。
+  /// 注意夹的只是**渲染**;raw 由 mark 的 attr(原文)决定,发出去仍是原值。
   static InlineNode _applySizeMark(
     InlineNode node,
     String? pct, {
@@ -605,20 +620,30 @@ class EditableTextContent {
     if (scale == null) return node;
     final effective =
         forEditing && scale <= hiddenSizeThreshold ? hiddenSizeEditingScale : scale;
-    return SizedRun(scale: effective, children: [node]);
+    return SizedRun(scale: effective, pctRaw: pct, children: [node]);
   }
 
   /// 颜色 mark → ColoredRun(前景/背景可同时存在,合成一个节点)。
+  ///
+  /// attr 是 CSS 原文(`red`/`#F00`…)—— 渲染取色走 parser 的完整 CSS
+  /// 色解析;解析失败时不上色(渲染降级),但原文仍带在 Run 上,
+  /// 序列化写回不丢。
   static InlineNode _applyColorMarks(
     InlineNode node,
     Set<MarkKind> kinds,
     String? fgHex,
     String? bgHex,
   ) {
-    final fg = kinds.contains(MarkKind.textColor) ? parseHex(fgHex) : null;
-    final bg = kinds.contains(MarkKind.bgColor) ? parseHex(bgHex) : null;
-    if (fg == null && bg == null) return node;
-    return ColoredRun(color: fg, background: bg, children: [node]);
+    final fgRaw = kinds.contains(MarkKind.textColor) ? fgHex : null;
+    final bgRaw = kinds.contains(MarkKind.bgColor) ? bgHex : null;
+    if (fgRaw == null && bgRaw == null) return node;
+    return ColoredRun(
+      color: ParagraphParser.parseCssColor(fgRaw),
+      background: ParagraphParser.parseCssColor(bgRaw),
+      colorRaw: fgRaw,
+      backgroundRaw: bgRaw,
+      children: [node],
+    );
   }
 
   // -----------------------------------------------------------------

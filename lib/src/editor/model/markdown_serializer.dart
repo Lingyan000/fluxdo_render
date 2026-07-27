@@ -838,8 +838,9 @@ String _serializeIslandInlines(List<InlineNode> inlines) {
       case LocalDateRun():
         buf.write(_serializeLocalDate(n));
       case ColoredRun():
-        // [color]/[bgcolor] BBCode 是 linux.do 未装插件的语法(cook 探针:
-        // 原样输出文本);着色 span 只能来自服务端放行的 HTML —— 写回同形态
+        // [color]/[bgcolor]:服务端装了 discourse-bbcode-color 插件(认这
+        // 个语法),客户端预览 bundle 没打包它(cook 原样输出字面文本)。
+        // 门禁两侧都用客户端 bundle → attr 原样写回即可两侧一致。
         buf.write(_serializeColored(n));
       case SizedRun():
         buf.write(_serializeSized(n));
@@ -881,13 +882,17 @@ String _serializeLocalDate(LocalDateRun n) {
 
 /// 着色重建 → **BBCode**(`[color=…]` / `[bgcolor=…]`)。
 ///
-/// 为什么不写 `<span style="color:…">`(服务端 cooked 的原始形态):
-/// Discourse 的 HTML 消毒器会把 span 上的 style 属性剥掉(实测
-/// `<span style="color:#FF0000">红</span>` → `<span>红</span>`),
-/// 只有 bbcode-color 插件在注册语法的同时把它加进了白名单。于是写
-/// span 形态的 raw 经客户端 cook 会丢色 —— 往返门禁(cook(raw) vs
-/// cook(docToRaw(doc)))必然不等,整帖降级源码模式。
-/// `[color=…]` 两端都认:服务端有插件、客户端有本地转换。
+/// 事实链(cook bundle 探针 + 站内官方教程帖):
+/// - **服务端**装了 discourse-bbcode-color 插件,`[color=X]` 被认并把 X
+///   **原样**放进 `style="color:X"`(`red`/`#F00` 逐字透传);
+/// - **客户端预览 bundle** 没打包该插件,cook 把 `[color=X]` 当字面文本;
+/// - 往返门禁 = cook(原 raw) vs cook(docToRaw(导入)),两侧都是客户端
+///   bundle → 两侧都把 [color] 当字面文本,**attr 原样写回即字节一致**。
+///   任何规范化(小写化 / `#F00`→`#ff0000` / `red`→hex)都会失配,
+///   整帖降级源码模式。
+///
+/// 所以优先写 colorRaw/backgroundRaw(cooked 里的 CSS 原文 = 用户在
+/// [color=X] 里写的 X);程序化构造(raw 为 null)才按 Color 值写 hex。
 String _serializeColored(ColoredRun n) {
   String hex(Color c) {
     final v = c.toARGB32() & 0xFFFFFF;
@@ -896,20 +901,26 @@ String _serializeColored(ColoredRun n) {
 
   var out = _serializeIslandInlines(n.children);
   // 前景包在里层、背景在外层(与解析侧的嵌套顺序一致)
-  if (n.color != null) out = '[color=${hex(n.color!)}]$out[/color]';
-  if (n.background != null) {
-    out = '[bgcolor=${hex(n.background!)}]$out[/bgcolor]';
+  if (n.color != null || n.colorRaw != null) {
+    final v = n.colorRaw ?? hex(n.color!);
+    out = '[color=$v]$out[/color]';
+  }
+  if (n.background != null || n.backgroundRaw != null) {
+    final v = n.backgroundRaw ?? hex(n.background!);
+    out = '[bgcolor=$v]$out[/bgcolor]';
   }
   return out;
 }
 
 /// 字号 → `[size=N]`。
 ///
-/// 与 [_serializeColored] 同一条理由:`<span style="font-size:…">` 形态经
-/// 客户端 cook 会被消毒掉样式,往返门禁必然不等 → 整帖降级源码模式。
-/// `[size=N]` 两端都认(服务端有 bbcode 插件、客户端有本地转换),
-/// 且实测映射就是 `N` ↔ `font-size:N%`。
+/// 与 [_serializeColored] 同一条理由:N 的原文(pctRaw)原样写回才能过
+/// 往返门禁;程序化构造(pctRaw=null)才按 scale 计算(整数化防浮点
+/// 脏值,见下)。
 String _serializeSized(SizedRun n) {
+  if (n.pctRaw != null) {
+    return '[size=${n.pctRaw}]${_serializeIslandInlines(n.children)}[/size]';
+  }
   // scale 由 `font-size:N%` / 100 而来,乘回 100 会带浮点脏值
   // (`0.07 * 100 == 7.000000000000001`)—— 与最近整数差在浮点误差
   // 量级(1e-6)内的按整数写,防止 raw 里出现 `[size=7.000000000000001]`。
