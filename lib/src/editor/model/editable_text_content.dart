@@ -679,24 +679,51 @@ class EditableTextContent {
     assert(offset >= 0 && offset <= text.length);
     if (inserted.isEmpty) return this;
     final len = inserted.length;
+    final newText = text.replaceRange(offset, offset, inserted);
     final newMarks = <MarkSpan>[];
     for (final m in marks) {
+      final MarkSpan span;
       if (m.end <= offset) {
-        newMarks.add(m);
+        span = m;
       } else if (m.start >= offset) {
-        newMarks.add(m.copyWith(start: m.start + len, end: m.end + len));
+        span = m.copyWith(start: m.start + len, end: m.end + len);
       } else {
-        newMarks.add(m.copyWith(end: m.end + len));
+        span = m.copyWith(end: m.end + len);
       }
+      newMarks.add(_syncSelfLinkedAttr(m, span, newText));
     }
     return EditableTextContent(
-      text: text.replaceRange(offset, offset, inserted),
+      text: newText,
       marks: newMarks,
       atoms: {
         for (final e in atoms.entries)
           (e.key >= offset ? e.key + len : e.key): e.value,
       },
     );
+  }
+
+  /// 「文本即链接」的 link mark:改文字时把 href 一起改掉。
+  ///
+  /// 裸链接(粘贴进来的 URL)的锚文本**就是** href。只改文字不改 attr,
+  /// 切到源码就是 `[改过的文字](原地址)` —— 显示一个地址、跳另一个
+  /// (真机复现:在编辑器里删掉链接文字末尾的 `?u=xxx`,href 纹丝不动)。
+  /// 判据取**编辑前**是否相等:本来就是自定义文案的链接不受影响。
+  MarkSpan _syncSelfLinkedAttr(MarkSpan old, MarkSpan next, String newText) {
+    if (old.kind != MarkKind.link) return next;
+    final os = old.start.clamp(0, text.length);
+    final oe = old.end.clamp(os, text.length);
+    if (old.attr != text.substring(os, oe)) return next; // 自定义文案,不动
+    final ns = next.start.clamp(0, newText.length);
+    final ne = next.end.clamp(ns, newText.length);
+    final slice = newText.substring(ns, ne);
+    return slice.isEmpty
+        ? next
+        : MarkSpan(
+            start: next.start,
+            end: next.end,
+            kind: next.kind,
+            attr: slice,
+          );
   }
 
   /// 在 [offset] 处插入一个原子(哨兵 + 身份)。
@@ -715,6 +742,7 @@ class EditableTextContent {
     assert(start >= 0 && end <= text.length && start <= end);
     if (start == end) return this;
     final len = end - start;
+    final newText = text.replaceRange(start, end, '');
     final newMarks = <MarkSpan>[];
     for (final m in marks) {
       // 区间平移/收缩:与删除区间求差。
@@ -723,10 +751,10 @@ class EditableTextContent {
           : (m.start >= end ? m.start - len : start);
       final ne = m.end <= start ? m.end : (m.end >= end ? m.end - len : start);
       final span = m.copyWith(start: ns, end: ne);
-      if (!span.isEmpty) newMarks.add(span);
+      if (!span.isEmpty) newMarks.add(_syncSelfLinkedAttr(m, span, newText));
     }
     return EditableTextContent(
-      text: text.replaceRange(start, end, ''),
+      text: newText,
       marks: newMarks,
       atoms: {
         for (final e in atoms.entries)
