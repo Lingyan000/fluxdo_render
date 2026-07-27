@@ -910,8 +910,12 @@ String _serializeColored(ColoredRun n) {
 /// `[size=N]` 两端都认(服务端有 bbcode 插件、客户端有本地转换),
 /// 且实测映射就是 `N` ↔ `font-size:N%`。
 String _serializeSized(SizedRun n) {
+  // scale 由 `font-size:N%` / 100 而来,乘回 100 会带浮点脏值
+  // (`0.07 * 100 == 7.000000000000001`)—— 与最近整数差在浮点误差
+  // 量级(1e-6)内的按整数写,防止 raw 里出现 `[size=7.000000000000001]`。
   final pct = n.scale * 100;
-  final v = pct == pct.roundToDouble() ? pct.round().toString() : '$pct';
+  final rounded = pct.round();
+  final v = (pct - rounded).abs() < 1e-6 ? rounded.toString() : '$pct';
   return '[size=$v]${_serializeIslandInlines(n.children)}[/size]';
 }
 

@@ -103,5 +103,18 @@ void main() {
       final doc = blockNodesToDoc([p], () => 'e_${n++}');
       expect(docToMarkdown(doc), isNot(contains('150.0')));
     });
+
+    test('0-400 全枚举往返:[size=N] 序列化回 [size=N](无浮点脏值)', () {
+      // scale = N/100 → 序列化乘回 100,浮点误差会产出
+      // `[size=7.000000000000001]` 这类脏值(修复前 0-400 中 35 个 N 中招)。
+      for (var i = 0; i <= 400; i++) {
+        final p = para('<p><span style="font-size:$i%">x</span></p>');
+        var n = 0;
+        final doc = blockNodesToDoc([p], () => 'e_${n++}');
+        final md = docToMarkdown(doc);
+        expect(md, contains('[size=$i]x[/size]'),
+            reason: 'N=$i 的往返应逐字保真,实际:$md');
+      }
+    });
   });
 }

@@ -187,9 +187,15 @@ class EditableTextContent {
       '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
 
   /// 倍数 → 百分比字符串(`1.5` → `150`;整数不写小数点,与 raw 口径一致)。
+  ///
+  /// `scale * 100` 是浮点乘法,`0.07 * 100` 会算出 `7.000000000000001`
+  /// 这类脏值(0-400 里有几十个 N 中招),直接 `'$v'` 就把脏值写进 raw。
+  /// 与最近整数差在浮点误差量级(1e-6)内的按整数写。
   static String _pct(double scale) {
     final v = scale * 100;
-    return v == v.roundToDouble() ? v.round().toString() : '$v';
+    final rounded = v.round();
+    if ((v - rounded).abs() < 1e-6) return rounded.toString();
+    return '$v';
   }
 
   /// 百分比字符串 → 倍数(`150` → `1.5`);解析不出返回 null。
