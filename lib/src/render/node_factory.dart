@@ -1628,11 +1628,12 @@ class _GridTile extends StatelessWidget {
       height: tileHeight,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(4),
-        // FittedBox + cover:让 imageContentBuilder 产生的 widget(主项目
-        // LazyImage 等)按 cover 填满瓦片,跟 legacy `BoxFit.cover` 一致。
-        child: FittedBox(
-          fit: BoxFit.cover,
-          clipBehavior: Clip.hardEdge,
+        // 给 builder 产物 tight 瓦片约束(列 stretch 提供宽、SizedBox
+        // 提供高),由主项目按 GridTileScope 标记以 BoxFit.cover 填满。
+        // 不用 FittedBox(cover) 包自然尺寸图:那会让图内 Hero 量到
+        // 「放大后未裁切的整图矩形」(溢出瓦片),开合飞行落点错误,
+        // 落地瞬间瓦片 clip 显形 = 突然被裁切。
+        child: GridTileScope(
           child: imageContentBuilder(context, image, totalImagesInPost),
         ),
       ),

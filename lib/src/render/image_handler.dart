@@ -107,3 +107,21 @@ typedef ImageGridBuilder = Widget? Function(
   BuildContext context,
   ImageGridNode node,
 );
+
+/// 网格瓦片作用域标记 —— 子包 `_GridTile` 用它包住 imageContentBuilder
+/// 的产物,让主项目的图片 widget 感知"自己正被 cover 裁切展示"
+/// (瓦片形态:FittedBox cover + 圆角 4)。
+///
+/// 主项目据此在打开查看器时启用飞行 crossfade(cover 纹理层随飞行
+/// 淡入淡出+圆角插值),消除「裁剪图↔完整图」的开合跳变;普通文档流
+/// 图(contain 无裁切)读不到本标记,行为不变。
+class GridTileScope extends InheritedWidget {
+  const GridTileScope({super.key, required super.child});
+
+  /// 当前 context 是否处于网格瓦片内
+  static bool of(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<GridTileScope>() != null;
+
+  @override
+  bool updateShouldNotify(GridTileScope oldWidget) => false;
+}
