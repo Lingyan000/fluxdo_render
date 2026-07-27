@@ -33,6 +33,7 @@ import '../node/inline_node.dart';
 import 'soft_break.dart';
 import '../render/emoji_handler.dart';
 import '../render/footnote_handler.dart';
+import '../render/hashtag_icons.dart';
 import '../render/image_handler.dart';
 import '../render/link_handler.dart';
 import '../render/local_date_handler.dart';
@@ -319,14 +320,31 @@ class InlineFlattener {
           text: '\n',
           recognizer: inheritedRecognizer,
         ),
-      LinkRun(:final href, :final children, :final isAttachment, :final filename) =>
-          _buildLinkSpan(
-            href,
-            children,
-            p,
-            isAttachment: isAttachment,
-            filename: filename,
-          ),
+      LinkRun(
+        :final href,
+        :final children,
+        :final isAttachment,
+        :final filename,
+        :final hashtagRef,
+        :final hashtagIcon,
+      ) =>
+        hashtagRef == null
+            ? _buildLinkSpan(
+                href,
+                children,
+                p,
+                isAttachment: isAttachment,
+                filename: filename,
+              )
+            // hashtag → 图标+名称药丸(对齐网页端);ref/label 一并交给
+            // 宿主的点击回调,标签真名靠 ref 才推得出来。
+            : _buildHashtagSpan(
+                href,
+                children,
+                p,
+                iconName: hashtagIcon,
+                ref: hashtagRef,
+              ),
       InlineCodeRun(:final text) => _buildInlineCodeSpan(
           text,
           p.context,
@@ -355,6 +373,119 @@ class InlineFlattener {
       ClickCountRun() => _buildClickCountSpan(node),
       MathInlineRun() => _buildMathInlineSpan(node, p.mathInlineBuilder),
     };
+  }
+
+  /// hashtag 药丸:图标 + 名称,外面包一层圆角底(对齐网页端 cooked 的
+  /// `a.hashtag-cooked` 视觉)。图标名由宿主注入的 [hashtagIconResolver]
+  /// 解析(子包不依赖具体图标库),认不出来按分类/标签兜底。
+  WidgetSpan _buildHashtagSpan(
+    String href,
+    List<InlineNode> children,
+    _FlattenPass p, {
+    String? iconName,
+    String? ref,
+  }) {
+    final label = _hashtagLabel(children);
+    final isTag = RegExp(r'/tags?/').hasMatch(href);
+    final resolver = hashtagIconResolver;
+    final handler = p.handler;
+    final emojiBaseSize = p.emojiBaseSize;
+    // context == null 是本 flattener 的「交互开关」(见 flatten 文档):
+    // 编辑态和纯 unit test 都不传,此时不能挂手势 —— 药丸吃掉点击会让
+    // 编辑器落不了光标(同图片原子 AbsorbPointer 的原则)。
+    final interactive = p.context != null;
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: Builder(
+        builder: (ctx) {
+          final scheme = Theme.of(ctx).colorScheme;
+          final fontSize = emojiBaseSize * 0.82;
+          final lineHeight = emojiBaseSize * 1.5;
+          // 图标解析放在 build 里:宿主要拿 context 去查分类表(cooked 给
+          // 的默认图标是个色块,分类自己配的图标才是想要的那个)。
+          final icon = resolver?.call(ctx, iconName, href);
+          return _maybeTappable(
+            enabled: interactive,
+            onTap: () {
+              final bare = label.startsWith('#') ? label.substring(1) : label;
+              if (hashtagTapHandler?.call(ctx, href, ref, bare) == true) {
+                return;
+              }
+              handler(ctx, href);
+            },
+            child: Container(
+              height: lineHeight,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon ??
+                        (isTag ? Icons.sell_outlined : Icons.folder_outlined),
+                    size: fontSize * 1.05,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontSize: fontSize,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  static Widget _maybeTappable({
+    required bool enabled,
+    required VoidCallback onTap,
+    required Widget child,
+  }) =>
+      enabled ? GestureDetector(onTap: onTap, child: child) : child;
+
+  /// 取 hashtag 锚文本(cooked 里就是 `<span>名称</span>`,可能带前导 `#`)。
+  String _hashtagLabel(List<InlineNode> children) {
+    final buf = StringBuffer();
+    void walk(List<InlineNode> nodes) {
+      for (final n in nodes) {
+        switch (n) {
+          case TextRun(:final text):
+            buf.write(text);
+          case InlineCodeRun(:final text):
+            buf.write(text);
+          case EmRun(:final children):
+            walk(children);
+          case StrongRun(:final children):
+            walk(children);
+          case StyledRun(:final children):
+            walk(children);
+          case ColoredRun(:final children):
+            walk(children);
+          case SizedRun(:final children):
+            walk(children);
+          case LinkRun(:final children):
+            walk(children);
+          default:
+            break;
+        }
+      }
+    }
+
+    walk(children);
+    final text = buf.toString().trim();
+    return text.startsWith('#') ? text : '#$text';
   }
 
   TextSpan _buildLinkSpan(

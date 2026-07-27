@@ -258,6 +258,7 @@ class LinkRun extends InlineNode {
     this.filename = '',
     this.origHref,
     this.hashtagRef,
+    this.hashtagIcon,
     this.isOneboxLink = false,
   });
 
@@ -287,6 +288,11 @@ class LinkRun extends InlineNode {
   /// (仍走普通 LinkRun 链路)。
   final String? hashtagRef;
 
+  /// hashtag 药丸的图标名(cooked 里 `<svg><use href="#folder">` 的那个
+  /// 名字,站点 `hashtag_icons` 设定;分类可自定义)。渲染侧交给宿主
+  /// 注入的 [hashtagIconResolver] 映射成图标,认不出来时按分类/标签兜底。
+  final String? hashtagIcon;
+
   /// onebox 系链接(`<a class="inline-onebox">` 行内 onebox,或
   /// `<a class="onebox">` 未展开的裸链)。两者 raw 里都是裸 URL:
   /// 行内 onebox 的锚文本是 cook 异步取回的页面标题(不能固化进 raw),
@@ -304,12 +310,13 @@ class LinkRun extends InlineNode {
           filename == other.filename &&
           origHref == other.origHref &&
           hashtagRef == other.hashtagRef &&
+          hashtagIcon == other.hashtagIcon &&
           isOneboxLink == other.isOneboxLink &&
           listEquals(children, other.children);
 
   @override
   int get hashCode => Object.hash(href, isAttachment, filename, origHref,
-      hashtagRef, isOneboxLink, Object.hashAll(children));
+      hashtagRef, hashtagIcon, isOneboxLink, Object.hashAll(children));
 
   @override
   String toString() => 'LinkRun($href'
