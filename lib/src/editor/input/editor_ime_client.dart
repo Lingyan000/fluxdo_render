@@ -321,10 +321,13 @@ class EditorImeClient with TextInputClient {
     // 整体剥除会被 diff 误判为"删除了原子"。幻造哨兵只可能出现在**新插入
     // 段**里 → 对 diff.inserted 单独 sanitize(见下)。
     var sanitizedText = value.text;
+    // caret 跟随剥换行修正:剥掉的 '\n' 都在插入段内,caret 之前每剥一个
+    // 就左移一位 —— 否则后续 diff 锚定与 imeReplace 落点全部右偏。
+    var caret = value.selection.extentOffset;
     final rawDiff = diffWithCaret(
       prev.text,
       sanitizedText,
-      value.selection.extentOffset,
+      caret,
     );
     if (rawDiff != null && rawDiff.inserted.contains('\n')) {
       final withoutBreaks = rawDiff.inserted.replaceAll('\n', '');
@@ -338,13 +341,18 @@ class EditorImeClient with TextInputClient {
       sanitizedText = sanitizedText.substring(0, rawDiff.start) +
           withoutBreaks +
           sanitizedText.substring(rawDiff.start + rawDiff.inserted.length);
+      for (var i = 0; i < rawDiff.inserted.length; i++) {
+        if (rawDiff.inserted[i] == '\n' && rawDiff.start + i < caret) {
+          caret--;
+        }
+      }
     }
 
     // 三段式 diff(对比上次值,caret 锚定):公共前缀/后缀 → 中段即变更。
     final diff = diffWithCaret(
       prev.text,
       sanitizedText,
-      value.selection.extentOffset,
+      caret,
     );
 
     var composing = value.composing;
@@ -408,8 +416,8 @@ class EditorImeClient with TextInputClient {
       diff.start,
       diff.oldEnd,
       cleanInserted,
-      caretOffset: (value.selection.extentOffset - phantomCount)
-          .clamp(0, sanitizedText.length - phantomCount),
+      caretOffset:
+          (caret - phantomCount).clamp(0, sanitizedText.length - phantomCount),
       composing: composing,
     );
 
@@ -438,10 +446,14 @@ class EditorImeClient with TextInputClient {
       }
     }
 
-    // reconcile:若应用后文档与 IME 认知不一致(编辑器改写了内容,
-    // 比如剥了 '\n'/幻造 FFFC/input rule 转换),回喂纠正。
+    // reconcile:若应用后文档与**平台窗口的实际内容**不一致(编辑器改写
+    // 了内容,比如剥了 '\n'/幻造 FFFC/input rule 转换),回喂纠正。对比
+    // 基准必须是 value.text(平台原文)而非 sanitizedText —— 剥过 '\n'
+    // 时文档恰好等于 sanitizedText,拿它对比恒不触发,平台窗口里多出的
+    // '\n' 就永远留在那,_lastSent 与文档从此失同步,下一击键的 diff
+    // 全部错位。
     final now = state.textBlockById(blockId);
-    if (now != null && now.content.text != sanitizedText) {
+    if (now != null && now.content.text != value.text) {
       syncFromState(show: false, force: true);
     }
   }
