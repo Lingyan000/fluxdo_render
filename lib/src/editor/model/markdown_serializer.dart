@@ -1009,41 +1009,11 @@ String _serializeTable(
 }
 
 // ---------------------------------------------------------------------
-// 原子 ↔ 字面 markdown(atom reveal 用:光标贴到原子边界时显形成
-// `![alt](src)` / `:name:` / `@user`,可直接改地址、改名)
+// 字面 markdown → 原子(input rules / 粘贴降级解析用)
 // ---------------------------------------------------------------------
-
-/// 原子节点的字面 raw 形态;不认识的节点返回 null(不展开)。
-String? atomToMarkdown(InlineNode node) => switch (node) {
-      final ImageRun img => _serializeImageRun(img),
-      EmojiRun(:final name) => name.isEmpty ? null : ':$name:',
-      MentionRun(:final username) => '@$username',
-      final LocalDateRun d => _serializeLocalDate(d),
-      // `[size=N]` 原子:显形时展开成字面 BBCode 供编辑(同分割线思路)
-      final SizedRun s => _serializeSized(s),
-      _ => null,
-    };
 
 final RegExp _imageMdRe =
     RegExp(r'^!\[([^\]]*?)(?:\|(\d+)x(\d+)(?:,\s*(\d+)%)?)?\]\(([^)]*)\)$');
-
-/// 字面 `[size=N]内容[/size]` → [SizedRun];不匹配返回 null。
-///
-/// 显形编辑后折叠用:用户可以直接把 `[size=0]` 改成 `[size=150]`,或改
-/// 里面的文字。内容里不允许再嵌 `[size` —— 保持"取最内层一段"的语义。
-final RegExp _sizeMdRe =
-    RegExp(r'^\[size=(\d{1,4})\]((?:(?!\[/?size)[\s\S])*)\[/size\]$');
-
-SizedRun? parseSizeMarkdown(String literal) {
-  final m = _sizeMdRe.firstMatch(literal);
-  if (m == null) return null;
-  final pct = int.tryParse(m.group(1)!);
-  if (pct == null) return null;
-  return SizedRun(
-    scale: pct / 100.0,
-    children: [TextRun(m.group(2)!)],
-  );
-}
 
 /// 字面图片语法 → [ImageRun];不匹配返回 null。
 ///

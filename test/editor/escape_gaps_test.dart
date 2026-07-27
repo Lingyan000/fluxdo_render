@@ -8,7 +8,6 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/editor.dart';
-import 'package:fluxdo_render/src/editor/model/doc_converter.dart';
 import 'package:fluxdo_render/src/node/node.dart';
 
 /// 造一个引用卡内的文本块(容器组 [groupId])。

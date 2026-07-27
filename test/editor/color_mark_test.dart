@@ -89,8 +89,6 @@ void main() {
     });
   });
 
-  _revealTests();
-
   group('色值解析', () {
     test('#rgb 与 #rrggbb 都认,非法返回 null', () {
       expect(EditableTextContent.parseHex('#f00'), const Color(0xFFFF0000));
@@ -98,68 +96,6 @@ void main() {
       expect(EditableTextContent.parseHex('red'), isNull);
       expect(EditableTextContent.parseHex('#12345'), isNull);
       expect(EditableTextContent.parseHex(null), isNull);
-    });
-  });
-}
-
-/// 显形往返:光标进边界 → 展开成 `[color=#xxx]…[/color]` 字面量 →
-/// 改完色值 → 折叠回带新颜色的 mark。这是"能像 markdown 一样改格式"
-/// 的核心能力(此前颜色被排除在显形之外,只能退格删掉重打)。
-void _revealTests() {
-  group('显形往返', () {
-    EditableTextContent colored() {
-      var n = 0;
-      final doc = blockNodesToDoc([
-        const ParagraphNode(id: 'p', inlines: [
-          ColoredRun(color: _red, children: [TextRun('红字')]),
-        ]),
-      ], () => 'e_${n++}');
-      return (doc.single as TextBlock).content;
-    }
-
-    test('边界能取到颜色 mark(不再被排除)', () {
-      final c = colored();
-      expect(c.markAtBoundary(0)?.kind, MarkKind.textColor);
-    });
-
-    test('展开成带色值的字面量', () {
-      final c = colored();
-      final mark = c.markAtBoundary(0)!;
-      final (revealed, _) = c.revealMark(mark, 0);
-      expect(revealed.text, '[color=#ff0000]红字[/color]');
-      expect(revealed.marks.where((m) => m.kind == MarkKind.textColor), isEmpty,
-          reason: '展开态没有 mark,只有字面量');
-    });
-
-    test('原样折叠回来,颜色不丢', () {
-      final c = colored();
-      final mark = c.markAtBoundary(0)!;
-      final (revealed, _) = c.revealMark(mark, 0);
-      final r = revealed.collapseMark(0, MarkKind.textColor, 0);
-      expect(r, isNotNull);
-      expect(r!.$1.text, '红字');
-      expect(r.$3.attr, '#ff0000');
-    });
-
-    test('改了色值再折叠 → 新颜色生效', () {
-      final c = colored();
-      final mark = c.markAtBoundary(0)!;
-      var (revealed, _) = c.revealMark(mark, 0);
-      // 把 #ff0000 改成 #00ff00(长度相同但值不同)
-      revealed = revealed.replace(0, '[color=#ff0000]'.length, '[color=#00ff00]');
-      final r = revealed.collapseMark(0, MarkKind.textColor, 0);
-      expect(r, isNotNull, reason: '改过色值也要能折叠回去');
-      expect(r!.$3.attr, '#00ff00');
-    });
-
-    test('色值改成不同长度也能折叠(正则容错,不是定长比对)', () {
-      final c = colored();
-      final mark = c.markAtBoundary(0)!;
-      var (revealed, _) = c.revealMark(mark, 0);
-      revealed = revealed.replace(0, '[color=#ff0000]'.length, '[color=red]');
-      final r = revealed.collapseMark(0, MarkKind.textColor, 0);
-      expect(r, isNotNull);
-      expect(r!.$3.attr, 'red');
     });
   });
 }

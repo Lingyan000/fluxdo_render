@@ -61,9 +61,6 @@ InputRuleOutcome tryApplyInputRules(
   if (typedChar == ' ') {
     return _tryBlockRules(state, block, sel.extent.offset);
   }
-  // mark 展开区内是字面标记编辑态(光标在边界展开的 `**`),行内规则
-  // 必须避让 —— 否则规则会把展开的标记立即折叠回 mark,编辑功能被吃掉。
-  if (state.caretInRevealedRegion) return InputRuleOutcome.none;
   if (typedChar == ')') {
     return _tryImageOrLinkRule(state, block, sel.extent.offset);
   }
@@ -818,9 +815,6 @@ InputRuleOutcome _tryInsidePairRules(
       contentLength: contentText.length,
       kind: kind,
     );
-    // 立刻回到展开(字面)态:光标还夹在定界符之间 = 正在编辑这段内容,
-    // 此时渲染会打断输入。mark 已建好,光标走出闭定界符时自然折叠。
-    state.revealMarkAtCaret();
     return InputRuleOutcome.applied;
   }
   return InputRuleOutcome.none;

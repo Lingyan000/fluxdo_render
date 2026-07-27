@@ -368,13 +368,9 @@ class EditableTextContent {
   /// 后者的 TapGestureRecognizer 会抢编辑器手势),改用纯 TextSpan 视觉
   /// 替代:spoiler=淡灰底纹(内容可见可编辑,对齐官方 rich editor 光标
   /// 内显形语义的简化),link=[editingLinkColor] 字色 + 下划线。
-  /// [markerRanges]:展开态的字面 markdown 标记区间(`**`/`> ` 等)。
-  /// 落在区间内的文本用 [markerColor] 淡化 —— 视觉上是「标记」而非正文。
   List<InlineNode> toInlines({
     bool forEditing = false,
     Color? editingLinkColor,
-    List<(int, int)> markerRanges = const [],
-    Color? markerColor,
   }) {
     if (text.isEmpty) return const [];
 
@@ -383,10 +379,6 @@ class EditableTextContent {
     for (final m in marks) {
       cuts.add(m.start.clamp(0, text.length));
       cuts.add(m.end.clamp(0, text.length));
-    }
-    for (final (a, b) in markerRanges) {
-      cuts.add(a.clamp(0, text.length));
-      cuts.add(b.clamp(0, text.length));
     }
     // '\n' 与原子单独成段
     for (var i = 0; i < text.length; i++) {
@@ -441,17 +433,12 @@ class EditableTextContent {
         // 无身份的孤儿哨兵(不变量破坏,构造器断言防):静默丢弃。
         continue;
       }
-      var node = _wrapPiece(piece, kinds, href,
+      out.add(_wrapPiece(piece, kinds, href,
           forEditing: forEditing,
           editingLinkColor: editingLinkColor,
           fgHex: fgHex,
           bgHex: bgHex,
-          sizePct: sizePct);
-      if (markerColor != null &&
-          markerRanges.any((r) => r.$1 <= s && r.$2 >= e)) {
-        node = ColoredRun(color: markerColor, children: [node]);
-      }
-      out.add(node);
+          sizePct: sizePct));
     }
     return _applyOnlyEmoji(out);
   }
@@ -932,192 +919,4 @@ class EditableTextContent {
   @override
   String toString() => 'EditableTextContent(${text.length} chars, '
       '${marks.length} marks, ${atoms.length} atoms)';
-
-  // -----------------------------------------------------------------
-  // Mark reveal: 光标在 mark 边界时展开标记字符
-  // -----------------------------------------------------------------
-
-  /// 查找光标所在边界的 mark(光标 == mark.start 或 == mark.end)。
-  /// 返回第一个匹配的 mark；link 不参与展开。
-  MarkSpan? markAtBoundary(int offset) {
-    for (final m in marks) {
-      // link 与颜色系不参与显形:它们的字面量带值([color=#f00] /
-      // ](href)),而显形的标记表只按 kind 取串、拿不到 attr,展开会把
-      // 色值/链接丢掉。这两类靠工具栏和源码模式编辑。
-      // link 不参与显形(闭标记 ](href) 与链接编辑另有入口)。
-      // 颜色系**参与** —— 展开成 [color=#xxx]…[/color] 字面量才能像
-      // markdown 一样改色值/改范围。
-      if (m.kind == MarkKind.link) continue;
-      if (offset == m.start || offset == m.end) return m;
-    }
-    return null;
-  }
-
-  /// 展开一个 mark：移除 MarkSpan，在文本对应位置插入标记字符。
-  /// 返回 (新 content, 光标偏移量调整值)。
-  (EditableTextContent, int) revealMark(MarkSpan mark, int cursorOffset) {
-    // 带 attr 的 mark 要把值写进字面量,否则展开再折叠就把值丢了:
-    // link 的值在**闭**标记(`](href)`),颜色的值在**开**标记
-    // (`[color=#f00]`)。
-    final open = switch (mark.kind) {
-      MarkKind.textColor => '[color=${mark.attr ?? ''}]',
-      MarkKind.bgColor => '[bgcolor=${mark.attr ?? ''}]',
-      MarkKind.size => '[size=${mark.attr ?? ''}]',
-      _ => _markOpenTag(mark.kind),
-    };
-    final close = mark.kind == MarkKind.link
-        ? '](${mark.attr ?? ''})'
-        : _markCloseTag(mark.kind);
-    // 先移除 mark
-    var c = removeMark(mark.start, mark.end, mark.kind);
-    // 在 end 处插入闭标记
-    c = c.insert(mark.end, close);
-    // 在 start 处插入开标记
-    c = c.insert(mark.start, open);
-    // 光标在 mark 区域内或边界上 → 跳过开标记；在 mark 之前 → 不动
-    final shift = cursorOffset < mark.start ? 0 : open.length;
-    return (c, shift);
-  }
-
-  /// 尝试折叠已展开的标记：检查文本中是否有匹配的标记对，
-  /// 如有则移除标记字符并重建 MarkSpan。
-  /// [revealStart] 是展开时的原始 mark.start（开标记插入位置）。
-  /// 返回 (新 content, 新光标绝对偏移, 重建的 MarkSpan)；
-  /// 若标记已被破坏则返回 null（保持现状）。
-  (EditableTextContent, int, MarkSpan)? collapseMark(
-    int revealStart,
-    MarkKind kind,
-    int cursorOffset,
-  ) {
-    final close = _markCloseTag(kind);
-    final closeLen = close.length;
-    // 开标记:颜色系带色值,长度随用户编辑变化 → 正则取;其余定长比对。
-    final int openLen;
-    String? openAttr;
-    final openRe = switch (kind) {
-      MarkKind.textColor => _colorOpenRe,
-      MarkKind.bgColor => _bgColorOpenRe,
-      MarkKind.size => _sizeOpenRe,
-      _ => null,
-    };
-    if (openRe != null) {
-      final m = openRe.matchAsPrefix(text, revealStart);
-      if (m == null) return null;
-      openLen = m.end - m.start;
-      openAttr = m.group(1);
-    } else {
-      final open = _markOpenTag(kind);
-      openLen = open.length;
-      if (revealStart + openLen > text.length) return null;
-      if (text.substring(revealStart, revealStart + openLen) != open) {
-        return null;
-      }
-    }
-    // 从末尾往前找配对闭标记（避免匹配用户输入的同字符）
-    final contentStart = revealStart + openLen;
-    final int closePos;
-    final int closeLenActual;
-    String? attr;
-    if (kind == MarkKind.link) {
-      // `](href)`:href 是用户可改的,长度不固定 —— 正则取最后一处。
-      final ms = _linkCloseRe.allMatches(text, contentStart).toList();
-      if (ms.isEmpty) return null;
-      final m = ms.last;
-      closePos = m.start;
-      closeLenActual = m.end - m.start;
-      attr = m.group(1);
-    } else {
-      closePos = text.lastIndexOf(close, text.length);
-      closeLenActual = closeLen;
-      attr ??= openAttr; // 颜色:值在开标记里
-    }
-    if (closePos < contentStart) return null;
-    final closeEnd = closePos + closeLenActual;
-    // 移除闭标记
-    var c = delete(closePos, closeEnd);
-    // 移除开标记
-    c = c.delete(revealStart, revealStart + openLen);
-    // 重建 MarkSpan
-    final markStart = revealStart;
-    final markEnd = closePos - openLen;
-    if (markStart < markEnd) {
-      c = c.applyMark(markStart, markEnd, kind, attr: attr);
-    }
-    // 精确计算新光标位置
-    int newCursor;
-    if (cursorOffset <= revealStart) {
-      newCursor = cursorOffset;
-    } else if (cursorOffset <= revealStart + openLen) {
-      newCursor = revealStart;
-    } else if (cursorOffset <= closePos) {
-      newCursor = cursorOffset - openLen;
-    } else if (cursorOffset <= closeEnd) {
-      newCursor = closePos - openLen;
-    } else {
-      newCursor = cursorOffset - openLen - closeLenActual;
-    }
-    return (
-      c,
-      newCursor.clamp(0, c.length),
-      MarkSpan(start: markStart, end: markEnd, kind: kind, attr: attr),
-    );
-  }
-}
-
-/// link 的闭标记 `](href)`(href 允许为空;不含 `)` 字符)。
-final RegExp _linkCloseRe = RegExp(r'\]\(([^)]*)\)');
-
-/// 颜色开标记(色值用户可改 → 正则,不能定长比对)。
-final RegExp _colorOpenRe = RegExp(r'\[color=([^\]]*)\]');
-final RegExp _bgColorOpenRe = RegExp(r'\[bgcolor=([^\]]*)\]');
-
-/// 字号开标记(值用户可改 → 正则,不能定长比对)。
-final RegExp _sizeOpenRe = RegExp(r'\[size=([^\]]*)\]');
-
-/// mark 开标记。
-/// HTML 样式标签名(小写):`<tag>…</tag>`。
-String? _htmlTagNameFor(MarkKind kind) => switch (kind) {
-      MarkKind.smallStyle => 'small',
-      MarkKind.bigStyle => 'big',
-      MarkKind.markStyle => 'mark',
-      MarkKind.superscript => 'sup',
-      MarkKind.subscript => 'sub',
-      MarkKind.monospaceStyle => 'kbd',
-      _ => null,
-    };
-
-String _markOpenTag(MarkKind kind) {
-  final tag = _htmlTagNameFor(kind);
-  if (tag != null) return '<$tag>';
-  return switch (kind) {
-    MarkKind.strong => '**',
-    MarkKind.em => '*',
-    MarkKind.inlineCode => '`',
-    MarkKind.underline => '[u]',
-    MarkKind.lineThrough => '~~',
-    MarkKind.spoilerInline => '[spoiler]',
-    MarkKind.link => '[',
-    // 不参与显形(见 markAtBoundary),给个空串保 switch 穷尽
-    MarkKind.textColor || MarkKind.bgColor || MarkKind.size => '',
-    _ => '',
-  };
-}
-
-/// mark 闭标记。
-String _markCloseTag(MarkKind kind) {
-  final tag = _htmlTagNameFor(kind);
-  if (tag != null) return '</$tag>';
-  return switch (kind) {
-    MarkKind.strong => '**',
-    MarkKind.em => '*',
-    MarkKind.inlineCode => '`',
-    MarkKind.underline => '[/u]',
-    MarkKind.lineThrough => '~~',
-    MarkKind.spoilerInline => '[/spoiler]',
-    MarkKind.link => ']',
-    MarkKind.textColor => '[/color]',
-    MarkKind.bgColor => '[/bgcolor]',
-    MarkKind.size => '[/size]',
-    _ => '',
-  };
 }

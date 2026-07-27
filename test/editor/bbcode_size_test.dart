@@ -82,28 +82,6 @@ void main() {
     });
   });
 
-  group('显形编辑(同分割线思路)', () {
-    test('原子能展开成字面 BBCode', () {
-      const run = SizedRun(scale: 1.5, children: [TextRun('大')]);
-      expect(atomToMarkdown(run), '[size=150]大[/size]');
-    });
-
-    test('改过的字面能解析回原子', () {
-      final r = parseSizeMarkdown('[size=200]改大了[/size]')!;
-      expect(r.scale, 2.0);
-      expect((r.children.single as TextRun).text, '改大了');
-    });
-
-    test('size=0 字面往返', () {
-      expect(parseSizeMarkdown('[size=0]隐[/size]')!.scale, 0.0);
-    });
-
-    test('语法不完整 → null(保持字面文本,不吞内容)', () {
-      expect(parseSizeMarkdown('[size=150]没闭合'), isNull);
-      expect(parseSizeMarkdown('[size=abc]x[/size]'), isNull);
-    });
-  });
-
   group('序列化写回 BBCode', () {
     test('size=0 往返', () {
       final p = para('<p><span style="font-size:0%">收到请回复123</span></p>');
