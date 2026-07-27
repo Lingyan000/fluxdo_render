@@ -59,6 +59,17 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
   void walk(List<InlineNode> nodes) {
     for (final node in nodes) {
       switch (node) {
+        // 必须排在 TextRun 之前(子类,switch 按序匹配):渲染占
+        // text.length 个字符、逻辑投影空串(零内容宽,同 codePad ——
+        // 复制/编辑坐标不带出,光标进不了定界符内部)。
+        case EditingDelimiterRun(:final text):
+          entries.add(ProjectionEntry(
+            renderStart: cursor,
+            renderLen: text.length,
+            logicalText: '',
+            kind: ProjectionKind.editingDelimiter,
+          ));
+          cursor += text.length;
         case TextRun(:final text):
           addText(insertSoftBreaks(text), ProjectionKind.text);
         case LineBreakRun():

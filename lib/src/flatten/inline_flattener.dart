@@ -279,6 +279,20 @@ class InlineFlattener {
     GestureRecognizer? inheritedRecognizer,
   }) {
     return switch (node) {
+      // 必须排在 TextRun 之前(子类,switch 按序匹配)。淡色字面定界符:
+      // 清 fontWeight/fontStyle(定界符本身不吃 mark 样式 —— `**` 不加粗、
+      // `*` 不斜),颜色用 toInlines 传入的 delimiter color(主题 outline)。
+      // 不 insertSoftBreaks:定界符是短字面量,注入 ZWSP 会让渲染长度
+      // 与 projection entry 的 text.length 失配。
+      EditingDelimiterRun(:final text, :final color) => TextSpan(
+          text: text,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.normal,
+            fontStyle: FontStyle.normal,
+          ),
+          recognizer: inheritedRecognizer,
+        ),
       TextRun(:final text) => TextSpan(
           text: insertSoftBreaks(text),
           recognizer: inheritedRecognizer,

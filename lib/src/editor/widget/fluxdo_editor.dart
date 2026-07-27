@@ -199,6 +199,7 @@ class FluxdoEditor extends StatefulWidget {
     required this.state,
     this.baseTextStyle,
     this.autofocus = false,
+    this.liveMarkdownPreview = true,
     this.focusNode,
     this.nodeFactory,
     this.markdownImporter,
@@ -225,6 +226,11 @@ class FluxdoEditor extends StatefulWidget {
   final TextStyle? baseTextStyle;
 
   final bool autofocus;
+
+  /// 定界符显形开关:光标(collapsed)进入行内 mark 范围时,该 mark
+  /// 两端展示淡色字面定界符(`**`/`[u]` 等,纯渲染投影零逻辑宽);
+  /// 光标离开即折叠回富文本。
+  final bool liveMarkdownPreview;
 
   /// 外部焦点节点(宿主监听焦点态做键盘/面板联动;null 内部自建)。
   final FocusNode? focusNode;
@@ -2118,6 +2124,16 @@ class _FluxdoEditorState extends State<FluxdoEditor>
         ? state.selection?.extent.blockId
         : null;
 
+    // 定界符显形位置:聚焦 + collapsed 选区才显形;composing 期间不显形
+    // (IME 预编辑中 mark 边界随每次上屏抖动,定界符忽隐忽现会打扰
+    // 输入;上屏后 composing 清空自然恢复)。
+    final revealSelection = widget.liveMarkdownPreview &&
+            _focusNode.hasPrimaryFocus &&
+            !state.hasComposing &&
+            (state.selection?.isCollapsed ?? false)
+        ? state.selection
+        : null;
+
     // 有序列表序号(派生渲染态):连续 listItem run 内扫描,run 首项取
     // listStart;ordered/depth 切换重新起算(同 depth 的 ol 连续编号)。
     final ordinals = List<int>.filled(state.blocks.length, 1);
@@ -2220,6 +2236,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             composing: tb.id == composingBlockId
                 ? state.composing
                 : TextRange.empty,
+            revealMarkdownAt: revealSelection?.extent.blockId == tb.id
+                ? revealSelection!.extent.offset
+                : null,
             listMarkerOrdinal: ordinals[i],
             // 行内图片原子走岛同一图片管线(upload 解析/解码上限);
             // hover=click(可点选)。注意:builder 产物进 flatten 缓存
