@@ -1,7 +1,11 @@
 /// Win+V(Windows 剪贴板历史)粘贴:注入的 `V` 不带 Ctrl 修饰位,
 /// 需靠「character==null + 主修饰键刚按下」补偿。真机日志固化。
+///
+/// 补偿窗口只在 Windows 生效(SendInput 注入是 Windows 平台行为),
+/// 用例需显式覆写 defaultTargetPlatform。
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +33,8 @@ void main() {
       );
 
   setUp(() {
+    // 修饰键补偿是 Windows 门控的,测试环境默认 android,须显式覆写
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     // 修饰键跟踪是模块级全局,跨用例/跨文件会互相污染,必须重置
     debugResetModifierState();
     state = EditorState.fromTexts(['abc']);
@@ -37,7 +43,10 @@ void main() {
     pasteCount = 0;
   });
 
-  tearDown(() => state.dispose());
+  tearDown(() {
+    debugDefaultTargetPlatformOverride = null;
+    state.dispose();
+  });
 
   test('Win+V 注入序列:Ctrl 按下后紧跟无修饰位的 V → 认粘贴', () {
     // 真机日志:Meta Left ↓、Control Left ↓、V(ctrl=false, char=null)
@@ -59,5 +68,14 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 300));
     expect(send(down(LogicalKeyboardKey.keyV)), KeyEventResult.ignored);
     expect(pasteCount, 0);
+  });
+
+  test('非 Windows 平台不吃补偿:同一注入序列不认粘贴', () {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    send(down(LogicalKeyboardKey.metaLeft));
+    send(down(LogicalKeyboardKey.controlLeft));
+    send(down(LogicalKeyboardKey.keyV));
+    expect(pasteCount, 0,
+        reason: 'SendInput 注入是 Windows 平台行为,别的平台吃补偿只会扩大误判面');
   });
 }

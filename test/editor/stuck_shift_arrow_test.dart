@@ -11,6 +11,7 @@
 /// shift+方向键仍然扩选。
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:flutter_test/flutter_test.dart';
@@ -99,6 +100,14 @@ void main() {
   });
 
   group('Ctrl+Enter 不该被当成普通回车', () {
+    // 内核 primary 的补偿窗口只在 Windows 生效 —— 显式覆写平台。
+    setUp(() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    });
+    tearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     test('本地看到 Ctrl 按下 → Enter 不分段(留给宿主发送)', () {
       send(ctrlDown());
       final before = state.blocks.length;
@@ -107,10 +116,10 @@ void main() {
           reason: 'primary 成立时内核应放行 Enter,不 splitBlock');
     });
 
-    // 注:「Ctrl 抬起后立刻按 Enter」不写断言 —— 上方 _isSyntheticModifiedKey
-    // 的补偿窗口(2s)会**有意**把它仍算作 Ctrl+Enter(那是 Win+V 注入
-    // 序列 / Windows 假 KeyUp 的补偿),属既有设计,不是本次改动引入。
-
+    // 注:「Ctrl 抬起后立刻按 Enter」—— 真实 KeyUp 会立刻清空补偿窗口
+    // (_trackModifierDown 的 KeyUp 分支),内核照常分段;丢失 KeyUp 的
+    // 场景内核在窗口内仍认 Ctrl+Enter(可逆:顶多少分一段),但**发送
+    // 判定 primaryModifierHeld 不吃窗口**,见下方独立分组。
 
     test('Ctrl 按下过但已抬起且超出补偿窗口 → Enter 必须当普通回车', () async {
       // 回归:曾把「本地看到 Ctrl 按下」并进 primary 取析取,Ctrl 的
@@ -136,6 +145,32 @@ void main() {
       final before = state.blocks.length;
       send(enterDown());
       expect(state.blocks.length, before + 1);
+    });
+  });
+
+  group('primaryModifierHeld(发送类判定)不吃补偿窗口', () {
+    setUp(() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    });
+    tearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('补偿窗口内(Ctrl keyup 丢失)敲纯 Enter → 不判成 Ctrl+Enter', () {
+      // 评审场景:Ctrl 的 key-up 丢失后 2s 内敲纯回车,若发送判定吃
+      // 补偿窗口,没写完的帖子会被直接发出去(不可逆)。发送类必须
+      // 只认 HardwareKeyboard 的真实状态。
+      send(ctrlDown()); // 只有按下,没有抬起 = keyup 丢失
+      expect(primaryModifierHeld(enterDown()), isFalse,
+          reason: '发送判定只认真实修饰键状态,不吃 2s 补偿窗口');
+    });
+
+    test('同一时刻内核 primary 仍吃补偿(可逆操作不受影响)', () {
+      send(ctrlDown());
+      final before = state.blocks.length;
+      send(enterDown());
+      expect(state.blocks.length, before,
+          reason: '内核 Enter 路由(可逆)照常吃补偿窗口放行');
     });
   });
 
