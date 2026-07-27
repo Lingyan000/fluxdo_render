@@ -37,6 +37,9 @@ enum ProjectionKind {
   /// mentionText 两侧的 NBSP 粘性内边距,语义同 [codePad]。
   mentionPad,
   image,
+
+  /// WidgetSpan 版 hashtag 药丸(`#分类` / `#标签`):原子占位。
+  hashtag,
   spoiler,
   footnote,
   localDate,

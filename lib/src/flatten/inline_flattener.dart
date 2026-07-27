@@ -319,14 +319,22 @@ class InlineFlattener {
           text: '\n',
           recognizer: inheritedRecognizer,
         ),
-      LinkRun(:final href, :final children, :final isAttachment, :final filename) =>
-          _buildLinkSpan(
-            href,
-            children,
-            p,
-            isAttachment: isAttachment,
-            filename: filename,
-          ),
+      LinkRun(
+        :final href,
+        :final children,
+        :final isAttachment,
+        :final filename,
+        :final hashtagRef,
+      ) =>
+        hashtagRef == null
+            ? _buildLinkSpan(
+                href,
+                children,
+                p,
+                isAttachment: isAttachment,
+                filename: filename,
+              )
+            : _buildHashtagSpan(href, children, p),
       InlineCodeRun(:final text) => _buildInlineCodeSpan(
           text,
           p.context,
@@ -444,6 +452,97 @@ class InlineFlattener {
       // 叶子会带同一个 recognizer
       children: linkChildren,
     );
+  }
+
+  /// hashtag(`#分类` / `#标签`)药丸:图标 + 名称,外面包一层浅底圆角,
+  /// 对齐网页端 `.hashtag-cooked` 的观感。
+  ///
+  /// 形态跟 mention 药丸同构(WidgetSpan + 行高锁定),点击仍走普通
+  /// link handler —— href 已经是 `/c/...` / `/tag/...`,主项目的
+  /// 链接分发认得。
+  WidgetSpan _buildHashtagSpan(
+    String href,
+    List<InlineNode> children,
+    _FlattenPass p,
+  ) {
+    final label = _hashtagLabel(children);
+    final isTag = RegExp(r'/tags?/').hasMatch(href);
+    final handler = p.handler;
+    final emojiBaseSize = p.emojiBaseSize;
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: Builder(
+        builder: (ctx) {
+          final scheme = Theme.of(ctx).colorScheme;
+          final fontSize = emojiBaseSize * 0.82;
+          final lineHeight = emojiBaseSize * 1.5;
+          return GestureDetector(
+            onTap: () => handler(ctx, href),
+            child: Container(
+              height: lineHeight,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(
+                    isTag ? Icons.sell_outlined : Icons.folder_outlined,
+                    size: fontSize * 1.05,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontSize: fontSize,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 取 hashtag 锚文本(cooked 里就是 `<span>名称</span>`,可能带前导 `#`)。
+  String _hashtagLabel(List<InlineNode> children) {
+    final buf = StringBuffer();
+    void walk(List<InlineNode> nodes) {
+      for (final n in nodes) {
+        switch (n) {
+          case TextRun(:final text):
+            buf.write(text);
+          case InlineCodeRun(:final text):
+            buf.write(text);
+          case EmRun(:final children):
+            walk(children);
+          case StrongRun(:final children):
+            walk(children);
+          case StyledRun(:final children):
+            walk(children);
+          case ColoredRun(:final children):
+            walk(children);
+          case SizedRun(:final children):
+            walk(children);
+          case LinkRun(:final children):
+            walk(children);
+          default:
+            break;
+        }
+      }
+    }
+
+    walk(children);
+    final text = buf.toString().trim();
+    return text.startsWith('#') ? text : '#$text';
   }
 
   /// 行内样式标签渲染(对齐 fwfh core_widget_factory 默认值)。
