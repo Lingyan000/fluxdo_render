@@ -479,40 +479,98 @@ class EditableTextContent {
     return _applyOnlyEmoji(out);
   }
 
-  /// Discourse 大表情语义:整段**只有** emoji(空白不算内容)且不超过
-  /// [_maxOnlyEmoji] 个 → 全部标 isOnlyEmoji(渲染 32dp);超了则全部
-  /// 普通尺寸。规则与 cook 引擎实测一致:
-  /// `:a:`→1 大 / `:a: :a: :a:`→3 全大 / 4 个→全不大。
+  /// Discourse 大表情语义:一**行**只有 emoji(空白不算内容)且不超过
+  /// [_maxOnlyEmoji] 个 → 该行的 emoji 全标 isOnlyEmoji(渲染 32dp)。
+  ///
+  /// 判定按**行**(软换行分段)走,不是按整段:`😋⏎aaaa` 发出去以后
+  /// 服务端渲染的就是「第一行大表情 + 第二行文字」(真机实测),编辑器
+  /// 要跟它一致 —— 按整段判会让回车后上一行的表情缩回去。
   ///
   /// 放在 [toInlines] 里而不是只放导出路径,是因为编辑器实时渲染
   /// (editable_paragraph)和导出(doc_converter)走的是同一个出口 ——
   /// 只在导出侧标记会导致"刚插入的 emoji 是小的,切到源码再切回来才
   /// 变大"(实测复现)。
   static List<InlineNode> _applyOnlyEmoji(List<InlineNode> out) {
-    var emojiCount = 0;
-    for (final n in out) {
-      if (n is EmojiRun) {
-        emojiCount++;
-        continue;
+    final large = <int>{}; // 需要放大的 EmojiRun 在 out 里的下标
+    var lineStart = 0;
+
+    void judgeLine(int endExclusive) {
+      final indices = <int>[];
+      for (var i = lineStart; i < endExclusive; i++) {
+        final n = out[i];
+        if (n is EmojiRun) {
+          indices.add(i);
+          continue;
+        }
+        // 纯空白不算内容;其余任何节点都让本行不再是"只有表情"
+        if (n is TextRun && n.text.trim().isEmpty) continue;
+        return;
       }
-      // 纯空白的文本片段不算内容;其余任何节点都让本段不再是"只有表情"
-      if (n is TextRun && n.text.trim().isEmpty) continue;
-      return out;
+      if (indices.isNotEmpty && indices.length <= _maxOnlyEmoji) {
+        large.addAll(indices);
+      }
     }
-    if (emojiCount == 0) return out;
-    final large = emojiCount <= _maxOnlyEmoji;
+
+    for (var i = 0; i < out.length; i++) {
+      if (out[i] is LineBreakRun) {
+        judgeLine(i);
+        lineStart = i + 1;
+      }
+    }
+    judgeLine(out.length);
+
     var changed = false;
     final result = [
-      for (final n in out)
-        if (n is EmojiRun && n.isOnlyEmoji != large)
+      for (var i = 0; i < out.length; i++)
+        if (out[i] case final EmojiRun n
+            when n.isOnlyEmoji != large.contains(i))
           () {
             changed = true;
-            return EmojiRun(name: n.name, url: n.url, isOnlyEmoji: large);
+            return EmojiRun(
+              name: n.name,
+              url: n.url,
+              isOnlyEmoji: large.contains(i),
+            );
           }()
         else
-          n,
+          out[i],
     ];
     return changed ? result : out;
+  }
+
+  /// 本段是不是含「大表情行」——判据与 [_applyOnlyEmoji] 同源。
+  ///
+  /// 给渲染侧用:大表情是 32dp + 上下 0.5em 外边距,远超裸行高,段落的
+  /// forceStrutHeight 双向钳制会把它压回去(真机症状:补全插入的 emoji
+  /// 不放大)。渲染侧据此放开钳制,同图片原子的处理。
+  bool get isOnlyEmojiLine {
+    var count = 0;
+    var lineCount = 0;
+    var lineClean = true;
+    for (var i = 0; i < text.length; i++) {
+      if (text[i] == '\n') {
+        if (lineClean && lineCount > 0 && lineCount <= _maxOnlyEmoji) {
+          count += lineCount;
+        }
+        lineCount = 0;
+        lineClean = true;
+        continue;
+      }
+      final atom = atoms[i];
+      if (atom != null) {
+        if (atom is EmojiRun) {
+          lineCount++;
+        } else {
+          lineClean = false;
+        }
+        continue;
+      }
+      if (text[i].trim().isNotEmpty) lineClean = false;
+    }
+    if (lineClean && lineCount > 0 && lineCount <= _maxOnlyEmoji) {
+      count += lineCount;
+    }
+    return count > 0;
   }
 
   /// 超过这个数量就不再算大表情(对齐 Discourse)。
