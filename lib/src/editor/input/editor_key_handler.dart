@@ -314,7 +314,13 @@ void _trackModifierDown(KeyEvent event, {required bool isMac}) {
   // splitBlock + 宿主软换行都因「不能碰发送快捷键」让路,回车穿透给平台
   // IME 兜底插入,表现为「粘贴后回车多插一行」——这条 KeyUp 是真实的
   // (不同于 Win+V 那种合成抬起),收到就该立刻清空窗口。
-  if (event is KeyUpEvent) _lastModifierDownAt = null;
+  //
+  // **只认真实抬起**:Win+V 的注入序列里,Flutter 会为「V 消息不带 Ctrl
+  // 修饰位」合成一次 Ctrl 抬起(就是本文件上方 Win+V 那段注释描述的
+  // 现象)。不排除合成事件的话,窗口在轮到 V 之前就被清空,补偿形同虚设
+  // —— 真机复现:Win+V 粘贴完全没反应。`synthesized` 正是框架给的这个
+  // 区分位。
+  if (event is KeyUpEvent && !event.synthesized) _lastModifierDownAt = null;
 }
 
 /// 本次按键是否**产出了可打印字符**。
