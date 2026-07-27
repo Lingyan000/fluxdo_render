@@ -293,14 +293,24 @@ bool _hasCrossingMarks(List<MarkSpan> marks) {
 
 /// 锚文本是否就是这条链接的裸 URL 形态。
 ///
-/// 精确相等之外还要**忽略 scheme 差异**:cook 给裸 URL linkify 时会自动
+/// 精确相等之外还要**忽略 `http://` 差异**:cook 给裸 URL linkify 时会自动
 /// 补 scheme(`dl.google.com` → href `http://dl.google.com`),锚文本却还是
 /// 没有 scheme 的原样。只认精确相等的话,这种链接会被写成
 /// `[dl.google.com](http://dl.google.com)` —— 用户写的裸 URL 被悄悄改写成
 /// markdown 链接语法(打开一次帖子就变形)。
+///
+/// 只放行 `http://`,**不放行 `https://`**:linkify 对无 scheme 裸 URL
+/// 一律补 `http://`(cook bundle 实测,域名/www/端口/路径形态无一例外),
+/// 所以 `href=https://X` + 锚文本 `X` 只可能是用户手写的 `[X](https://X)`
+/// —— 把它裸化的话,重 cook 会补回 `http://`,用户特意写的 https 被静默
+/// 降级成 http。
+///
+/// `mailto:` 同 `http://` 待遇:裸邮箱被 linkify 成
+/// `href=mailto:user@example.com` + 无 scheme 锚文本,裸化写回后重 cook
+/// 仍产同一个 mailto 链接,往返稳定。
 bool _isBareUrlText(String text, String href) {
   if (text == href) return true;
-  for (final scheme in const ['https://', 'http://']) {
+  for (final scheme in const ['http://', 'mailto:']) {
     if (href.startsWith(scheme) && href.substring(scheme.length) == text) {
       return true;
     }
@@ -830,8 +840,9 @@ String _serializeIslandInlines(List<InlineNode> inlines) {
       case LocalDateRun():
         buf.write(_serializeLocalDate(n));
       case ColoredRun():
-        // [color]/[bgcolor] BBCode 是 linux.do 未装插件的语法(cook 探针:
-        // 原样输出文本);着色 span 只能来自服务端放行的 HTML —— 写回同形态
+        // [color]/[bgcolor]:服务端装了 discourse-bbcode-color 插件(认这
+        // 个语法),客户端预览 bundle 没打包它(cook 原样输出字面文本)。
+        // 门禁两侧都用客户端 bundle → attr 原样写回即可两侧一致。
         buf.write(_serializeColored(n));
       case SizedRun():
         buf.write(_serializeSized(n));
@@ -873,13 +884,17 @@ String _serializeLocalDate(LocalDateRun n) {
 
 /// 着色重建 → **BBCode**(`[color=…]` / `[bgcolor=…]`)。
 ///
-/// 为什么不写 `<span style="color:…">`(服务端 cooked 的原始形态):
-/// Discourse 的 HTML 消毒器会把 span 上的 style 属性剥掉(实测
-/// `<span style="color:#FF0000">红</span>` → `<span>红</span>`),
-/// 只有 bbcode-color 插件在注册语法的同时把它加进了白名单。于是写
-/// span 形态的 raw 经客户端 cook 会丢色 —— 往返门禁(cook(raw) vs
-/// cook(docToRaw(doc)))必然不等,整帖降级源码模式。
-/// `[color=…]` 两端都认:服务端有插件、客户端有本地转换。
+/// 事实链(cook bundle 探针 + 站内官方教程帖):
+/// - **服务端**装了 discourse-bbcode-color 插件,`[color=X]` 被认并把 X
+///   **原样**放进 `style="color:X"`(`red`/`#F00` 逐字透传);
+/// - **客户端预览 bundle** 没打包该插件,cook 把 `[color=X]` 当字面文本;
+/// - 往返门禁 = cook(原 raw) vs cook(docToRaw(导入)),两侧都是客户端
+///   bundle → 两侧都把 [color] 当字面文本,**attr 原样写回即字节一致**。
+///   任何规范化(小写化 / `#F00`→`#ff0000` / `red`→hex)都会失配,
+///   整帖降级源码模式。
+///
+/// 所以优先写 colorRaw/backgroundRaw(cooked 里的 CSS 原文 = 用户在
+/// [color=X] 里写的 X);程序化构造(raw 为 null)才按 Color 值写 hex。
 String _serializeColored(ColoredRun n) {
   String hex(Color c) {
     final v = c.toARGB32() & 0xFFFFFF;
@@ -888,22 +903,32 @@ String _serializeColored(ColoredRun n) {
 
   var out = _serializeIslandInlines(n.children);
   // 前景包在里层、背景在外层(与解析侧的嵌套顺序一致)
-  if (n.color != null) out = '[color=${hex(n.color!)}]$out[/color]';
-  if (n.background != null) {
-    out = '[bgcolor=${hex(n.background!)}]$out[/bgcolor]';
+  if (n.color != null || n.colorRaw != null) {
+    final v = n.colorRaw ?? hex(n.color!);
+    out = '[color=$v]$out[/color]';
+  }
+  if (n.background != null || n.backgroundRaw != null) {
+    final v = n.backgroundRaw ?? hex(n.background!);
+    out = '[bgcolor=$v]$out[/bgcolor]';
   }
   return out;
 }
 
 /// 字号 → `[size=N]`。
 ///
-/// 与 [_serializeColored] 同一条理由:`<span style="font-size:…">` 形态经
-/// 客户端 cook 会被消毒掉样式,往返门禁必然不等 → 整帖降级源码模式。
-/// `[size=N]` 两端都认(服务端有 bbcode 插件、客户端有本地转换),
-/// 且实测映射就是 `N` ↔ `font-size:N%`。
+/// 与 [_serializeColored] 同一条理由:N 的原文(pctRaw)原样写回才能过
+/// 往返门禁;程序化构造(pctRaw=null)才按 scale 计算(整数化防浮点
+/// 脏值,见下)。
 String _serializeSized(SizedRun n) {
+  if (n.pctRaw != null) {
+    return '[size=${n.pctRaw}]${_serializeIslandInlines(n.children)}[/size]';
+  }
+  // scale 由 `font-size:N%` / 100 而来,乘回 100 会带浮点脏值
+  // (`0.07 * 100 == 7.000000000000001`)—— 与最近整数差在浮点误差
+  // 量级(1e-6)内的按整数写,防止 raw 里出现 `[size=7.000000000000001]`。
   final pct = n.scale * 100;
-  final v = pct == pct.roundToDouble() ? pct.round().toString() : '$pct';
+  final rounded = pct.round();
+  final v = (pct - rounded).abs() < 1e-6 ? rounded.toString() : '$pct';
   return '[size=$v]${_serializeIslandInlines(n.children)}[/size]';
 }
 
@@ -1001,41 +1026,11 @@ String _serializeTable(
 }
 
 // ---------------------------------------------------------------------
-// 原子 ↔ 字面 markdown(atom reveal 用:光标贴到原子边界时显形成
-// `![alt](src)` / `:name:` / `@user`,可直接改地址、改名)
+// 字面 markdown → 原子(input rules / 粘贴降级解析用)
 // ---------------------------------------------------------------------
-
-/// 原子节点的字面 raw 形态;不认识的节点返回 null(不展开)。
-String? atomToMarkdown(InlineNode node) => switch (node) {
-      final ImageRun img => _serializeImageRun(img),
-      EmojiRun(:final name) => name.isEmpty ? null : ':$name:',
-      MentionRun(:final username) => '@$username',
-      final LocalDateRun d => _serializeLocalDate(d),
-      // `[size=N]` 原子:显形时展开成字面 BBCode 供编辑(同分割线思路)
-      final SizedRun s => _serializeSized(s),
-      _ => null,
-    };
 
 final RegExp _imageMdRe =
     RegExp(r'^!\[([^\]]*?)(?:\|(\d+)x(\d+)(?:,\s*(\d+)%)?)?\]\(([^)]*)\)$');
-
-/// 字面 `[size=N]内容[/size]` → [SizedRun];不匹配返回 null。
-///
-/// 显形编辑后折叠用:用户可以直接把 `[size=0]` 改成 `[size=150]`,或改
-/// 里面的文字。内容里不允许再嵌 `[size` —— 保持"取最内层一段"的语义。
-final RegExp _sizeMdRe =
-    RegExp(r'^\[size=(\d{1,4})\]((?:(?!\[/?size)[\s\S])*)\[/size\]$');
-
-SizedRun? parseSizeMarkdown(String literal) {
-  final m = _sizeMdRe.firstMatch(literal);
-  if (m == null) return null;
-  final pct = int.tryParse(m.group(1)!);
-  if (pct == null) return null;
-  return SizedRun(
-    scale: pct / 100.0,
-    children: [TextRun(m.group(2)!)],
-  );
-}
 
 /// 字面图片语法 → [ImageRun];不匹配返回 null。
 ///

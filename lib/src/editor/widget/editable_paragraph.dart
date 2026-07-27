@@ -260,12 +260,14 @@ class _EditableParagraphState extends State<EditableParagraph> {
     }
 
     // 极小字号([size=0] 等)编辑态标识:实线描边框,提示"这段内容被
-    // 缩到隐藏了"——光标不在区间内时容易忽略过去,补一个视觉标记
-    // (光标移到边界会自动展开成字面 [size=0]…[/size],见 mark reveal)。
+    // 缩到隐藏了"——光标不在区间内时容易忽略过去,补一个视觉标记。
+    // 判定与 _applySizeMark 同口径:严格小于阈值([size=15] 是合法 15%,
+    // 不算隐藏)。
     final hiddenSizeSpans = [
       for (final m in block.content.marks)
         if (m.kind == MarkKind.size &&
-            (EditableTextContent.parsePct(m.attr) ?? 1.0) <= 0.15)
+            (EditableTextContent.parsePct(m.attr) ?? 1.0) <
+                EditableTextContent.hiddenSizeThreshold)
           TextRange(start: m.start, end: m.end),
     ];
     if (hiddenSizeSpans.isNotEmpty) {

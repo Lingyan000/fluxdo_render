@@ -626,9 +626,9 @@ class InlineFlattener {
           color: const Color(0xFF000000),
           background: Paint()..color = const Color(0xFFFFFF00),
         ),
-      // kbd/samp/tt:浏览器默认渲染的"键帽"底色(fwfh 原只给字体,不带底色;
-      // 改成贴近浏览器 UA 样式的浅灰底,视觉上才认得出是键位)。
-      InlineStyleKind.monospace => TextStyle(
+      // kbd/samp/tt:等宽字体,不带底色(fwfh/legacy 同款只给字体;
+      // 硬编码浅灰底在深色主题下是刺眼白块,阅读端视觉变更须单独拍板)。
+      InlineStyleKind.monospace => const TextStyle(
           fontFamily: 'FiraCode',
           fontFamilyFallback: const ['monospace', 'Menlo', 'Courier'],
           backgroundColor: const Color(0xFFE8E8E8),

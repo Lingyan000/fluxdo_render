@@ -222,6 +222,18 @@ KeyEventResult handleEditorKeyEvent(
 //   实有修饰键压制了字符 —— 中文输入法下拼音 `v` 也带 character,不命中;
 // - 主修饰键刚按下过(_modifierWindow 内):Win+V 的注入序列里 Ctrl 按下
 //   紧挨着 V,而普通打字前不会有这个前缀。
+//
+// **窗口边界**(2026-07 评审定案):
+// - 只在 **Windows** 生效(SendInput 注入/IME 假抬起都是 Windows 平台
+//   行为,其他平台吃这个补偿只会扩大误判面);
+// - 只服务**可逆**操作(粘贴/复制/格式切换/Enter 路由 —— 错了顶多多插
+//   一行,undo 能回)。发送类不可逆动作的判定([primaryModifierHeld])
+//   **不吃**这个窗口 —— 2s 的暴露面对可逆操作可接受,对「误发帖」不行。
+//
+// 状态是库级 top-level:编辑器同时只有一个键盘焦点实例,且
+// [observeModifierKeyEvent] 要求宿主在**页面级**喂事件(多编辑器实例
+// 共享同一物理键盘,状态本就该全局)。测试间用 [debugResetModifierState]
+// 重置。
 const Duration _modifierWindow = Duration(milliseconds: 2000);
 DateTime? _lastModifierDownAt;
 
@@ -332,16 +344,10 @@ bool shiftModifierHeld() {
       _physicalHeld(pressed, PhysicalKeyboardKey.shiftLeft, PhysicalKeyboardKey.shiftRight);
 }
 
-/// 主修饰键(Windows/Linux 的 Ctrl、macOS 的 Cmd)是否按下 —— **权威判定**。
-///
-/// 宿主的按键拦截层必须用这个,而不是直接读 `HardwareKeyboard`:后者在
-/// 平台注入/IME 介入时会失真(见上方 Win+V 与 _localPrimaryDown 的注释)。
-/// 两边口径不一致的后果是 Ctrl+Enter 被当普通回车 —— 内核分段、宿主再插
-/// 软换行,一次按键换两行还发不出去。
 /// 清空修饰键的本地跟踪状态。
 ///
 /// 这些状态是**模块级全局**(编辑器同时只有一个焦点实例,不必按实例存)。
-/// 测试之间必须重置,否则上个用例按下的 Ctrl 会连同 250ms 补偿窗口一起
+/// 测试之间必须重置,否则上个用例按下的 Ctrl 会连同补偿窗口一起
 /// 污染下一个用例。
 @visibleForTesting
 void debugResetModifierState() {
@@ -364,14 +370,31 @@ void observeModifierKeyEvent(KeyEvent event) {
   );
 }
 
+/// 主修饰键(Windows/Linux 的 Ctrl、macOS 的 Cmd)是否按下 —— **权威判定,
+/// 供宿主的发送类快捷键(Cmd/Ctrl+Enter 提交)使用**。
+///
+/// **只认 `HardwareKeyboard` 的真实状态,不吃 2s 补偿窗口**:发送是
+/// 不可逆动作,补偿窗口的存在意义是救 Win+V 注入/假抬起这类**可逆**
+/// 操作(粘贴错了能 undo)。若发送也吃窗口,评审场景直接成立:Ctrl+V
+/// 粘贴后 Ctrl 的 key-up 丢失,2s 内敲**纯回车**会被误判成 Ctrl+Enter
+/// 把没写完的帖子发出去 —— 比「Ctrl+Enter 偶尔失效需要重按」严重得多。
+///
+/// 口径拆分(可逆吃补偿、不可逆不吃):
+/// - 内核 [handleEditorKeyEvent] 的 primary(粘贴/复制/格式/Enter 路由,
+///   全部可逆)继续用「真实状态 或 补偿窗口」;
+/// - 本函数(发送判定)只用真实状态。两边不一致的最坏情形:补偿窗口
+///   活跃时敲 Enter,内核放行、宿主不发送,回车穿透给平台 IME 兜底插行
+///   —— 多一个换行,可逆,可接受。
 bool primaryModifierHeld(KeyEvent event) {
   final isMac = defaultTargetPlatform == TargetPlatform.macOS;
   final pressed = HardwareKeyboard.instance;
-  return (isMac ? pressed.isMetaPressed : pressed.isControlPressed) ||
-      (!_producedPrintable(event) && _isSyntheticModifiedKey(event));
+  return isMac ? pressed.isMetaPressed : pressed.isControlPressed;
 }
 
 bool _isSyntheticModifiedKey(KeyEvent event) {
+  // SendInput 注入 / IME 假抬起是 Windows 平台行为 —— 别的平台不吃补偿,
+  // 免得白白扩大误判面。
+  if (defaultTargetPlatform != TargetPlatform.windows) return false;
   if (event.character != null) return false;
   final at = _lastModifierDownAt;
   if (at == null) return false;

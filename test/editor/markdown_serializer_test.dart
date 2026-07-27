@@ -569,9 +569,11 @@ void main() {
   });
 }
 
-/// 裸 URL 往返:cook 给裸 URL linkify 时会补 scheme(锚文本无 scheme、
-/// href 有),锚文本与 href 只差 scheme 时仍应写回裸 URL —— 否则用户写的
+/// 裸 URL 往返:cook 给裸 URL linkify 时会补 `http://`(锚文本无 scheme、
+/// href 有),锚文本与 href 只差 `http://` 时仍应写回裸 URL —— 否则用户写的
 /// `dl.google.com` 打开一次就被改写成 `[dl.google.com](http://dl.google.com)`。
+/// https 则相反:linkify 从不产 https,`[X](https://X)` 只可能是手写的完整
+/// 链接语法,必须原样保留(裸化后重 cook 会降级成 http)。
 void _bareUrlTests() {
   MarkSpan link(int s, int e, String href) =>
       MarkSpan(start: s, end: e, kind: MarkKind.link, attr: href);
@@ -581,11 +583,19 @@ void _bareUrlTests() {
       ]);
 
   group('裸 URL 序列化', () {
-    test('锚文本与 href 只差 scheme → 写回裸 URL', () {
+    test('锚文本与 href 只差 http:// → 写回裸 URL(linkify 产物)', () {
       expect(md('看 dl.google.com 吧', link(2, 15, 'http://dl.google.com')),
           '看 dl.google.com 吧');
+    });
+
+    test('锚文本与 href 差 https:// → 保留完整语法(只能是手写链接)', () {
       expect(md('看 dl.google.com 吧', link(2, 15, 'https://dl.google.com')),
-          '看 dl.google.com 吧');
+          '看 [dl.google.com](https://dl.google.com) 吧');
+    });
+
+    test('锚文本与 href 只差 mailto: → 写回裸邮箱(linkify 产物)', () {
+      expect(md('联系 user@example.com 吧', link(3, 19, 'mailto:user@example.com')),
+          '联系 user@example.com 吧');
     });
 
     test('锚文本与 href 完全相同 → 仍写回裸 URL(原有行为)', () {

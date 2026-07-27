@@ -498,6 +498,11 @@ void _writeInline(StringBuffer buf, InlineNode node, int indent) {
       buf.writeln('$pad$node');
     case MathInlineRun():
       buf.writeln('$pad$node');
+    case SizedRun(:final scale, :final children):
+      buf.writeln('${pad}SizedRun(x$scale)');
+      for (final c in children) {
+        _writeInline(buf, c, indent + 1);
+      }
   }
 }
 

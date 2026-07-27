@@ -61,9 +61,6 @@ InputRuleOutcome tryApplyInputRules(
   if (typedChar == ' ') {
     return _tryBlockRules(state, block, sel.extent.offset);
   }
-  // mark 展开区内是字面标记编辑态(光标在边界展开的 `**`),行内规则
-  // 必须避让 —— 否则规则会把展开的标记立即折叠回 mark,编辑功能被吃掉。
-  if (state.caretInRevealedRegion) return InputRuleOutcome.none;
   if (typedChar == ')') {
     return _tryImageOrLinkRule(state, block, sel.extent.offset);
   }
@@ -128,37 +125,46 @@ InputRuleOutcome _tryBlockRules(
   TextBlock block,
   int caret,
 ) {
-  // 块级标记必须在**行首起敲**:光标前的全部文本就是标记本身。
-  // (含 '\n' 软换行的段落里,只认真正的块首 —— 对齐官方
-  // textblockTypeInputRule 的 ^ 锚定。)
-  final before = block.content.text.substring(0, caret);
+  // 块级标记必须在**行首**起敲。基准是光标所在**软行**的行首(段内
+  // '\n' 软换行后的第二行打 `- ` 同样要触发 —— 对齐官方 rich editor:
+  // ProseMirror 里 Shift+Enter 后的行首同样吃 textblockTypeInputRule)。
+  // 软行行首触发时块会在软换行处分裂,当前软行起的内容变成新块。
+  final text = block.content.text;
+  final lineStart =
+      caret == 0 ? 0 : text.lastIndexOf('\n', caret - 1) + 1;
+  final before = text.substring(lineStart, caret);
   if (before.contains('\n')) return InputRuleOutcome.none;
   // 标记区不能有原子(emoji 后打 "# " 不是标题意图)
-  for (var i = 0; i < caret; i++) {
+  for (var i = lineStart; i < caret; i++) {
     if (block.content.isAtomAt(i)) return InputRuleOutcome.none;
   }
+  final atBlockStart = lineStart == 0;
+  final markerLength = caret - lineStart;
 
-  // hr:任何块类型都可触发(空段打 --- )
+  // hr:任何块类型都可触发(空段打 --- )。**只认真正的块首**:hr 是
+  // 「整块换岛」语义(视图层删块插岛),软行触发会把整段前文一起吞掉
+  // —— 取舍:软行场景极少见(想插分隔线先回车分段即可),不值得为它
+  // 把 hrRequest 改成「切块+局部替换」的复杂协议。callout 同理。
   final hr = _hrRe.firstMatch(before);
-  if (hr != null && block.isParagraph) {
+  if (hr != null && block.isParagraph && atBlockStart) {
     state.sealHistory();
     state.applyBlockInputRule(
       block.id,
-      markerLength: caret,
+      markerLength: markerLength,
       transform: (b) => b, // 类型不变,仅清标记;岛由视图层插
     );
     return InputRuleOutcome.hrRequest;
   }
 
   // callout:任何段落块都可触发(空段打 "[!note] " 或引用层里打
-  // "> [!note] ")
+  // "> [!note] ")。同 hr,只认块首(整块经 cook 换岛语义)。
   final callout = _calloutRe.firstMatch(before);
-  if (callout != null && block.isParagraph) {
+  if (callout != null && block.isParagraph && atBlockStart) {
     state.pendingCalloutType = callout.group(1)!.toLowerCase();
     state.sealHistory();
     state.applyBlockInputRule(
       block.id,
-      markerLength: caret,
+      markerLength: markerLength,
       transform: (b) => b, // 类型不变,仅清标记;岛由视图层经 cook 插
     );
     return InputRuleOutcome.calloutRequest;
@@ -171,7 +177,8 @@ InputRuleOutcome _tryBlockRules(
     state.sealHistory();
     state.applyBlockInputRule(
       block.id,
-      markerLength: caret,
+      markerLength: markerLength,
+      lineStart: lineStart,
       transform: (b) => b.asHeading(level),
     );
     return InputRuleOutcome.applied;
@@ -181,7 +188,8 @@ InputRuleOutcome _tryBlockRules(
     state.sealHistory();
     state.applyBlockInputRule(
       block.id,
-      markerLength: caret,
+      markerLength: markerLength,
+      lineStart: lineStart,
       transform: (b) => b.asListItem(ordered: false),
     );
     return InputRuleOutcome.applied;
@@ -193,7 +201,8 @@ InputRuleOutcome _tryBlockRules(
     state.sealHistory();
     state.applyBlockInputRule(
       block.id,
-      markerLength: caret,
+      markerLength: markerLength,
+      lineStart: lineStart,
       transform: (b) => b.asListItem(ordered: true, listStart: start),
     );
     return InputRuleOutcome.applied;
@@ -203,7 +212,8 @@ InputRuleOutcome _tryBlockRules(
     state.sealHistory();
     state.applyBlockInputRule(
       block.id,
-      markerLength: caret,
+      markerLength: markerLength,
+      lineStart: lineStart,
       transform: (b) => b.copyWith(
         containers: [
           QuoteFrame(groupId: nextFrameGroupId()),
@@ -818,9 +828,6 @@ InputRuleOutcome _tryInsidePairRules(
       contentLength: contentText.length,
       kind: kind,
     );
-    // 立刻回到展开(字面)态:光标还夹在定界符之间 = 正在编辑这段内容,
-    // 此时渲染会打断输入。mark 已建好,光标走出闭定界符时自然折叠。
-    state.revealMarkAtCaret();
     return InputRuleOutcome.applied;
   }
   return InputRuleOutcome.none;

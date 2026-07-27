@@ -459,11 +459,6 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   void _onFocusChanged() {
     final primary = _focusNode.hasPrimaryFocus;
-    // 临时探针(Win+V 排查):剪贴板面板抢焦点后编辑器是否掉了主焦点
-    // (掉了就会 _ime.detach(),回来时注入的按键无处可去)。
-    if (kDebugMode) {
-      debugPrint('[Focus] primary=$primary hasFocus=${_focusNode.hasFocus}');
-    }
     if (primary) {
       // 聚焦编辑器正文(Tab / 点击 / 从 cell 输入框回来):恢复光标可编辑。
       // 无选区时落到文档末尾(常规编辑器语义)。
@@ -480,9 +475,6 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       // 焦点离开编辑器正文(→ 子输入框如表格 cell,或 → 编辑器外):
       // 关编辑器 IME + 封历史口;光标随 hasPrimaryFocus 消失(见
       // _computeLocalCaretRect),否则与 cell TextField 双光标。
-      // 焦点离开编辑器(点「发送」/切到别处):先把显形的字面标记收回
-      // 结构,否则 `**粗**` 会原样被序列化提交。
-      widget.state.commitReveals();
       _ime.detach();
       widget.state.sealHistory();
     }
@@ -1578,19 +1570,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       if (!mounted || ticket != _pasteTicket) return;
     }
 
-    if (kDebugMode) {
-      final before = widget.state.blocks.length;
-      final kinds = fragment?.map((b) => b.runtimeType).toList();
-      if (fragment != null && fragment.isNotEmpty) {
-        widget.state.pasteBlocks(fragment);
-      } else {
-        widget.state.pastePlainText(text);
-      }
-      debugPrint(
-        '[FluxdoEditor] paste "${text.split('\n').first}" '
-        'fragKinds=$kinds blocks $before→${widget.state.blocks.length}',
-      );
-    } else if (fragment != null && fragment.isNotEmpty) {
+    if (fragment != null && fragment.isNotEmpty) {
       widget.state.pasteBlocks(fragment);
     } else {
       widget.state.pastePlainText(text);
@@ -1726,7 +1706,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     _verticalGoalX = null;
     _caretAffinity = hit.$2;
     widget.state.sealHistory();
-    widget.state.navigateSelection(EditorSelection.collapsed(hit.$1));
+    widget.state.updateSelection(EditorSelection.collapsed(hit.$1));
     _ime.syncFromState();
 
     // 可编辑原子(date chip)单击 → 请求编辑(对齐官方:chip 是节点,
@@ -2241,7 +2221,6 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                 ? state.composing
                 : TextRange.empty,
             listMarkerOrdinal: ordinals[i],
-            markerRanges: state.markerRangesOf(tb.id),
             // 行内图片原子走岛同一图片管线(upload 解析/解码上限);
             // hover=click(可点选)。注意:builder 产物进 flatten 缓存
             // (content 不变不重跑),不能在闭包里读选中态等易变状态

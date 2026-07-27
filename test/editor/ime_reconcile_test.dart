@@ -21,6 +21,8 @@ void main() {
   _cjkCommitRuleTests();
   _softBreakTests();
   TestWidgetsFlutterBinding.ensureInitialized();
+  _cjkCommitRuleTests();
+  _softBreakTests();
 
   (EditorState, EditorImeClient) makeAttached({
     List<String> paragraphs = const ['第一段', 'second'],
@@ -364,56 +366,6 @@ void main() {
       expect(state.hasComposing, false);
       expect(state.selection!.extent.offset, 2, reason: '光标在"你好"之后');
     });
-
-    test('mark 展开状态下两步上屏:光标落在新字之后', () {
-      final state = EditorState(blocks: [
-        TextBlock(
-          id: 'b0',
-          content: EditableTextContent(
-            text: 'hello world',
-            marks: [MarkSpan(start: 6, end: 11, kind: MarkKind.strong)],
-          ),
-        ),
-      ]);
-      // 光标到 bold 起始边界 → 展开为 "hello **world**",光标 8
-      state.navigateSelection(const EditorSelection.collapsed(
-        EditorPosition(blockId: 'b0', offset: 6),
-      ));
-      expect((state.blocks[0] as TextBlock).content.text, 'hello **world**');
-      expect(state.selection!.extent.offset, 8);
-
-      final ime = EditorImeClient(state: state);
-      ime.debugAttachToBlock(
-        'b0',
-        EditorImeClient.debugFormat(
-          const TextEditingValue(
-            text: 'hello **world**',
-            selection: TextSelection.collapsed(offset: 8),
-          ),
-        ),
-      );
-      // 拼音预编辑 "a"
-      ime.updateEditingValue(TextEditingValue(
-        text: '${pad}hello **aworld**',
-        selection: const TextSelection.collapsed(offset: 10),
-        composing: const TextRange(start: 9, end: 10),
-      ));
-      // 上屏第一步:选区滞后在组首
-      ime.updateEditingValue(TextEditingValue(
-        text: '${pad}hello **啊world**',
-        selection: const TextSelection.collapsed(offset: 9),
-        composing: const TextRange(start: 9, end: 10),
-      ));
-      // 上屏第二步:收尾通知带最终光标
-      ime.updateEditingValue(TextEditingValue(
-        text: '${pad}hello **啊world**',
-        selection: const TextSelection.collapsed(offset: 10),
-        composing: TextRange.empty,
-      ));
-      expect(
-          (state.blocks[0] as TextBlock).content.text, 'hello **啊world**');
-      expect(state.selection!.extent.offset, 9, reason: '光标在"啊"之后');
-    });
   });
 
   group('英文直输', () {
@@ -448,8 +400,6 @@ void main() {
 /// 换行全没、几行并成一行 —— 早先 IME 层无条件 `replaceAll('\n','')`,
 /// 把"段内既有软换行"和"平台插入的回车"一起洗了。
 void _softBreakTests() {
-  final pad = EditorImeClient.padCharForTesting;
-
   group('段内软换行', () {
     (EditorState, EditorImeClient) attach(String text, {int? caret}) {
       final c = caret ?? text.length;
@@ -501,6 +451,44 @@ void _softBreakTests() {
       expect(state.blocks.length, 2, reason: '回车 → 分段');
       expect(textOf(state), t, reason: '既有软换行没被吃');
     });
+
+    test('混合变更(替换段含换行):剥换行后 caret 不右偏', () {
+      // 平台批量替换:abc → aX\nYc(删 b,插 "X\nY",caret 在 Y 后)。
+      // 剥掉插入段里的 \n 后文档应为 aXYc,caret 应落在 Y 后 = 3
+      // —— 曾用未剥文本的 caret(4)直接 clamp,右偏一位。
+      const t = 'abc';
+      final (state, ime) = attach(t, caret: 2);
+      ime.updateEditingValue(const TextEditingValue(
+        text: '${EditorImeClient.padCharForTesting}aX\nYc',
+        selection: TextSelection.collapsed(offset: 5), // pad a X \n Y | c
+      ));
+      expect(textOf(state), 'aXYc');
+      expect(state.blocks.length, 1, reason: '混合变更不分段');
+      expect(state.selection!.extent.offset, 3, reason: 'caret 在 Y 后');
+    });
+
+    test('混合变更剥换行后:下一击键内容不错位(_lastSent 一致性)', () {
+      // 第一轮剥 \n 后必须强制回喂平台(reconcile 基准 = 平台原文),
+      // 否则 _lastSent 里残留 \n,第二轮 diff 全部错位 —— 曾实测
+      // 第二轮在 Y 后打 Z 得到 "aXYcZ"(应为 "aXYZc")。
+      const t = 'abc';
+      final (state, ime) = attach(t, caret: 2);
+      ime.updateEditingValue(const TextEditingValue(
+        text: '${EditorImeClient.padCharForTesting}aX\nYc',
+        selection: TextSelection.collapsed(offset: 5), // pad a X \n Y | c
+      ));
+      expect(textOf(state), 'aXYc');
+      // reconcile 已回喂:_lastSent 应与文档一致(不含 \n)
+      expect(ime.debugLastSent.text.contains('\n'), isFalse,
+          reason: '平台窗口已被纠正,无残留换行');
+      // 第二轮:在 Y 后插 Z(基于纠正后的窗口 aXYc)
+      ime.updateEditingValue(const TextEditingValue(
+        text: '${EditorImeClient.padCharForTesting}aXYZc',
+        selection: TextSelection.collapsed(offset: 5), // pad a X Y Z | c
+      ));
+      expect(textOf(state), 'aXYZc');
+      expect(state.selection!.extent.offset, 4, reason: 'caret 在 Z 后');
+    });
   });
 }
 
@@ -510,8 +498,6 @@ void _softBreakTests() {
 /// 拼音还在 composing 里,规则按约定跳过;上屏通知的 diff.inserted 是空的,
 /// 普通路径也进不来,于是 `**编辑器**` 永远停在字面星号。
 void _cjkCommitRuleTests() {
-  final pad = EditorImeClient.padCharForTesting;
-
   group('CJK 上屏后补判 input rules', () {
     (EditorState, EditorImeClient) attach(String text, int caret) {
       final state = EditorState(blocks: [

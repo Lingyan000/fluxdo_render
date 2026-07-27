@@ -82,25 +82,41 @@ void main() {
     });
   });
 
-  group('显形编辑(同分割线思路)', () {
-    test('原子能展开成字面 BBCode', () {
-      const run = SizedRun(scale: 1.5, children: [TextRun('大')]);
-      expect(atomToMarkdown(run), '[size=150]大[/size]');
+  group('隐藏内容阈值(编辑态夹下限)', () {
+    List<InlineNode> editInlines(String html) {
+      var n = 0;
+      final doc = blockNodesToDoc([para(html)], () => 'e_${n++}');
+      return (doc.single as TextBlock).content.toInlines(forEditing: true);
+    }
+
+    test('[size=15] 恰在阈值上,是合法 15% 字号,不当隐藏内容', () {
+      final run = editInlines(
+              '<p><span style="font-size:15%">小字</span></p>')
+          .whereType<SizedRun>()
+          .single;
+      expect(run.scale, 0.15, reason: '判定是严格小于阈值,0.15 原样渲染');
     });
 
-    test('改过的字面能解析回原子', () {
-      final r = parseSizeMarkdown('[size=200]改大了[/size]')!;
-      expect(r.scale, 2.0);
-      expect((r.children.single as TextRun).text, '改大了');
+    test('[size=0] 低于阈值,编辑态夹到可读小尺寸', () {
+      final run = editInlines(
+              '<p><span style="font-size:0%">隐</span></p>')
+          .whereType<SizedRun>()
+          .single;
+      expect(run.scale, EditableTextContent.hiddenSizeEditingScale);
     });
 
-    test('size=0 字面往返', () {
-      expect(parseSizeMarkdown('[size=0]隐[/size]')!.scale, 0.0);
-    });
-
-    test('语法不完整 → null(保持字面文本,不吞内容)', () {
-      expect(parseSizeMarkdown('[size=150]没闭合'), isNull);
-      expect(parseSizeMarkdown('[size=abc]x[/size]'), isNull);
+    test('阅读态不夹(forEditing=false 原样)', () {
+      var n = 0;
+      final doc = blockNodesToDoc(
+        [para('<p><span style="font-size:0%">隐</span></p>')],
+        () => 'e_${n++}',
+      );
+      final run = (doc.single as TextBlock)
+          .content
+          .toInlines()
+          .whereType<SizedRun>()
+          .single;
+      expect(run.scale, 0.0);
     });
   });
 
@@ -124,6 +140,19 @@ void main() {
       var n = 0;
       final doc = blockNodesToDoc([p], () => 'e_${n++}');
       expect(docToMarkdown(doc), isNot(contains('150.0')));
+    });
+
+    test('0-400 全枚举往返:[size=N] 序列化回 [size=N](无浮点脏值)', () {
+      // scale = N/100 → 序列化乘回 100,浮点误差会产出
+      // `[size=7.000000000000001]` 这类脏值(修复前 0-400 中 35 个 N 中招)。
+      for (var i = 0; i <= 400; i++) {
+        final p = para('<p><span style="font-size:$i%">x</span></p>');
+        var n = 0;
+        final doc = blockNodesToDoc([p], () => 'e_${n++}');
+        final md = docToMarkdown(doc);
+        expect(md, contains('[size=$i]x[/size]'),
+            reason: 'N=$i 的往返应逐字保真,实际:$md');
+      }
     });
   });
 }
