@@ -279,6 +279,12 @@ class EditableTextContent {
         case SpoilerRun(:final children):
           _flattenInto(children, buf, marks, atoms,
               [...activeKinds, (MarkKind.spoilerInline, null)]);
+        // hashtag 链接:行内原子(mention 同机制)。整体一个哨兵字符,
+        // 编辑态渲染成药丸,序列化写回 `#ref`。必须排在普通 LinkRun
+        // 分支之前 —— 否则会被当成普通链接 mark 化,把 `#ref` 写法毁掉。
+        case LinkRun(:final hashtagRef) when hashtagRef != null:
+          atoms[buf.length] = node;
+          _appendText(buf, marks, activeKinds, kAtomChar);
         case LinkRun(:final href, :final children, :final isOneboxLink):
           if (isOneboxLink) {
             // 裸 URL 的 linkify 链接:编辑器显示 URL 本身(锚文本可能
@@ -465,35 +471,94 @@ class EditableTextContent {
   /// (editable_paragraph)和导出(doc_converter)走的是同一个出口 ——
   /// 只在导出侧标记会导致"刚插入的 emoji 是小的,切到源码再切回来才
   /// 变大"(实测复现)。
+  /// 判定按**行**(软换行分段)走,不是按整段:`😋⏎aaaa` 发出去以后
+  /// 服务端渲染的就是「第一行大表情 + 第二行文字」(实测),编辑器要
+  /// 跟它一致。
   static List<InlineNode> _applyOnlyEmoji(List<InlineNode> out) {
-    var emojiCount = 0;
-    for (final n in out) {
-      if (n is EmojiRun) {
-        emojiCount++;
-        continue;
+    final large = <int>{}; // 需要放大的 EmojiRun 在 out 里的下标
+    var lineStart = 0;
+
+    void judgeLine(int endExclusive) {
+      final indices = <int>[];
+      for (var i = lineStart; i < endExclusive; i++) {
+        final n = out[i];
+        if (n is EmojiRun) {
+          indices.add(i);
+          continue;
+        }
+        // 纯空白不算内容;其余任何节点都让本行不再是"只有表情"
+        if (n is TextRun && n.text.trim().isEmpty) continue;
+        return;
       }
-      // 纯空白的文本片段不算内容;其余任何节点都让本段不再是"只有表情"
-      if (n is TextRun && n.text.trim().isEmpty) continue;
-      return out;
+      if (indices.isNotEmpty && indices.length <= _maxOnlyEmoji) {
+        large.addAll(indices);
+      }
     }
-    if (emojiCount == 0) return out;
-    final large = emojiCount <= _maxOnlyEmoji;
+
+    for (var i = 0; i < out.length; i++) {
+      if (out[i] is LineBreakRun) {
+        judgeLine(i);
+        lineStart = i + 1;
+      }
+    }
+    judgeLine(out.length);
+
     var changed = false;
     final result = [
-      for (final n in out)
-        if (n is EmojiRun && n.isOnlyEmoji != large)
+      for (var i = 0; i < out.length; i++)
+        if (out[i] case final EmojiRun n when n.isOnlyEmoji != large.contains(i))
           () {
             changed = true;
-            return EmojiRun(name: n.name, url: n.url, isOnlyEmoji: large);
+            return EmojiRun(
+              name: n.name,
+              url: n.url,
+              isOnlyEmoji: large.contains(i),
+            );
           }()
         else
-          n,
+          out[i],
     ];
     return changed ? result : out;
   }
 
   /// 超过这个数量就不再算大表情(对齐 Discourse)。
   static const int _maxOnlyEmoji = 3;
+
+  /// 本段是不是「大表情段」——判据与 [_applyOnlyEmoji] 同源(只有 emoji
+  /// 原子、空白不算内容、不超过 [_maxOnlyEmoji] 个)。
+  ///
+  /// 给渲染侧用:大表情是 32dp + 上下 0.5em 外边距,远超裸行高,段落的
+  /// forceStrutHeight 双向钳制会把它压回去(真机症状:补全插入的 emoji
+  /// 不放大)。渲染侧据此放开钳制,同图片原子的处理。
+  bool get isOnlyEmojiLine {
+    var count = 0;
+    var lineCount = 0;
+    var lineClean = true;
+    for (var i = 0; i < text.length; i++) {
+      if (text[i] == '\n') {
+        if (lineClean && lineCount > 0 && lineCount <= _maxOnlyEmoji) {
+          count += lineCount;
+        }
+        lineCount = 0;
+        lineClean = true;
+        continue;
+      }
+      final atom = atoms[i];
+      if (atom != null) {
+        if (atom is EmojiRun) {
+          lineCount++;
+        } else {
+          lineClean = false;
+        }
+        continue;
+      }
+      if (text[i].trim().isNotEmpty) lineClean = false;
+    }
+    if (lineClean && lineCount > 0 && lineCount <= _maxOnlyEmoji) {
+      count += lineCount;
+    }
+    return count > 0;
+  }
 
   static InlineNode _wrapAtom(
     InlineNode atom,
@@ -644,24 +709,51 @@ class EditableTextContent {
     assert(offset >= 0 && offset <= text.length);
     if (inserted.isEmpty) return this;
     final len = inserted.length;
+    final newText = text.replaceRange(offset, offset, inserted);
     final newMarks = <MarkSpan>[];
     for (final m in marks) {
+      final MarkSpan span;
       if (m.end <= offset) {
-        newMarks.add(m);
+        span = m;
       } else if (m.start >= offset) {
-        newMarks.add(m.copyWith(start: m.start + len, end: m.end + len));
+        span = m.copyWith(start: m.start + len, end: m.end + len);
       } else {
-        newMarks.add(m.copyWith(end: m.end + len));
+        span = m.copyWith(end: m.end + len);
       }
+      newMarks.add(_syncSelfLinkedAttr(m, span, newText));
     }
     return EditableTextContent(
-      text: text.replaceRange(offset, offset, inserted),
+      text: newText,
       marks: newMarks,
       atoms: {
         for (final e in atoms.entries)
           (e.key >= offset ? e.key + len : e.key): e.value,
       },
     );
+  }
+
+  /// 「文本即链接」的 link mark:改文字时把 href 一起改掉。
+  ///
+  /// 裸链接(粘贴进来的 URL)的锚文本**就是** href。只改文字不改 attr,
+  /// 切到源码就是 `[改过的文字](原地址)` —— 显示一个地址、跳另一个
+  /// (真机复现:删掉 `?u=xxx` 后两边不一致)。判据取**编辑前**是否相等:
+  /// 本来就是自定义文案的链接不受影响。
+  MarkSpan _syncSelfLinkedAttr(MarkSpan old, MarkSpan next, String newText) {
+    if (old.kind != MarkKind.link) return next;
+    final os = old.start.clamp(0, text.length);
+    final oe = old.end.clamp(os, text.length);
+    if (old.attr != text.substring(os, oe)) return next; // 自定义文案,不动
+    final ns = next.start.clamp(0, newText.length);
+    final ne = next.end.clamp(ns, newText.length);
+    final slice = newText.substring(ns, ne);
+    return slice.isEmpty
+        ? next
+        : MarkSpan(
+            start: next.start,
+            end: next.end,
+            kind: next.kind,
+            attr: slice,
+          );
   }
 
   /// 在 [offset] 处插入一个原子(哨兵 + 身份)。
@@ -680,6 +772,7 @@ class EditableTextContent {
     assert(start >= 0 && end <= text.length && start <= end);
     if (start == end) return this;
     final len = end - start;
+    final newText = text.replaceRange(start, end, '');
     final newMarks = <MarkSpan>[];
     for (final m in marks) {
       // 区间平移/收缩:与删除区间求差。
@@ -688,10 +781,10 @@ class EditableTextContent {
           : (m.start >= end ? m.start - len : start);
       final ne = m.end <= start ? m.end : (m.end >= end ? m.end - len : start);
       final span = m.copyWith(start: ns, end: ne);
-      if (!span.isEmpty) newMarks.add(span);
+      if (!span.isEmpty) newMarks.add(_syncSelfLinkedAttr(m, span, newText));
     }
     return EditableTextContent(
-      text: text.replaceRange(start, end, ''),
+      text: newText,
       marks: newMarks,
       atoms: {
         for (final e in atoms.entries)

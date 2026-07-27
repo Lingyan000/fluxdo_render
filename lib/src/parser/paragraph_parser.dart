@@ -2366,6 +2366,7 @@ class ParagraphParser {
             href: href,
             children: List.unmodifiable(children),
             hashtagRef: (ref == null || ref.isEmpty) ? null : ref,
+            hashtagIcon: _hashtagIconName(el),
           ));
         } else {
           out.add(LinkRun(
@@ -2807,6 +2808,24 @@ class ParagraphParser {
     if (classes.contains('meta')) return true;
     if (classes.contains('lb-spacer')) return true;
     return false;
+  }
+
+  /// hashtag 锚点里的图标名:cooked 形如
+  /// `<svg class="fa d-icon d-icon-folder …"><use href="#folder"></use></svg>`。
+  /// 优先取 `<use>` 的 href/xlink:href(`#name`),退回 svg 的
+  /// `d-icon-<name>` class。都没有 → null(渲染侧按分类/标签兜底)。
+  String? _hashtagIconName(dom.Element el) {
+    for (final use in el.querySelectorAll('use')) {
+      final raw = (use.attributes['href'] ?? use.attributes['xlink:href'] ?? '')
+          .trim();
+      if (raw.startsWith('#') && raw.length > 1) return raw.substring(1);
+    }
+    for (final svg in el.querySelectorAll('svg')) {
+      for (final c in svg.classes) {
+        if (c.startsWith('d-icon-') && c.length > 7) return c.substring(7);
+      }
+    }
+    return null;
   }
 
   /// 把元素子树的所有 text 节点拼成一段(用于 InlineCodeRun)。

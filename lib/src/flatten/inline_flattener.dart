@@ -33,6 +33,7 @@ import '../node/inline_node.dart';
 import 'soft_break.dart';
 import '../render/emoji_handler.dart';
 import '../render/footnote_handler.dart';
+import '../render/hashtag_icons.dart';
 import '../render/image_handler.dart';
 import '../render/link_handler.dart';
 import '../render/local_date_handler.dart';
@@ -325,6 +326,7 @@ class InlineFlattener {
         :final isAttachment,
         :final filename,
         :final hashtagRef,
+        :final hashtagIcon,
       ) =>
         hashtagRef == null
             ? _buildLinkSpan(
@@ -334,7 +336,13 @@ class InlineFlattener {
                 isAttachment: isAttachment,
                 filename: filename,
               )
-            : _buildHashtagSpan(href, children, p),
+            : _buildHashtagSpan(
+                href,
+                children,
+                p,
+                iconName: hashtagIcon,
+                ref: hashtagRef,
+              ),
       InlineCodeRun(:final text) => _buildInlineCodeSpan(
           text,
           p.context,
@@ -463,12 +471,19 @@ class InlineFlattener {
   WidgetSpan _buildHashtagSpan(
     String href,
     List<InlineNode> children,
-    _FlattenPass p,
-  ) {
+    _FlattenPass p, {
+    String? iconName,
+    String? ref,
+  }) {
     final label = _hashtagLabel(children);
     final isTag = RegExp(r'/tags?/').hasMatch(href);
+    final resolver = hashtagIconResolver;
     final handler = p.handler;
     final emojiBaseSize = p.emojiBaseSize;
+    // context == null 是本 flattener 的「交互开关」(见 flatten 文档):
+    // 编辑态和纯 unit test 都不传,此时不能挂手势 —— 药丸吃掉点击会让
+    // 编辑器落不了光标(同图片原子 AbsorbPointer 的原则)。
+    final interactive = p.context != null;
     return WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: Builder(
@@ -476,8 +491,18 @@ class InlineFlattener {
           final scheme = Theme.of(ctx).colorScheme;
           final fontSize = emojiBaseSize * 0.82;
           final lineHeight = emojiBaseSize * 1.5;
-          return GestureDetector(
-            onTap: () => handler(ctx, href),
+          // 图标解析放在 build 里:宿主要拿 context 去查分类表(cooked 给
+          // 的默认图标是个色块,分类自己配的图标才是想要的那个)。
+          final icon = resolver?.call(ctx, iconName, href);
+          return _maybeTappable(
+            enabled: interactive,
+            onTap: () {
+              final bare = label.startsWith('#') ? label.substring(1) : label;
+              if (hashtagTapHandler?.call(ctx, href, ref, bare) == true) {
+                return;
+              }
+              handler(ctx, href);
+            },
             child: Container(
               height: lineHeight,
               padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -490,7 +515,8 @@ class InlineFlattener {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Icon(
-                    isTag ? Icons.sell_outlined : Icons.folder_outlined,
+                    icon ??
+                        (isTag ? Icons.sell_outlined : Icons.folder_outlined),
                     size: fontSize * 1.05,
                     color: scheme.primary,
                   ),
@@ -511,6 +537,13 @@ class InlineFlattener {
       ),
     );
   }
+
+  static Widget _maybeTappable({
+    required bool enabled,
+    required VoidCallback onTap,
+    required Widget child,
+  }) =>
+      enabled ? GestureDetector(onTap: onTap, child: child) : child;
 
   /// 取 hashtag 锚文本(cooked 里就是 `<span>名称</span>`,可能带前导 `#`)。
   String _hashtagLabel(List<InlineNode> children) {
@@ -757,6 +790,9 @@ class InlineFlattener {
     final recognizer = ctx == null
         ? null
         : (TapGestureRecognizer()
+          ..onTapDown = (d) {
+            lastInlineTapGlobalPosition = d.globalPosition;
+          }
           ..onTap = () {
             final live = mount.context;
             if (live == null) return;

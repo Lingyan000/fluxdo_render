@@ -78,6 +78,53 @@ void main() {
     });
   });
 
+  group('判定按行走(软换行分段),与服务端渲染一致', () {
+    test('回车后不缩回去', () {
+      var c = _content([_e()]);
+      expect(_flags(c), [true], reason: '先确认是大的');
+      c = c.insert(c.length, '\n');
+      expect(_flags(c), [true]);
+      expect(c.isOnlyEmojiLine, isTrue, reason: '两边判据要一致');
+    });
+
+    test('下一行打字,上一行的表情仍然大', () {
+      var c = _content([_e()]);
+      c = c.insert(c.length, '\naaaa');
+      expect(_flags(c), [true], reason: '发出去就是第一行大表情+第二行文字');
+      expect(c.isOnlyEmojiLine, isTrue);
+    });
+
+    test('同一行里表情后面跟文字 → 那一行不大', () {
+      var c = _content([_e()]);
+      c = c.insert(c.length, 'aaaa');
+      expect(_flags(c), [false]);
+    });
+
+    test('多行各自判定:纯表情行大,混排行不大', () {
+      var c = _content([_e()]);
+      c = c.insert(c.length, '\n');
+      c = c.insertAtom(c.length, _e('smile'));
+      c = c.insert(c.length, ' 文字');
+      expect(_flags(c), [true, false]);
+    });
+  });
+
+  group('isOnlyEmojiLine(渲染侧放开行高钳制的判据)', () {
+    test('与 isOnlyEmoji 同口径:≤3 个纯 emoji 段为真', () {
+      expect(_content([_e()]).isOnlyEmojiLine, isTrue);
+      expect(_content([_e(), _e(), _e()], between: ' ').isOnlyEmojiLine, isTrue);
+    });
+
+    test('4 个 / 掺正文 / 空段 → 假(不该放开钳制)', () {
+      expect(_content([_e(), _e(), _e(), _e()]).isOnlyEmojiLine, isFalse);
+      expect(
+        _content([_e()]).insert(0, '文字').isOnlyEmojiLine,
+        isFalse,
+      );
+      expect(EditableTextContent(text: '').isOnlyEmojiLine, isFalse);
+    });
+  });
+
   test('没有 emoji 的段落不受影响', () {
     final c = EditableTextContent(text: '').insert(0, '普通文字');
     expect(_flags(c), isEmpty);

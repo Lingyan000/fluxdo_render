@@ -184,6 +184,9 @@ class RenderTextProjection {
         ProjectionKind.emoji ||
         ProjectionKind.mention ||
         ProjectionKind.localDate ||
+        // hashtag 药丸:编辑模型里也是一个 FFFC 原子(投影文本 `#ref`
+        // 只给复制/引用用)。漏了这条光标会被算进药丸内部。
+        ProjectionKind.hashtag ||
         ProjectionKind.image =>
           1,
         // **mentionText 同样宽 1**:无状态 emoji 的 mention 走纯 TextSpan
