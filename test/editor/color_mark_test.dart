@@ -167,6 +167,47 @@ void main() {
     });
   });
 
+  group('嵌套颜色取内层(CSS 内层胜)', () {
+    test('外红内蓝:中段渲染成蓝色', () {
+      // [color=red]a[color=blue]b[/color]c[/color] 的 cooked 形态
+      var n = 0;
+      final doc = blockNodesToDoc(
+        [
+          _cooked('<p><span style="color:red">a'
+              '<span style="color:blue">b</span>c</span></p>')
+        ],
+        () => 'e_${n++}',
+      );
+      final inlines = (doc.single as TextBlock).content.toInlines();
+      final colored = inlines.whereType<ColoredRun>().toList();
+      // a / b / c 三段各自成 ColoredRun
+      expect(colored, hasLength(3));
+      Color? colorOfText(String t) => colored
+          .singleWhere((c) => (c.children.single as TextRun).text == t)
+          .color;
+      expect(colorOfText('a'), const Color(0xFFFF0000));
+      expect(colorOfText('b'), const Color(0xFF0000FF),
+          reason: '内层区间最窄,必须胜出(修复前取到外层红)');
+      expect(colorOfText('c'), const Color(0xFFFF0000));
+    });
+
+    test('嵌套背景色同理取内层', () {
+      var n = 0;
+      final doc = blockNodesToDoc(
+        [
+          _cooked('<p><span style="background-color:yellow">a'
+              '<span style="background-color:lime">b</span></span></p>')
+        ],
+        () => 'e_${n++}',
+      );
+      final inlines = (doc.single as TextBlock).content.toInlines();
+      final inner = inlines
+          .whereType<ColoredRun>()
+          .singleWhere((c) => (c.children.single as TextRun).text == 'b');
+      expect(inner.background, const Color(0xFF00FF00));
+    });
+  });
+
   group('色值解析', () {
     test('#rgb 与 #rrggbb 都认,非法返回 null', () {
       expect(EditableTextContent.parseHex('#f00'), const Color(0xFFFF0000));

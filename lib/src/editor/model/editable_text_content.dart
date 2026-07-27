@@ -427,20 +427,34 @@ class EditableTextContent {
       };
       // link href:覆盖片段的 link mark 的 attr(同帧唯一)
       String? href;
+      // 颜色/字号:同 kind 多个区间覆盖同一片段时(嵌套
+      // `[color=red]a[color=blue]b[/color]c[/color]`),取**最窄**覆盖
+      // 区间的 attr —— CSS 内层胜语义(内层 span 的 style 覆盖外层)。
       String? fgHex;
       String? bgHex;
       String? sizePct;
+      var fgW = -1, bgW = -1, szW = -1;
       for (final m in marks) {
         if (m.start > s || m.end < e) continue;
+        final w = m.end - m.start;
         switch (m.kind) {
           case MarkKind.link:
             href ??= m.attr;
           case MarkKind.textColor:
-            fgHex ??= m.attr;
+            if (fgW < 0 || w < fgW) {
+              fgW = w;
+              fgHex = m.attr;
+            }
           case MarkKind.bgColor:
-            bgHex ??= m.attr;
+            if (bgW < 0 || w < bgW) {
+              bgW = w;
+              bgHex = m.attr;
+            }
           case MarkKind.size:
-            sizePct ??= m.attr;
+            if (szW < 0 || w < szW) {
+              szW = w;
+              sizePct = m.attr;
+            }
           default:
             break;
         }
