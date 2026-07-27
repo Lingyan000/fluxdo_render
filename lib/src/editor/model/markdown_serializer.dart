@@ -262,10 +262,18 @@ bool _hasCrossingMarks(List<MarkSpan> marks) {
 /// 所以 `href=https://X` + 锚文本 `X` 只可能是用户手写的 `[X](https://X)`
 /// —— 把它裸化的话,重 cook 会补回 `http://`,用户特意写的 https 被静默
 /// 降级成 http。
+///
+/// `mailto:` 同 `http://` 待遇:裸邮箱被 linkify 成
+/// `href=mailto:user@example.com` + 无 scheme 锚文本,裸化写回后重 cook
+/// 仍产同一个 mailto 链接,往返稳定。
 bool _isBareUrlText(String text, String href) {
   if (text == href) return true;
-  const scheme = 'http://';
-  return href.startsWith(scheme) && href.substring(scheme.length) == text;
+  for (final scheme in const ['http://', 'mailto:']) {
+    if (href.startsWith(scheme) && href.substring(scheme.length) == text) {
+      return true;
+    }
+  }
+  return false;
 }
 
 String _inlineToMarkdown(EditableTextContent content) {

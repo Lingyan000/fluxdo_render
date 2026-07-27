@@ -591,6 +591,11 @@ void _bareUrlTests() {
           '看 [dl.google.com](https://dl.google.com) 吧');
     });
 
+    test('锚文本与 href 只差 mailto: → 写回裸邮箱(linkify 产物)', () {
+      expect(md('联系 user@example.com 吧', link(3, 19, 'mailto:user@example.com')),
+          '联系 user@example.com 吧');
+    });
+
     test('锚文本与 href 完全相同 → 仍写回裸 URL(原有行为)', () {
       expect(
         md('看 https://a.b 吧', link(2, 13, 'https://a.b')),
