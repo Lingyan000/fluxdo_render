@@ -171,8 +171,24 @@ class SelectionToolbar {
                   padding: TextSelectionToolbarTextButton.getPadding(
                       i, items.length),
                   onPressed: items[i].onPressed,
-                  child: Text(AdaptiveTextSelectionToolbar.getButtonLabel(
-                      ctx, items[i])),
+                  // TextSelectionToolbarTextButton 用 styleFrom(textStyle:)
+                  // 把按钮文字样式整体覆盖成不带 fontFamily 的固定样式,
+                  // 导致这里的文字始终是系统兜底字体(与全局设置的自定义
+                  // 字体不一致,CJK 下尤其明显)。只取 Theme 的字体族合并
+                  // 进来 —— 不能整个套 bodyMedium(inherit: false,会连
+                  // color/height 一起顶掉 SDK 按钮的前景色/禁用态语义)。
+                  child: Text(
+                    AdaptiveTextSelectionToolbar.getButtonLabel(
+                        ctx, items[i]),
+                    style: TextStyle(
+                      fontFamily:
+                          Theme.of(ctx).textTheme.bodyMedium?.fontFamily,
+                      fontFamilyFallback: Theme.of(ctx)
+                          .textTheme
+                          .bodyMedium
+                          ?.fontFamilyFallback,
+                    ),
+                  ),
                 ),
             ],
           );
