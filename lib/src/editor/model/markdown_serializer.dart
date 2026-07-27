@@ -293,14 +293,24 @@ bool _hasCrossingMarks(List<MarkSpan> marks) {
 
 /// 锚文本是否就是这条链接的裸 URL 形态。
 ///
-/// 精确相等之外还要**忽略 scheme 差异**:cook 给裸 URL linkify 时会自动
+/// 精确相等之外还要**忽略 `http://` 差异**:cook 给裸 URL linkify 时会自动
 /// 补 scheme(`dl.google.com` → href `http://dl.google.com`),锚文本却还是
 /// 没有 scheme 的原样。只认精确相等的话,这种链接会被写成
 /// `[dl.google.com](http://dl.google.com)` —— 用户写的裸 URL 被悄悄改写成
 /// markdown 链接语法(打开一次帖子就变形)。
+///
+/// 只放行 `http://`,**不放行 `https://`**:linkify 对无 scheme 裸 URL
+/// 一律补 `http://`(cook bundle 实测,域名/www/端口/路径形态无一例外),
+/// 所以 `href=https://X` + 锚文本 `X` 只可能是用户手写的 `[X](https://X)`
+/// —— 把它裸化的话,重 cook 会补回 `http://`,用户特意写的 https 被静默
+/// 降级成 http。
+///
+/// `mailto:` 同 `http://` 待遇:裸邮箱被 linkify 成
+/// `href=mailto:user@example.com` + 无 scheme 锚文本,裸化写回后重 cook
+/// 仍产同一个 mailto 链接,往返稳定。
 bool _isBareUrlText(String text, String href) {
   if (text == href) return true;
-  for (final scheme in const ['https://', 'http://']) {
+  for (final scheme in const ['http://', 'mailto:']) {
     if (href.startsWith(scheme) && href.substring(scheme.length) == text) {
       return true;
     }
