@@ -765,14 +765,15 @@ class EditableTextContent {
   /// 继续打字 = 继续粗体)。
   /// - link 例外:链接尾打字长出链接是公认反直觉(ProseMirror link
   ///   inclusive:false 同款);
-  /// - inlineCode 例外:代码框尾打字应退出代码(codePad 既有交互约定);
   /// - 带 attr 的 mark(size/color/bgcolor)例外:延伸会与后续同 kind
   ///   不同 attr 的区间重叠(破坏"同 kind 不重叠"不变量),且延伸出的
   ///   字号/颜色未必是用户意图。
+  /// - inlineCode **包含**:ProseMirror basic schema 的 code mark 默认
+  ///   inclusive,Typora/Vditor 同款 —— 代码尾打字继续在代码内,退出
+  ///   走右移跨界。曾按"代码尾打字退出"排除,实测造成 ir 下 code 无
+  ///   内侧停位:光标到不了末字符内侧、code 内打字光标蹦到闭 \` 之后。
   static bool isInclusiveMark(MarkSpan m) =>
-      m.attr == null &&
-      m.kind != MarkKind.link &&
-      m.kind != MarkKind.inlineCode;
+      m.attr == null && m.kind != MarkKind.link;
 
   EditableTextContent insert(
     int offset,

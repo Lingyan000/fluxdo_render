@@ -190,6 +190,50 @@ void main() {
   });
 
   group('末端打字延伸(inclusive marks)', () {
+    test('inlineCode 是 inclusive:末端打字延伸 + ir 二态四步 + 内侧退格删字', () {
+      // 回归:曾按「代码尾打字退出」把 inlineCode 排除在 inclusive 外,
+      // 实测造成 ir 下 code 无内侧停位 —— 光标到不了末字符内侧,code
+      // 内打字光标蹦到闭 ` 之后。ProseMirror code mark 默认 inclusive。
+      final state = EditorState(blocks: [
+        TextBlock(
+          id: 'e_0',
+          content: EditableTextContent(
+            text: 'a code b',
+            marks: const [
+              MarkSpan(start: 2, end: 6, kind: MarkKind.inlineCode)
+            ],
+          ),
+        ),
+      ])
+        ..mode = EditorMode.ir;
+      addTearDown(state.dispose);
+      // 末端打字延伸
+      state.updateSelection(const EditorSelection.collapsed(
+          EditorPosition(blockId: 'e_0', offset: 6)));
+      state.insertText('X');
+      var c = (state.blocks.first as TextBlock).content;
+      expect(c.marks.single.end, 7, reason: '代码尾打字 = 继续代码');
+      state.undo();
+      // ir 二态四步:5→6内→6外→7
+      state.updateSelection(const EditorSelection.collapsed(
+          EditorPosition(blockId: 'e_0', offset: 5)));
+      state.moveCaretHorizontal(1);
+      expect(state.selection!.extent.offset, 6);
+      expect(state.caretOutsideMarkEnd, isFalse, reason: '先到内侧');
+      state.moveCaretHorizontal(1);
+      expect(state.selection!.extent.offset, 6);
+      expect(state.caretOutsideMarkEnd, isTrue, reason: '再到外侧');
+      state.moveCaretHorizontal(1);
+      expect(state.selection!.extent.offset, 7);
+      // 内侧退格 = 删字收缩
+      state.updateSelection(const EditorSelection.collapsed(
+          EditorPosition(blockId: 'e_0', offset: 6)));
+      state.backspace();
+      c = (state.blocks.first as TextBlock).content;
+      expect(c.text, 'a cod b');
+      expect(c.marks.single.end, 5);
+    });
+
     test('insertText 在 mark 末端:格式延伸覆盖新字符', () {
       final state = EditorState(blocks: [
         TextBlock(
@@ -229,7 +273,9 @@ void main() {
       expect(c.marks.single.end, 5);
     });
 
-    test('link/inlineCode/带 attr 的 mark 末端不延伸', () {
+    // 注:inlineCode 现为 inclusive(ProseMirror code mark 默认/Typora
+    // 同款),末端打字延伸,不在本用例;仅 link 与带 attr 的 mark 不延伸。
+    test('link/带 attr 的 mark 末端不延伸', () {
       final state = EditorState(blocks: [
         TextBlock(
           id: 'e_0',
