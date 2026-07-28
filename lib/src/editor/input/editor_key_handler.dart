@@ -314,7 +314,23 @@ void _trackModifierDown(KeyEvent event, {required bool isMac}) {
   // splitBlock + 宿主软换行都因「不能碰发送快捷键」让路,回车穿透给平台
   // IME 兜底插入,表现为「粘贴后回车多插一行」——这条 KeyUp 是真实的
   // (不同于 Win+V 那种合成抬起),收到就该立刻清空窗口。
-  if (event is KeyUpEvent) _lastModifierDownAt = null;
+  //
+  // 曾用 `event.synthesized` 区分真实/合成抬起,但真机抓包证伪:Win+V
+  // 注入的 Ctrl-up 在 Flutter 眼里就是一次**普通**的真实 KeyUpEvent
+  // (`synthesized == false`),只是发生得极快——抓到的真实序列是
+  //   Ctrl-down → Ctrl-up(间隔仅 10~40ms)→ V-down → V-up → Ctrl-down → Ctrl-up
+  // 也就是说窗口在 V 到达**之前**就被这条"真实"的 Ctrl-up 清空了,
+  // `synthesized` 判据完全没生效,Win+V 依然一点反应都没有。
+  //
+  // 真人不可能在 <80ms 内完成一次按下+抬起,这种"抖动式抬起"本身就是
+  // 合成序列的信号,不能当真实释放处理——否则窗口在 V 出现前就没了,
+  // 永远补偿不到。
+  if (event is KeyUpEvent) {
+    final downAt = _lastModifierDownAt;
+    final isFlickerUp = downAt != null &&
+        DateTime.now().difference(downAt) < const Duration(milliseconds: 80);
+    if (!isFlickerUp) _lastModifierDownAt = null;
+  }
 }
 
 /// 本次按键是否**产出了可打印字符**。
