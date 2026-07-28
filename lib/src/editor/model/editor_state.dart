@@ -373,6 +373,8 @@ class EditorState extends ChangeNotifier {
   // 事务提交
   // -----------------------------------------------------------------
 
+  /// 唯一的文档快照替换出口(imeReplace 也走这里,无旁路):
+  /// [composing] 透传给状态(IME 预编辑标记;非 IME 事务默认清空)。
   void _commit(
     List<EditorBlock> newBlocks,
     EditorSelection? newSelection, {
@@ -561,7 +563,6 @@ class EditorState extends ChangeNotifier {
       return;
     }
 
-    _recordHistory(groupWithPrevious: true);
     var content = block.content.replace(safeStart, safeEnd, replacement);
     // pending marks:替换起点命中锚点(打字第一个字符)时施加。
     // composing 进行中保留 pending(候选切换会反复 replace 同区间)。
@@ -581,13 +582,14 @@ class EditorState extends ChangeNotifier {
     }
     final newBlocks = [..._blocks];
     newBlocks[i] = block.copyWith(content: content);
-    _blocks = List.unmodifiable(newBlocks);
-    _docRevision++;
-    _selection = _clampSelection(EditorSelection.collapsed(
-      EditorPosition(blockId: blockId, offset: caretOffset),
-    ));
-    _composing = composing;
-    notifyListeners();
+    _commit(
+      newBlocks,
+      EditorSelection.collapsed(
+        EditorPosition(blockId: blockId, offset: caretOffset),
+      ),
+      groupWithPrevious: true,
+      composing: composing,
+    );
   }
 
   /// 删除当前选区(跨块支持;孤岛按端点四象限归一)。
@@ -741,6 +743,12 @@ class EditorState extends ChangeNotifier {
       mergeWithPrevious(pos.blockId);
       return;
     }
+    // 闭端退格 = 拆标记:光标恰在某 mark.end(显形态,闭定界符紧贴
+    // 光标左边)时,第一次退格不删正文字符,而是把该 mark 物化为字面
+    // 定界符;物化后光标在闭定界符末尾,再退格走常规路径删字面字符,
+    // 行为连贯。开端(mark.start)不触发 —— 普通退格删前一字符、mark
+    // 区间自然收缩,现有行为已合理。
+    if (_tryMaterializeAtMarkEnd(block, pos)) return;
     // 找光标前一个 grapheme 的起点(原子 FFFC 恒 1)
     final before = block.content.text.substring(0, pos.offset);
     final lastCluster =
@@ -754,6 +762,33 @@ class EditorState extends ChangeNotifier {
       EditorSelection.collapsed(pos.copyWith(offset: delStart)),
       groupWithPrevious: true,
     );
+  }
+
+  /// 闭端退格的物化判定:collapsed 光标恰在某 mark.end(显形判定
+  /// [EditableTextContent.revealableMarksAt] 对 end==caret 恒命中)时,
+  /// 取**最内层**的那个 mark 物化,返回 true(一次退格拆一层)。
+  ///
+  /// 最内层口径与显形定界符的闭合发射序(toInlines.appendDelimiters)
+  /// 同源:start 更大 = 更内层;同界按 [kMarkNestingOrder] 更靠后为内。
+  bool _tryMaterializeAtMarkEnd(TextBlock block, EditorPosition pos) {
+    MarkSpan? target;
+    for (final m in block.content.marks) {
+      if (m.end != pos.offset) continue;
+      // 定界符文案覆盖不了的 kind 不参与(物化会 no-op,退格必须照常删字)
+      if (markOpeningDelimiter(m).isEmpty && markClosingDelimiter(m).isEmpty) {
+        continue;
+      }
+      if (target == null ||
+          m.start > target.start ||
+          (m.start == target.start &&
+              kMarkNestingOrder.indexOf(m.kind) >
+                  kMarkNestingOrder.indexOf(target.kind))) {
+        target = m;
+      }
+    }
+    if (target == null) return false;
+    materializeMarkAt(block.id, target);
+    return true;
   }
 
   /// 光标后删一个 grapheme(Forward Delete;段尾对岛同样两段式)。
@@ -1058,6 +1093,60 @@ class EditorState extends ChangeNotifier {
       content: block.content.removeMark(from.offset, to.offset, MarkKind.link),
     );
     _commit(newBlocks, _selection, groupWithPrevious: false);
+    sealHistory();
+  }
+
+  /// 物化事务:把 [mark] 从样式区间还原为**真实字面文本**(投影显形的
+  /// 反向操作)。mark 摘除,mark.start 前插开定界符、mark.end 后插闭
+  /// 定界符(与序列化 [markOpeningDelimiter]/[markClosingDelimiter]
+  /// 单一真相),文本变成普通可编辑内容 —— 用户改完字面(`**`→`*`)
+  /// 由 input rules 重新识别折叠。
+  ///
+  /// - 单次 _commit = 独立 undo 步(undo 一步整体回滚:mark 回来、
+  ///   字面消失、光标还原);
+  /// - 只物化目标 mark:其余 marks/atoms 经 [EditableTextContent.insert]
+  ///   的区间调整语义平移(跨插入点的区间拉伸、其后的整体右移),
+  ///   先插闭定界符再插开(先尾后头,避免偏移平移);
+  /// - [mark] 必须是 content.marks 里现存的区间(displaced/陈旧 span
+  ///   无操作);
+  /// - **边界(本阶段不做)**:link 的 href 原位编辑走物化后的字面
+  ///   `](href)` 修改;原子(图片/emoji/date chip)不参与物化 ——
+  ///   它们没有"字面定界符"形态,序列化时整体重写。
+  void materializeMarkAt(String blockId, MarkSpan mark) {
+    final i = indexOfBlock(blockId);
+    if (i < 0) return;
+    final block = _blocks[i];
+    if (block is! TextBlock) return;
+    final content = block.content;
+    if (!content.marks.contains(mark)) return;
+    final opening = markOpeningDelimiter(mark);
+    final closing = markClosingDelimiter(mark);
+    if (opening.isEmpty && closing.isEmpty) return; // 覆盖不了的 kind
+    sealHistory();
+    _clearPending();
+    // 摘掉目标 mark(其余 marks/atoms 原样),再插字面定界符
+    var next = EditableTextContent(
+      text: content.text,
+      marks: [
+        for (final m in content.marks)
+          if (m != mark) m,
+      ],
+      atoms: content.atoms,
+    );
+    next = next.insert(mark.end, closing);
+    next = next.insert(mark.start, opening);
+    final newBlocks = [..._blocks];
+    newBlocks[i] = block.copyWith(content: next);
+    _commit(
+      newBlocks,
+      // 光标落在物化后的闭定界符末尾(mark.end 处退格触发的自然落点:
+      // 再退格 = 删字面字符,行为连贯)
+      EditorSelection.collapsed(EditorPosition(
+        blockId: blockId,
+        offset: mark.end + opening.length + closing.length,
+      )),
+      groupWithPrevious: false,
+    );
     sealHistory();
   }
 

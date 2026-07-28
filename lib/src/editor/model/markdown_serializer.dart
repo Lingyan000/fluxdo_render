@@ -203,7 +203,11 @@ String _serializeListRun(List<TextBlock> run) {
 
 /// mark 开/闭标记(嵌套固定序:spoiler > link > strong > em > underline >
 /// lineThrough;inlineCode 独占由 toInlines 语义保证,这里同优先级处理即可)。
-const _markOrder = [
+///
+/// **单一真相**:编辑态显形(EditableTextContent.toInlines 的
+/// revealMarkdownAt)的定界符排列也用这份序 —— 显形展示与序列化产物
+/// 的嵌套形态一致,不维护第二份。
+const List<MarkKind> kMarkNestingOrder = [
   MarkKind.spoilerInline,
   // size 包在颜色外层(与 toInlines._wrapPiece 的包裹顺序一致:先套色
   // 再套字号,size 最外)
@@ -272,6 +276,14 @@ String _closeTag(MarkSpan m, {required bool htmlEmphasis}) {
     _ => '',
   };
 }
+
+/// 编辑态显形用:mark 的字面开定界符(markdown/BBCode 形态,与序列化
+/// [_openTag] 完全同源 —— 显形展示的字面量就是序列化会写出的字面量,
+/// attr 类(color/size/link)带原样 attr)。
+String markOpeningDelimiter(MarkSpan m) => _openTag(m, htmlEmphasis: false);
+
+/// 编辑态显形用:mark 的字面闭定界符(与 [_closeTag] 同源)。
+String markClosingDelimiter(MarkSpan m) => _closeTag(m, htmlEmphasis: false);
 
 /// 是否存在交错区间(a.start < b.start < a.end < b.end)。
 ///
@@ -377,7 +389,8 @@ String _inlineToMarkdown(EditableTextContent content) {
     // 固定序开启(spoiler/link 最外)
     final sorted = [...toOpen]
       ..sort((a, b) =>
-          _markOrder.indexOf(a.kind).compareTo(_markOrder.indexOf(b.kind)));
+          kMarkNestingOrder.indexOf(a.kind)
+              .compareTo(kMarkNestingOrder.indexOf(b.kind)));
     for (final m in sorted) {
       if (!bareLinks.contains(m)) {
         buf.write(_openTag(m, htmlEmphasis: htmlEmphasis));

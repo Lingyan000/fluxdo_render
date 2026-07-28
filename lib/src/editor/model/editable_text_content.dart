@@ -25,6 +25,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../node/inline_node.dart';
 import '../../parser/paragraph_parser.dart' show ParagraphParser;
+import 'markdown_serializer.dart'
+    show kMarkNestingOrder, markOpeningDelimiter, markClosingDelimiter;
 
 /// 原子哨兵字符(U+FFFC OBJECT REPLACEMENT CHARACTER)。
 const String kAtomChar = '\uFFFC';
@@ -258,6 +260,11 @@ class EditableTextContent {
   ) {
     for (final node in nodes) {
       switch (node) {
+        // 防御:显形虚拟定界符只存在于编辑渲染产物,不该被喂回模型;
+        // 不拦的话会落进下面的 TextRun 分支(子类),把 `**` 字面量写进
+        // 文档 —— 显形泄漏成真字符。
+        case EditingDelimiterRun():
+          break;
         case TextRun(:final text):
           _appendText(buf, marks, activeKinds, sanitizeText(text));
         case LineBreakRun():
@@ -390,11 +397,22 @@ class EditableTextContent {
   /// 替代:spoiler=淡灰底纹(内容可见可编辑,对齐官方 rich editor 的
   /// spoiler-blurred decoration 思路的简化),link=[editingLinkColor]
   /// 字色 + 下划线。
+  ///
+  /// [revealMarkdownAt]:显形位置(内容偏移;仅 [forEditing] 生效)。
+  /// 光标命中的 mark 区间(含边界)两端插 [EditingDelimiterRun] 虚拟
+  /// 定界符(零逻辑宽,纯渲染投影);null = 不显形。
+  /// [editingDelimiterColor]:定界符淡色(主题 outline)。
   List<InlineNode> toInlines({
     bool forEditing = false,
     Color? editingLinkColor,
+    Color? editingDelimiterColor,
+    int? revealMarkdownAt,
   }) {
     if (text.isEmpty) return const [];
+
+    final revealedMarks = forEditing && revealMarkdownAt != null
+        ? revealableMarksAt(revealMarkdownAt)
+        : const <MarkSpan>[];
 
     // 1. 收集切点
     final cuts = <int>{0, text.length};
@@ -413,10 +431,44 @@ class EditableTextContent {
 
     // 2. 逐片段构建
     final out = <InlineNode>[];
+
+    // 显形定界符:片段边界处按嵌套序发射(开定界符外层先、闭定界符
+    // 内层先 —— 与序列化 kMarkNestingOrder 单一真相,显示形态 = raw 形态)。
+    void appendDelimiters(int offset, {required bool opening}) {
+      if (revealedMarks.isEmpty) return;
+      final atOffset = <MarkSpan>[
+        for (final mark in revealedMarks)
+          if ((opening ? mark.start : mark.end) == offset) mark,
+      ];
+      if (atOffset.isEmpty) return;
+      int order(MarkSpan m) => kMarkNestingOrder.indexOf(m.kind);
+      atOffset.sort((a, b) {
+        if (opening) {
+          // 外层先开:覆盖更长(end 更大)在前;同界按固定嵌套序。
+          final byEnd = b.end.compareTo(a.end);
+          if (byEnd != 0) return byEnd;
+          return order(a).compareTo(order(b));
+        }
+        // 内层先闭:start 更大在前;同界按固定嵌套序反向。
+        final byStart = b.start.compareTo(a.start);
+        if (byStart != 0) return byStart;
+        return order(b).compareTo(order(a));
+      });
+      for (final mark in atOffset) {
+        final delimiter = opening
+            ? markOpeningDelimiter(mark)
+            : markClosingDelimiter(mark);
+        if (delimiter.isEmpty) continue; // 覆盖不了的 kind:宁缺毋错
+        out.add(EditingDelimiterRun(delimiter, color: editingDelimiterColor));
+      }
+    }
+
     for (var i = 0; i + 1 < points.length; i++) {
       final s = points[i];
       final e = points[i + 1];
       if (s >= e) continue;
+      appendDelimiters(s, opening: false);
+      appendDelimiters(s, opening: true);
       final piece = text.substring(s, e);
       if (piece == '\n') {
         out.add(const LineBreakRun());
@@ -476,7 +528,19 @@ class EditableTextContent {
           bgHex: bgHex,
           sizePct: sizePct));
     }
+    appendDelimiters(text.length, opening: false);
     return _applyOnlyEmoji(out);
+  }
+
+  /// 显形探测:光标(collapsed)在 [offset] 时需要展开定界符的 mark
+  /// 集合 —— 区间**含边界**命中(`start <= caret <= end`,官方
+  /// getMarkRange 的 inclusive 语义:贴着 mark 两端也显形)。
+  List<MarkSpan> revealableMarksAt(int offset) {
+    final caret = offset.clamp(0, text.length);
+    return [
+      for (final mark in marks)
+        if (mark.start <= caret && caret <= mark.end) mark,
+    ];
   }
 
   /// Discourse 大表情语义:整段**只有** emoji(空白不算内容)且不超过
@@ -495,6 +559,9 @@ class EditableTextContent {
         emojiCount++;
         continue;
       }
+      // 显形虚拟定界符不算内容(零逻辑宽,纯渲染投影)—— 否则光标进入
+      // 覆盖纯 emoji 段的 mark 时,大表情会因定界符出现而突然缩小。
+      if (n is EditingDelimiterRun) continue;
       // 纯空白的文本片段不算内容;其余任何节点都让本段不再是"只有表情"
       if (n is TextRun && n.text.trim().isEmpty) continue;
       return out;
