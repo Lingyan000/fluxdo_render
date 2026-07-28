@@ -390,6 +390,56 @@ void main() {
       expect(state.selection!.extent.offset, 2);
     });
   });
+
+  group('ir spin 经 IME 通道(移动端退格主通道)', () {
+    test('IME 退格删出完整对 → spin 折叠 → reconcile 回喂平台', () {
+      // 文档 '**bold**x',IME 退格删掉尾 'x' → '**bold**' 是完整字面对,
+      // imeReplace 落地后 spin 折叠为 strong;文档('bold')与平台窗口
+      // ('**bold**')不一致 → reconcile 强制回喂,_lastSent 与文档一致。
+      final (state, ime) = makeAttached(paragraphs: ['**bold**x'], caret: 9);
+      state.mode = EditorMode.ir;
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad**bold**',
+        selection: const TextSelection.collapsed(offset: 9),
+        composing: TextRange.empty,
+      ));
+      final c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, 'bold');
+      expect(c.marks.single.kind, MarkKind.strong);
+      expect(state.selection!.extent.offset, 4, reason: 'caret 重映射到内容尾');
+      // reconcile 已回喂:_lastSent = pad + 文档文本
+      expect(ime.debugLastSent.text, '${pad}bold');
+      expect(ime.debugLastSent.selection.extentOffset, 5,
+          reason: 'pad 后坐标 4+1');
+    });
+
+    test('composing 活跃时不 spin(预编辑文本是临时的)', () {
+      final (state, ime) = makeAttached(paragraphs: ['**bold*'], caret: 7);
+      state.mode = EditorMode.ir;
+      // 拼音进行中,文本恰好拼出 '**bold**'(composing 覆盖尾部)
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad**bold**',
+        selection: const TextSelection.collapsed(offset: 9),
+        composing: const TextRange(start: 8, end: 9),
+      ));
+      final c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, '**bold**', reason: 'composing 中不折叠');
+      expect(c.marks, isEmpty);
+    });
+
+    test('wysiwyg 下 IME 删出完整对不折叠', () {
+      final (state, ime) = makeAttached(paragraphs: ['**bold**x'], caret: 9);
+      expect(state.mode, EditorMode.wysiwyg);
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad**bold**',
+        selection: const TextSelection.collapsed(offset: 9),
+        composing: TextRange.empty,
+      ));
+      final c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, '**bold**', reason: 'wysiwyg 无 spin');
+      expect(c.marks, isEmpty);
+    });
+  });
 }
 
 /// 段内软换行(cook 的 `<br>` 导入形态)必须扛得住 IME 回调。
