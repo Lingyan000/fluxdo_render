@@ -21,6 +21,7 @@ library;
 import '../model/editable_text_content.dart';
 import '../model/editor_state.dart';
 import '../model/markdown_serializer.dart' show parseImageMarkdown;
+import 'inline_pair_defs.dart';
 
 /// 规则应用结果。
 enum InputRuleOutcome {
@@ -61,6 +62,19 @@ InputRuleOutcome tryApplyInputRules(
   if (typedChar == ' ') {
     return _tryBlockRules(state, block, sel.extent.offset);
   }
+
+  // ir(即时渲染):**行内**规则整体关闭 —— 折叠时机统一为「光标移出
+  // 字面区」(spin 收口负责),打字过程保持字面显示(带语法着色),
+  // 打完闭定界符不立即收符号。块级规则(`# `/`- `/callout,上方)与
+  // 图片/链接(`)` 触发,产物是原子/带 href 的结构,字面态没有对应
+  // 渲染)保留立即转换。wysiwyg 维持全部规则即打即渲染。
+  if (state.mode == EditorMode.ir) {
+    if (typedChar == ')') {
+      return _tryImageOrLinkRule(state, block, sel.extent.offset);
+    }
+    return InputRuleOutcome.none;
+  }
+
   if (typedChar == ')') {
     return _tryImageOrLinkRule(state, block, sel.extent.offset);
   }
@@ -231,18 +245,8 @@ InputRuleOutcome _tryBlockRules(
 // 行内规则(收尾定界符)
 // ---------------------------------------------------------------------
 
-/// (正则, mark, 定界符)。按特异性排序:长定界符优先(`**` 先于 `*`)。
-/// 内容组不允许含定界字符本身(官方 [^*]+ 同款),且首尾非空格
-/// (`** x**` 不触发 —— CommonMark 语义)。
-final List<(RegExp, MarkKind, String)> _inlineRules = [
-  (RegExp(r'\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$'), MarkKind.strong, '**'),
-  (RegExp(r'__([^_\s](?:[^_]*[^_\s])?)__$'), MarkKind.strong, '__'),
-  (RegExp(r'~~([^~\s](?:[^~]*[^~\s])?)~~$'), MarkKind.lineThrough, '~~'),
-  (RegExp(r'`([^`]+)`$'), MarkKind.inlineCode, '`'),
-  // 单 * 斜体:前面不能还是 *(否则和 ** 混淆)
-  (RegExp(r'(?<!\*)\*([^*\s](?:[^*]*[^*\s])?)\*$'), MarkKind.em, '*'),
-  (RegExp(r'(?<!_)_([^_\s](?:[^_]*[^_\s])?)_$'), MarkKind.em, '_'),
-];
+/// 定界符表:见 inline_pair_defs.dart([kInlineRules],与 ir spin 共享
+/// 单一真相)。
 
 InputRuleOutcome _tryInlineRules(
   EditorState state,
@@ -255,7 +259,7 @@ InputRuleOutcome _tryInlineRules(
     return InputRuleOutcome.none;
   }
 
-  for (final (re, kind, delim) in _inlineRules) {
+  for (final (re, kind, delim) in kInlineRules) {
     final m = re.firstMatch(before);
     if (m == null) continue;
     final contentText = m.group(1)!;
@@ -278,28 +282,9 @@ InputRuleOutcome _tryInlineRules(
   return InputRuleOutcome.none;
 }
 
-/// (正则, mark, 闭标记)。BBCode 属性标记 —— 开/闭标记不等长
-/// (`[size=150]` vs `[/size]`),属性值(group 1)进 mark.attr。
-/// 内容组不允许含 `[`(不支持嵌套 BBCode/链接,同 [_inlineRules] 的
-/// 简化取舍),首尾非空格。
-final List<(RegExp, MarkKind, String)> _bbcodeAttrRules = [
-  (
-    RegExp(r'\[size=(\d{1,4})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/size\]$'),
-    MarkKind.size,
-    '[/size]',
-  ),
-  (
-    RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/color\]$'),
-    MarkKind.textColor,
-    '[/color]',
-  ),
-  (
-    RegExp(
-        r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]([^\[\s](?:[^\[]*[^\[\s])?)\[/bgcolor\]$'),
-    MarkKind.bgColor,
-    '[/bgcolor]',
-  ),
-];
+/// BBCode 属性标记(size/color/bgcolor)三种形态的表全部派生自
+/// inline_pair_defs.dart 的 [kBbcodeAttrSpecs](完整对 [kBbcodeAttrRules]、
+/// 补开标记锚定版 [kBbcodeOpenRules]、非锚定版 [kBbcodeOpenPatterns])。
 
 /// `[size=N]x[/size]` / `[color=#xxx]x[/color]` / `[bgcolor=...]` 收尾
 /// `]` 触发 —— 与 `**x**` 同级的即打即渲染,不必等回车送 cook。
@@ -313,7 +298,7 @@ InputRuleOutcome _tryBbcodeAttrRules(
     return InputRuleOutcome.none;
   }
 
-  for (final (re, kind, closeTag) in _bbcodeAttrRules) {
+  for (final (re, kind, closeTag) in kBbcodeAttrRules) {
     final m = re.firstMatch(before);
     if (m == null) continue;
     final attr = m.group(1)!;
@@ -338,30 +323,6 @@ InputRuleOutcome _tryBbcodeAttrRules(
   return InputRuleOutcome.none;
 }
 
-/// (开标记正则, mark, 闭标记)。开标记值可变长,单独一张表 —— 用于
-/// "先打闭标记、光标挪回来补开标记" 场景([_tryBbcodeOpenRules])。
-final List<(RegExp, MarkKind, String)> _bbcodeOpenRules = [
-  (RegExp(r'\[size=(\d{1,4})\]$'), MarkKind.size, '[/size]'),
-  (RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]$'), MarkKind.textColor, '[/color]'),
-  (
-    RegExp(r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]$'),
-    MarkKind.bgColor,
-    '[/bgcolor]',
-  ),
-];
-
-/// 同 [_bbcodeOpenRules],但不 `$` 锚定 —— 给 [_tryBbcodeInsidePairRules]
-/// 在 `before` 串**中间**找开标记用(锚定版只能匹配到串尾)。
-final List<(RegExp, MarkKind, String)> _bbcodeOpenPatterns = [
-  (RegExp(r'\[size=(\d{1,4})\]'), MarkKind.size, '[/size]'),
-  (RegExp(r'\[color=(#?[0-9a-fA-F]{3,8})\]'), MarkKind.textColor, '[/color]'),
-  (
-    RegExp(r'\[bgcolor=(#?[0-9a-fA-F]{3,8})\]'),
-    MarkKind.bgColor,
-    '[/bgcolor]',
-  ),
-];
-
 /// 补打 BBCode **开**标记触发:右边已经有配对的闭标记
 /// (`x[size=150]大[/size]` 这种"先打后半截、再回来补前半截"的写法)。
 /// 同 [_tryOpenDelimRules],开/闭标记不等长需要分开处理。
@@ -377,7 +338,7 @@ InputRuleOutcome _tryBbcodeOpenRules(
   }
   final before = text.substring(0, caret);
 
-  for (final (openRe, kind, closeTag) in _bbcodeOpenRules) {
+  for (final (openRe, kind, closeTag) in kBbcodeOpenRules) {
     final openM = openRe.firstMatch(before);
     if (openM == null) continue;
     final openStart = openM.start;
@@ -412,18 +373,7 @@ InputRuleOutcome _tryBbcodeOpenRules(
   return InputRuleOutcome.none;
 }
 
-/// (开标记, mark, 闭标记)。无 attr 的 BBCode 标记 —— `[u]`/`[spoiler]`
-/// 早就是 mark 类型([MarkKind.underline]/[MarkKind.spoilerInline]),但
-/// 此前只有工具栏按钮能插入,手打字面标记不会即时渲染。
-const List<(String, MarkKind, String)> _bbcodeMarkTags = [
-  ('[u]', MarkKind.underline, '[/u]'),
-  ('[spoiler]', MarkKind.spoilerInline, '[/spoiler]'),
-  // b/i/s 真实 Discourse 支持(cook 出 strong/em/s,在消毒白名单里),
-  // 复用已有 MarkKind,同 markdown ** 定界符殊途同归。
-  ('[b]', MarkKind.strong, '[/b]'),
-  ('[i]', MarkKind.em, '[/i]'),
-  ('[s]', MarkKind.lineThrough, '[/s]'),
-];
+/// 无 attr BBCode 标记表:见 inline_pair_defs.dart([kBbcodeMarkTags])。
 
 /// `[u]x[/u]` / `[spoiler]x[/spoiler]` 收尾 `]` 触发。
 InputRuleOutcome _tryBbcodeMarkRules(
@@ -436,7 +386,7 @@ InputRuleOutcome _tryBbcodeMarkRules(
     return InputRuleOutcome.none;
   }
 
-  for (final (openTag, kind, closeTag) in _bbcodeMarkTags) {
+  for (final (openTag, kind, closeTag) in kBbcodeMarkTags) {
     if (!before.endsWith(closeTag)) continue;
     final beforeClose = before.substring(0, before.length - closeTag.length);
     final openAt = beforeClose.lastIndexOf(openTag);
@@ -476,7 +426,7 @@ InputRuleOutcome _tryBbcodeMarkOpenRules(
     return InputRuleOutcome.none;
   }
 
-  for (final (openTag, kind, closeTag) in _bbcodeMarkTags) {
+  for (final (openTag, kind, closeTag) in kBbcodeMarkTags) {
     final openStart = caret - openTag.length;
     if (openStart < 0 || !text.startsWith(openTag, openStart)) continue;
 
@@ -526,10 +476,10 @@ InputRuleOutcome _tryBbcodeInsidePairRules(
   }
   final before = text.substring(0, caret);
 
-  // attr 版:size/color/bgcolor。[_bbcodeOpenRules] 是 `$` 锚定的(给
+  // attr 版:size/color/bgcolor。[kBbcodeOpenRules] 是 `$` 锚定的(给
   // "刚打完开标记,光标就在后面"那条规则用),这里要在 `before` 中间
   // 找,不能锚在串尾 —— 用不锚定的版本,取离光标最近(最后)的一个。
-  for (final (openRe, kind, closeTag) in _bbcodeOpenPatterns) {
+  for (final (openRe, kind, closeTag) in kBbcodeOpenPatterns) {
     if (!text.startsWith(closeTag, caret)) continue;
     final matches = openRe.allMatches(before);
     if (matches.isEmpty) continue;
@@ -557,7 +507,7 @@ InputRuleOutcome _tryBbcodeInsidePairRules(
   }
 
   // 无 attr 版:u/spoiler
-  for (final (openTag, kind, closeTag) in _bbcodeMarkTags) {
+  for (final (openTag, kind, closeTag) in kBbcodeMarkTags) {
     if (!text.startsWith(closeTag, caret)) continue;
     final openAt = before.lastIndexOf(openTag);
     if (openAt < 0) continue;
@@ -584,27 +534,7 @@ InputRuleOutcome _tryBbcodeInsidePairRules(
   return InputRuleOutcome.none;
 }
 
-/// (开标签, mark, 闭标签)。HTML 样式标签 —— 读端早就支持
-/// (InlineStyleKind.small/big/mark/superscript/subscript/monospace),
-/// 编辑态此前没有触发规则,手打字面标签不会即时渲染。
-const List<(String, MarkKind, String)> _htmlMarkTags = [
-  ('<small>', MarkKind.smallStyle, '</small>'),
-  ('<big>', MarkKind.bigStyle, '</big>'),
-  ('<mark>', MarkKind.markStyle, '</mark>'),
-  ('<sup>', MarkKind.superscript, '</sup>'),
-  ('<sub>', MarkKind.subscript, '</sub>'),
-  ('<kbd>', MarkKind.monospaceStyle, '</kbd>'),
-  // 读端(paragraph_parser.dart)已有的简化映射,同 ins→underline /
-  // del→lineThrough / samp|tt→monospace(对齐 kbd)/ cite|dfn|var→em
-  // (浏览器默认都是斜体)保持一致——复用既有 MarkKind,不新增渲染类型。
-  ('<ins>', MarkKind.underline, '</ins>'),
-  ('<del>', MarkKind.lineThrough, '</del>'),
-  ('<samp>', MarkKind.monospaceStyle, '</samp>'),
-  ('<tt>', MarkKind.monospaceStyle, '</tt>'),
-  ('<cite>', MarkKind.em, '</cite>'),
-  ('<dfn>', MarkKind.em, '</dfn>'),
-  ('<var>', MarkKind.em, '</var>'),
-];
+/// HTML 样式标签表:见 inline_pair_defs.dart([kHtmlMarkTags])。
 
 /// `<small>x</small>` 等收尾 `>` 触发。
 InputRuleOutcome _tryHtmlMarkRules(
@@ -617,7 +547,7 @@ InputRuleOutcome _tryHtmlMarkRules(
     return InputRuleOutcome.none;
   }
 
-  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+  for (final (openTag, kind, closeTag) in kHtmlMarkTags) {
     if (!before.endsWith(closeTag)) continue;
     final beforeClose = before.substring(0, before.length - closeTag.length);
     final openAt = beforeClose.lastIndexOf(openTag);
@@ -657,7 +587,7 @@ InputRuleOutcome _tryHtmlMarkOpenRules(
     return InputRuleOutcome.none;
   }
 
-  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+  for (final (openTag, kind, closeTag) in kHtmlMarkTags) {
     final openStart = caret - openTag.length;
     if (openStart < 0 || !text.startsWith(openTag, openStart)) continue;
 
@@ -702,7 +632,7 @@ InputRuleOutcome _tryHtmlInsidePairRules(
   }
   final before = text.substring(0, caret);
 
-  for (final (openTag, kind, closeTag) in _htmlMarkTags) {
+  for (final (openTag, kind, closeTag) in kHtmlMarkTags) {
     if (!text.startsWith(closeTag, caret)) continue;
     final openAt = before.lastIndexOf(openTag);
     if (openAt < 0) continue;
@@ -748,7 +678,7 @@ InputRuleOutcome _tryOpenDelimRules(
     return InputRuleOutcome.none;
   }
 
-  for (final (re, kind, delim) in _inlineRules) {
+  for (final (re, kind, delim) in kInlineRules) {
     final open = caret - delim.length;
     if (open < 0) continue;
     // 光标左边恰好是一个完整的开定界符
@@ -808,7 +738,7 @@ InputRuleOutcome _tryInsidePairRules(
   }
 
   final before = text.substring(0, caret);
-  for (final (re, kind, delim) in _inlineRules) {
+  for (final (re, kind, delim) in kInlineRules) {
     if (!text.startsWith(delim, caret)) continue;
     // 闭定界符后不能还是同类定界字符(`**q***` 归属不明,不触发)。
     final after = caret + delim.length;

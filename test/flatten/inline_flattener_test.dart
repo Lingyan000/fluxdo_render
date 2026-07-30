@@ -23,15 +23,28 @@ void main() {
     expect((children[0] as TextSpan).text, 'hello');
   });
 
-  test('em 注入 italic style', () {
+  test('em 注入 italic style(尾字带 letterSpacing 校正)', () {
     final result = flattener.flatten(
       [const EmRun(children: [TextRun('it')])],
       baseStyle,
     );
     final em = result.span.children![0] as TextSpan;
     expect(em.style?.fontStyle, FontStyle.italic);
-    expect(em.children, hasLength(1));
-    expect((em.children![0] as TextSpan).text, 'it');
+    // 合成斜体尾字校正:末 grapheme 拆独立子 span 加尾部 letterSpacing
+    // (斜切墨迹倾出 advance,与后随正体重叠 —— italic correction)。
+    // 文本内容不变:拼回来仍是 'it'。
+    final flat = StringBuffer();
+    em.visitChildren((s) {
+      if (s is TextSpan && s.text != null) flat.write(s.text);
+      return true;
+    });
+    expect(flat.toString(), 'it');
+    TextSpan? corrected;
+    em.visitChildren((s) {
+      if (s is TextSpan && (s.style?.letterSpacing ?? 0) > 0) corrected = s;
+      return true;
+    });
+    expect(corrected?.text, 't', reason: '斜体 run 末字形吃尾部校正间距');
   });
 
   test('strong 注入 bold style', () {

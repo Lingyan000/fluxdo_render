@@ -75,7 +75,7 @@ void main() {
       );
     });
 
-    test('嵌套(同区间 strong+em 固定序)', () {
+    test('嵌套(同区间 strong+em 尊重列表序)', () {
       expect(
         docToMarkdown([
           tb('x', marks: const [
@@ -83,7 +83,84 @@ void main() {
             MarkSpan(start: 0, end: 1, kind: MarkKind.strong),
           ])
         ]),
-        '***x***', // strong 外 em 内:**\*x\***
+        '***x***', // em 外 strong 内:*\**x\***(字节同 strong 外形态)
+      );
+    });
+
+    test('同区间嵌套保序:HTML 标签内嵌删除线不翻转(门禁回归)', () {
+      // 真实翻车:`<small>~~旧称~~</small>` 摊平成同区间 smallStyle+
+      // lineThrough(列表序 = DOM 外层先)。曾按 kMarkNestingOrder 重排
+      // 写出 `~~<small>旧称</small>~~` —— 二次 cook 结构翻转,宿主往返
+      // 门禁判不等价,整帖降级源码模式。
+      expect(
+        docToMarkdown([
+          tb('旧称', marks: const [
+            MarkSpan(start: 0, end: 2, kind: MarkKind.smallStyle),
+            MarkSpan(start: 0, end: 2, kind: MarkKind.lineThrough),
+          ])
+        ]),
+        '<small>~~旧称~~</small>',
+      );
+      // 反向嵌套(`~~<small>…</small>~~` 的 cooked)同样保序
+      expect(
+        docToMarkdown([
+          tb('旧称', marks: const [
+            MarkSpan(start: 0, end: 2, kind: MarkKind.lineThrough),
+            MarkSpan(start: 0, end: 2, kind: MarkKind.smallStyle),
+          ])
+        ]),
+        '~~<small>旧称</small>~~',
+      );
+      // 其他 HTML 标签同理:big 内嵌 strong
+      expect(
+        docToMarkdown([
+          tb('新称', marks: const [
+            MarkSpan(start: 0, end: 2, kind: MarkKind.bigStyle),
+            MarkSpan(start: 0, end: 2, kind: MarkKind.strong),
+          ])
+        ]),
+        '<big>**新称**</big>',
+      );
+    });
+
+    test('同区间硬约束组合仍按固定序(列表序不越权)', () {
+      // color 必须包 link 外(cook 实测,写反锚文本被 BBCode 切碎)——
+      // 即使列表序把 link 放前面,输出仍是 color 在外。
+      expect(
+        docToMarkdown([
+          tb('文字', marks: const [
+            MarkSpan(start: 0, end: 2, kind: MarkKind.link, attr: 'https://a.b'),
+            MarkSpan(start: 0, end: 2, kind: MarkKind.textColor, attr: 'red'),
+          ])
+        ]),
+        '[color=red][文字](https://a.b)[/color]',
+      );
+    });
+
+    test('cooked 摊平 → 序列化:嵌套方向端到端保序', () {
+      // 模拟 parser 摊平 `<small><s>旧称</s></small>`(外层先入递归)
+      final content = EditableTextContent.fromInlines(const [
+        StyledRun(kind: InlineStyleKind.small, children: [
+          StyledRun(kind: InlineStyleKind.lineThrough, children: [
+            TextRun('旧称'),
+          ]),
+        ]),
+      ]);
+      expect(
+        docToMarkdown([TextBlock(id: 'b0', content: content)]),
+        '<small>~~旧称~~</small>',
+      );
+      // 反向:`<s><small>…</small></s>`
+      final reversed = EditableTextContent.fromInlines(const [
+        StyledRun(kind: InlineStyleKind.lineThrough, children: [
+          StyledRun(kind: InlineStyleKind.small, children: [
+            TextRun('旧称'),
+          ]),
+        ]),
+      ]);
+      expect(
+        docToMarkdown([TextBlock(id: 'b0', content: reversed)]),
+        '~~<small>旧称</small>~~',
       );
     });
 

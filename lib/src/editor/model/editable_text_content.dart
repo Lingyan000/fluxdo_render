@@ -25,6 +25,13 @@ import 'package:flutter/foundation.dart';
 
 import '../../node/inline_node.dart';
 import '../../parser/paragraph_parser.dart' show ParagraphParser;
+import 'inline_spin.dart' show scanInlineSyntax;
+import 'markdown_serializer.dart'
+    show
+        compareSameSpanMarkOpen,
+        kMarkNestingOrder,
+        markOpeningDelimiter,
+        markClosingDelimiter;
 
 /// 原子哨兵字符(U+FFFC OBJECT REPLACEMENT CHARACTER)。
 const String kAtomChar = '\uFFFC';
@@ -258,6 +265,11 @@ class EditableTextContent {
   ) {
     for (final node in nodes) {
       switch (node) {
+        // 防御:显形虚拟定界符只存在于编辑渲染产物,不该被喂回模型;
+        // 不拦的话会落进下面的 TextRun 分支(子类),把 `**` 字面量写进
+        // 文档 —— 显形泄漏成真字符。
+        case EditingDelimiterRun():
+          break;
         case TextRun(:final text):
           _appendText(buf, marks, activeKinds, sanitizeText(text));
         case LineBreakRun():
@@ -390,11 +402,82 @@ class EditableTextContent {
   /// 替代:spoiler=淡灰底纹(内容可见可编辑,对齐官方 rich editor 的
   /// spoiler-blurred decoration 思路的简化),link=[editingLinkColor]
   /// 字色 + 下划线。
+  ///
+  /// [revealMarkdownAt]:显形位置(内容偏移;仅 [forEditing] 生效)。
+  /// 光标命中的 mark 区间(含边界)两端插 [EditingDelimiterRun] 虚拟
+  /// 定界符(零逻辑宽,纯渲染投影);null = 不显形。
+  /// [editingDelimiterColor]:定界符淡色(主题 outline)。
   List<InlineNode> toInlines({
     bool forEditing = false,
     Color? editingLinkColor,
+    Color? editingDelimiterColor,
+    int? revealMarkdownAt,
+    bool syntaxHighlight = false,
   }) {
     if (text.isEmpty) return const [];
+
+    // ir 字面语法着色(Vditor「符号可见 + 格式保持」):物化字面
+    // `*123*` 编辑态渲染出斜体内容 + 淡色定界符。实现 = 把语法命中
+    // 合成**临时 marks**(内容段→对应 kind;定界符段→淡色 textColor)
+    // 喂回本函数的既有切段/样式管线 —— 纯展示,文本/坐标零改动
+    // (字面字符全是真实字符;与 EditingDelimiterRun 零宽投影无关)。
+    if (forEditing && syntaxHighlight) {
+      final hits = scanInlineSyntax(this);
+      if (hits.isNotEmpty) {
+        final dim = editingDelimiterColor == null
+            ? null
+            : _hex(editingDelimiterColor);
+        final synthetic = <MarkSpan>[
+          for (final h in hits) ...[
+            // 内容样式只罩**内容段**:`<mark>` 的黄底/`~~` 的删除线涂
+            // 到标签字面上是错的(样式只属于内容,Vditor 同款)。斜体
+            // 内容与后随定界符的合成斜体重叠由 flattener 的尾字校正
+            // (italic correction)解决,不再靠把定界符一起斜。
+            // (link 不合成 —— 编辑态 label 蓝色下划线反而掩盖「这是
+            // 待编辑字面」;inlineCode 合成后自带灰底/等宽)
+            if (h.kind != MarkKind.link)
+              MarkSpan(
+                start: h.start + h.openLen,
+                end: h.start + h.openLen + h.contentLen,
+                kind: h.kind,
+                attr: h.attr,
+              ),
+            // 定界符段淡色(dim 区间更窄,fg 取最窄覆盖 → 淡色胜出)
+            if (dim != null) ...[
+              MarkSpan(
+                start: h.start,
+                end: h.start + h.openLen,
+                kind: MarkKind.textColor,
+                attr: dim,
+              ),
+              MarkSpan(
+                start: h.start + h.openLen + h.contentLen,
+                end: h.start + h.openLen + h.contentLen + h.closeLen,
+                kind: MarkKind.textColor,
+                attr: dim,
+              ),
+            ],
+          ],
+        ];
+        if (synthetic.isNotEmpty) {
+          // 合成 marks 是展示专用:递归**不传** revealMarkdownAt ——
+          // 否则显形逻辑会把临时着色 mark 再展开成 [color=…] 字面。
+          return EditableTextContent(
+            text: text,
+            marks: [...marks, ...synthetic],
+            atoms: atoms,
+          ).toInlines(
+            forEditing: true,
+            editingLinkColor: editingLinkColor,
+            editingDelimiterColor: editingDelimiterColor,
+          );
+        }
+      }
+    }
+
+    final revealedMarks = forEditing && revealMarkdownAt != null
+        ? revealableMarksAt(revealMarkdownAt)
+        : const <MarkSpan>[];
 
     // 1. 收集切点
     final cuts = <int>{0, text.length};
@@ -413,10 +496,59 @@ class EditableTextContent {
 
     // 2. 逐片段构建
     final out = <InlineNode>[];
+
+    // 显形定界符:片段边界处按嵌套序发射(开定界符外层先、闭定界符
+    // 内层先 —— 与序列化定序单一真相,显示形态 = raw 形态:同区间尊重
+    // marks 列表序(原 DOM 嵌套方向),硬约束 kind 按 kMarkNestingOrder,
+    // 见 compareSameSpanMarkOpen)。
+    final markListIndex = <MarkSpan, int>{};
+    for (var i = 0; i < marks.length; i++) {
+      markListIndex.putIfAbsent(marks[i], () => i);
+    }
+    void appendDelimiters(int offset, {required bool opening}) {
+      if (revealedMarks.isEmpty) return;
+      final atOffset = <MarkSpan>[
+        for (final mark in revealedMarks)
+          if ((opening ? mark.start : mark.end) == offset) mark,
+      ];
+      if (atOffset.isEmpty) return;
+      int openCompare(MarkSpan a, MarkSpan b) {
+        if (a.start == b.start && a.end == b.end) {
+          return compareSameSpanMarkOpen(
+              a, markListIndex[a] ?? 0, b, markListIndex[b] ?? 0);
+        }
+        return kMarkNestingOrder
+            .indexOf(a.kind)
+            .compareTo(kMarkNestingOrder.indexOf(b.kind));
+      }
+
+      atOffset.sort((a, b) {
+        if (opening) {
+          // 外层先开:覆盖更长(end 更大)在前;同界按开序。
+          final byEnd = b.end.compareTo(a.end);
+          if (byEnd != 0) return byEnd;
+          return openCompare(a, b);
+        }
+        // 内层先闭:start 更大在前;同界按开序反向。
+        final byStart = b.start.compareTo(a.start);
+        if (byStart != 0) return byStart;
+        return openCompare(b, a);
+      });
+      for (final mark in atOffset) {
+        final delimiter = opening
+            ? markOpeningDelimiter(mark)
+            : markClosingDelimiter(mark);
+        if (delimiter.isEmpty) continue; // 覆盖不了的 kind:宁缺毋错
+        out.add(EditingDelimiterRun(delimiter, color: editingDelimiterColor));
+      }
+    }
+
     for (var i = 0; i + 1 < points.length; i++) {
       final s = points[i];
       final e = points[i + 1];
       if (s >= e) continue;
+      appendDelimiters(s, opening: false);
+      appendDelimiters(s, opening: true);
       final piece = text.substring(s, e);
       if (piece == '\n') {
         out.add(const LineBreakRun());
@@ -476,7 +608,19 @@ class EditableTextContent {
           bgHex: bgHex,
           sizePct: sizePct));
     }
+    appendDelimiters(text.length, opening: false);
     return _applyOnlyEmoji(out);
+  }
+
+  /// 显形探测:光标(collapsed)在 [offset] 时需要展开定界符的 mark
+  /// 集合 —— 区间**含边界**命中(`start <= caret <= end`,官方
+  /// getMarkRange 的 inclusive 语义:贴着 mark 两端也显形)。
+  List<MarkSpan> revealableMarksAt(int offset) {
+    final caret = offset.clamp(0, text.length);
+    return [
+      for (final mark in marks)
+        if (mark.start <= caret && caret <= mark.end) mark,
+    ];
   }
 
   /// Discourse 大表情语义:整段**只有** emoji(空白不算内容)且不超过
@@ -495,6 +639,9 @@ class EditableTextContent {
         emojiCount++;
         continue;
       }
+      // 显形虚拟定界符不算内容(零逻辑宽,纯渲染投影)—— 否则光标进入
+      // 覆盖纯 emoji 段的 mark 时,大表情会因定界符出现而突然缩小。
+      if (n is EditingDelimiterRun) continue;
       // 纯空白的文本片段不算内容;其余任何节点都让本段不再是"只有表情"
       if (n is TextRun && n.text.trim().isEmpty) continue;
       return out;
@@ -675,16 +822,52 @@ class EditableTextContent {
   ///
   /// 注意:[inserted] 未经 [sanitizeText] —— 调用方(EditorState/
   /// insertAtom)负责;insertAtom 恰要插入哨兵本体,不能在这里一刀切剥。
-  EditableTextContent insert(int offset, String inserted) {
+  /// 末端打字是否延伸该 mark(主流编辑器 inclusive marks 语义:粗体末尾
+  /// 继续打字 = 继续粗体)。
+  /// - link 例外:链接尾打字长出链接是公认反直觉(ProseMirror link
+  ///   inclusive:false 同款);
+  /// - 带 attr 的 mark(size/color/bgcolor)例外:延伸会与后续同 kind
+  ///   不同 attr 的区间重叠(破坏"同 kind 不重叠"不变量),且延伸出的
+  ///   字号/颜色未必是用户意图。
+  /// - inlineCode **包含**:ProseMirror basic schema 的 code mark 默认
+  ///   inclusive,Typora/Vditor 同款 —— 代码尾打字继续在代码内,退出
+  ///   走右移跨界。曾按"代码尾打字退出"排除,实测造成 ir 下 code 无
+  ///   内侧停位:光标到不了末字符内侧、code 内打字光标蹦到闭 \` 之后。
+  static bool isInclusiveMark(MarkSpan m) =>
+      m.attr == null && m.kind != MarkKind.link;
+
+  EditableTextContent insert(
+    int offset,
+    String inserted, {
+    bool extendMarksAtEnd = false,
+    bool extendMarksAtStart = false,
+  }) {
     assert(offset >= 0 && offset <= text.length);
     if (inserted.isEmpty) return this;
     final len = inserted.length;
     final newMarks = <MarkSpan>[];
     for (final m in marks) {
       if (m.end <= offset) {
-        newMarks.add(m);
+        // 打字路径([extendMarksAtEnd]):恰在 mark 末端插入时,inclusive
+        // kind 延伸覆盖插入段 —— 与 marksAt(工具栏活跃态探测 offset-1)
+        // 口径一致,也让显形态"最后一个字符后打字仍在格式内"成立。
+        if (extendMarksAtEnd &&
+            m.end == offset &&
+            isInclusiveMark(m)) {
+          newMarks.add(m.copyWith(end: m.end + len));
+        } else {
+          newMarks.add(m);
+        }
       } else if (m.start >= offset) {
-        newMarks.add(m.copyWith(start: m.start + len, end: m.end + len));
+        // 开端二态内侧打字路径([extendMarksAtStart]):恰在 mark 开端
+        // 插入时,inclusive kind 前扩覆盖插入段(start 不右移,end 随
+        // 内容右移)—— ir 开端内侧停位「`**` 后打字进格式」的落点。
+        // 默认(外侧)整体右移 = 插在 mark 前。
+        if (extendMarksAtStart && m.start == offset && isInclusiveMark(m)) {
+          newMarks.add(m.copyWith(end: m.end + len));
+        } else {
+          newMarks.add(m.copyWith(start: m.start + len, end: m.end + len));
+        }
       } else {
         newMarks.add(m.copyWith(end: m.end + len));
       }
@@ -753,7 +936,22 @@ class EditableTextContent {
   /// 整选 → 直接打字」会因 delete+insert 在区间边界不延续样式而把
   /// spoiler mark 丢掉,打出来的是普通文字。用原始 span(含 attr)
   /// 重建而非只记 kind,链接 href/颜色值不丢。
-  EditableTextContent replace(int start, int end, String replacement) {
+  EditableTextContent replace(
+    int start,
+    int end,
+    String replacement, {
+    bool extendMarksAtEnd = false,
+    bool extendMarksAtStart = false,
+  }) {
+    if (start == end) {
+      // 纯插入(IME 打字主形态):透传末端/开端延伸语义
+      return insert(
+        start,
+        replacement,
+        extendMarksAtEnd: extendMarksAtEnd,
+        extendMarksAtStart: extendMarksAtStart,
+      );
+    }
     final carried = (start < end && replacement.isNotEmpty)
         ? [
             for (final m in marks)
