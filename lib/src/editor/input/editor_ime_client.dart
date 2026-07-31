@@ -488,6 +488,15 @@ class EditorImeClient with TextInputClient {
         //
         // typedChar 取光标前一字符:上屏后它就是这段输入的收尾字符。
         _tryRulesAfterCommit(blockId);
+        // 规则命中会改文档(`~~x~~` 转换要删掉四个波浪号),而这条路
+        // **原本直接 return**,跳过了下方常规路径的 reconcile —— 平台
+        // 窗口留着转换前的旧文本,`_lastSent` 与文档从此失同步,之后每
+        // 一击的 diff 全部错位(真机复现:先打 `~~~~`,光标插中间再打
+        // 中文,拼音一段段堆进正文)。这里补同一条回喂。
+        final afterRules = state.textBlockById(blockId);
+        if (afterRules != null && afterRules.content.text != value.text) {
+          syncFromState(show: false, force: true);
+        }
       } else if (!isEcho && value.selection.isValid) {
         // 只认**全选形状**(0..len):菜单 Edit 唯一主动发的选区就是
         // Select All;其余非回显纯选区通知维持忽略(回显可能带轻微
