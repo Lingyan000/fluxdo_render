@@ -623,44 +623,81 @@ class EditableTextContent {
     ];
   }
 
-  /// Discourse 大表情语义:整段**只有** emoji(空白不算内容)且不超过
-  /// [_maxOnlyEmoji] 个 → 全部标 isOnlyEmoji(渲染 32dp);超了则全部
-  /// 普通尺寸。规则与 cook 引擎实测一致:
-  /// `:a:`→1 大 / `:a: :a: :a:`→3 全大 / 4 个→全不大。
+  /// Discourse 大表情语义:一**行**只有 emoji(空白不算内容)且不超过
+  /// [_maxOnlyEmoji] 个 → 该行的 emoji 全标 isOnlyEmoji(渲染 32dp)。
+  ///
+  /// 判定按**行**(软换行分段)走,不是按整段:`😋⏎aaaa` 发出去以后
+  /// 服务端渲染的就是「第一行大表情 + 第二行文字」(cook 引擎实测),
+  /// 编辑器要跟它一致 —— 按整段判会让回车后上一行的表情缩回去。每行
+  /// 独立计数:`:a:`→1 大 / `:a: :a: :a:`→3 全大 / 4 个→全不大。
   ///
   /// 放在 [toInlines] 里而不是只放导出路径,是因为编辑器实时渲染
   /// (editable_paragraph)和导出(doc_converter)走的是同一个出口 ——
   /// 只在导出侧标记会导致"刚插入的 emoji 是小的,切到源码再切回来才
   /// 变大"(实测复现)。
   static List<InlineNode> _applyOnlyEmoji(List<InlineNode> out) {
-    var emojiCount = 0;
-    for (final n in out) {
-      if (n is EmojiRun) {
-        emojiCount++;
-        continue;
+    final large = <int>{}; // 需要放大的 EmojiRun 在 out 里的下标
+
+    void judgeLine(int start, int endExclusive) {
+      final indices = <int>[];
+      for (var i = start; i < endExclusive; i++) {
+        final n = out[i];
+        if (n is EmojiRun) {
+          indices.add(i);
+          continue;
+        }
+        // 显形虚拟定界符不算内容(零逻辑宽,纯渲染投影)—— 否则光标进入
+        // 覆盖纯 emoji 行的 mark 时,大表情会因定界符出现而突然缩小。
+        // 必须先于 TextRun 判(EditingDelimiterRun 是 TextRun 子类)。
+        if (n is EditingDelimiterRun) continue;
+        // 纯空白不算内容;其余任何节点都让本行不再是"只有表情"
+        if (n is TextRun && n.text.trim().isEmpty) continue;
+        return;
       }
-      // 显形虚拟定界符不算内容(零逻辑宽,纯渲染投影)—— 否则光标进入
-      // 覆盖纯 emoji 段的 mark 时,大表情会因定界符出现而突然缩小。
-      if (n is EditingDelimiterRun) continue;
-      // 纯空白的文本片段不算内容;其余任何节点都让本段不再是"只有表情"
-      if (n is TextRun && n.text.trim().isEmpty) continue;
-      return out;
+      if (indices.isNotEmpty && indices.length <= _maxOnlyEmoji) {
+        large.addAll(indices);
+      }
     }
-    if (emojiCount == 0) return out;
-    final large = emojiCount <= _maxOnlyEmoji;
+
+    var lineStart = 0;
+    for (var i = 0; i < out.length; i++) {
+      if (out[i] is LineBreakRun) {
+        judgeLine(lineStart, i);
+        lineStart = i + 1;
+      }
+    }
+    judgeLine(lineStart, out.length);
+
     var changed = false;
     final result = [
-      for (final n in out)
-        if (n is EmojiRun && n.isOnlyEmoji != large)
+      for (var i = 0; i < out.length; i++)
+        if (out[i] case final EmojiRun n
+            when n.isOnlyEmoji != large.contains(i))
           () {
             changed = true;
-            return EmojiRun(name: n.name, url: n.url, isOnlyEmoji: large);
+            return EmojiRun(
+              name: n.name,
+              url: n.url,
+              isOnlyEmoji: large.contains(i),
+            );
           }()
         else
-          n,
+          out[i],
     ];
     return changed ? result : out;
   }
+
+  /// 本段是否含「大表情行」。
+  ///
+  /// 给渲染侧用:大表情是 32dp + 上下 0.5em 外边距,远超裸行高,段落的
+  /// forceStrutHeight 双向钳制会把它压回去(真机症状:补全插入的 emoji
+  /// 不放大)。渲染侧据此放开钳制,同图片原子的处理。
+  ///
+  /// 判据不重写第二份 —— 直接看编辑渲染出口([toInlines] →
+  /// [_applyOnlyEmoji])的产物,与实际渲染**构造上同源**,不会漂移。
+  /// 实例不可变,late final 缓存首算结果。
+  late final bool hasOnlyEmojiLine = toInlines(forEditing: true)
+      .any((n) => n is EmojiRun && n.isOnlyEmoji);
 
   /// 超过这个数量就不再算大表情(对齐 Discourse)。
   static const int _maxOnlyEmoji = 3;

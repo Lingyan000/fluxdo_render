@@ -407,6 +407,19 @@ bool primaryModifierHeld(KeyEvent event) {
   return isMac ? pressed.isMetaPressed : pressed.isControlPressed;
 }
 
+/// 主修饰键判定的**可逆动作版**:真实状态 **或** 补偿窗口 —— 与内核
+/// [handleEditorKeyEvent] 里 primary 的口径逐字一致。
+///
+/// 宿主同样有可逆的修饰键路径(如 Ctrl+V 走图片粘贴),那些地方必须用
+/// 本函数而不是 [primaryModifierHeld]:Win+V 注入的 `V` 不带 Ctrl 修饰位,
+/// 只认真实状态会让整条粘贴路径失效(真机复现:Win+V 粘图没反应)。
+///
+/// 反过来,**发送/删除这类不可逆动作一律用 [primaryModifierHeld]** ——
+/// 补偿窗口的 2s 暴露面对可逆操作可接受,对误发帖不行(见上方口径拆分)。
+bool primaryModifierHeldForReversibleAction(KeyEvent event) =>
+    primaryModifierHeld(event) ||
+    (!_producedPrintable(event) && _isSyntheticModifiedKey(event));
+
 bool _isSyntheticModifiedKey(KeyEvent event) {
   // SendInput 注入 / IME 假抬起是 Windows 平台行为 —— 别的平台不吃补偿,
   // 免得白白扩大误判面。
