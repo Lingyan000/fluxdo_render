@@ -266,32 +266,98 @@ class InlineFlattener {
     List<InlineNode> nodes,
     _FlattenPass p, {
     GestureRecognizer? inheritedRecognizer,
+    bool italicTrailFix = false,
   }) {
     return [
-      for (final node in nodes)
-        _toSpan(node, p, inheritedRecognizer: inheritedRecognizer),
+      for (var i = 0; i < nodes.length; i++)
+        _toSpan(
+          nodes[i],
+          p,
+          inheritedRecognizer: inheritedRecognizer,
+          italicTrailFix: italicTrailFix && i == nodes.length - 1,
+        ),
     ];
+  }
+
+  /// 合成斜体尾字校正量(em 倍数)。MiSans 等 CJK 字体无斜体字形,
+  /// FontStyle.italic 走引擎合成斜切:字形墨迹向右倾出 advance(实测
+  /// 尾字形墨迹超出 ~0.05em),与紧随的正体字形重叠。修法 = 排版学
+  /// 「italic correction」:斜体 run 的最后一个字形加尾部 letterSpacing
+  /// —— 不插字符(投影/选区坐标零影响),只在斜→正边界补出倾斜量。
+  static const double _kItalicTrailFixEm = 0.08;
+
+  /// 斜体 run 尾字校正:把 [text](软换行处理后)的最后一个 grapheme 拆
+  /// 成独立子 span 加尾部 letterSpacing。文本内容零改动(render text 与
+  /// projection 的一致性铁律不受扰),只是末字形 advance 变宽,把合成
+  /// 斜切倾出的墨迹让出来。
+  InlineSpan _italicTrailFixedSpan(
+    String text,
+    _FlattenPass p,
+    GestureRecognizer? recognizer,
+  ) {
+    final sb = insertSoftBreaks(text);
+    if (sb.isEmpty) {
+      return TextSpan(text: sb, recognizer: recognizer);
+    }
+    final last = sb.characters.last;
+    final head = sb.substring(0, sb.length - last.length);
+    return TextSpan(children: [
+      if (head.isNotEmpty) TextSpan(text: head, recognizer: recognizer),
+      TextSpan(
+        text: last,
+        style: TextStyle(
+          letterSpacing: p.emojiBaseSize * _kItalicTrailFixEm,
+        ),
+        recognizer: recognizer,
+      ),
+    ]);
   }
 
   InlineSpan _toSpan(
     InlineNode node,
     _FlattenPass p, {
     GestureRecognizer? inheritedRecognizer,
+    bool italicTrailFix = false,
   }) {
     return switch (node) {
-      TextRun(:final text) => TextSpan(
-          text: insertSoftBreaks(text),
+      // 必须排在 TextRun 之前(子类,switch 按序匹配)。淡色字面定界符:
+      // 清 fontWeight/fontStyle(定界符本身不吃 mark 样式 —— `**` 不加粗、
+      // `*` 不斜),颜色用 toInlines 传入的 delimiter color(主题 outline)。
+      // 不 insertSoftBreaks:定界符是短字面量,注入 ZWSP 会让渲染长度
+      // 与 projection entry 的 text.length 失配。
+      EditingDelimiterRun(:final text, :final color) => TextSpan(
+          text: text,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.normal,
+            fontStyle: FontStyle.normal,
+          ),
           recognizer: inheritedRecognizer,
         ),
+      TextRun(:final text) => italicTrailFix
+          ? _italicTrailFixedSpan(text, p, inheritedRecognizer)
+          : TextSpan(
+              text: insertSoftBreaks(text),
+              recognizer: inheritedRecognizer,
+            ),
       EmRun(:final children) => TextSpan(
           style: const TextStyle(fontStyle: FontStyle.italic),
-          children:
-              _build(children, p, inheritedRecognizer: inheritedRecognizer),
+          // 斜体 run 的最后一个文字字形吃尾字校正(见 _kItalicTrailFixEm)
+          children: _build(
+            children,
+            p,
+            inheritedRecognizer: inheritedRecognizer,
+            italicTrailFix: true,
+          ),
         ),
       StrongRun(:final children) => TextSpan(
           style: const TextStyle(fontWeight: FontWeight.bold),
-          children:
-              _build(children, p, inheritedRecognizer: inheritedRecognizer),
+          children: _build(
+            children,
+            p,
+            inheritedRecognizer: inheritedRecognizer,
+            italicTrailFix: italicTrailFix,
+          ),
         ),
       StyledRun(:final kind, :final children) => _buildStyledSpan(
           kind,
@@ -303,8 +369,12 @@ class InlineFlattener {
       // 为 null 时不覆盖父级色(继承),background 为 null 时无底色。
       ColoredRun(:final color, :final background, :final children) => TextSpan(
           style: TextStyle(color: color, backgroundColor: background),
-          children:
-              _build(children, p, inheritedRecognizer: inheritedRecognizer),
+          children: _build(
+            children,
+            p,
+            inheritedRecognizer: inheritedRecognizer,
+            italicTrailFix: italicTrailFix,
+          ),
         ),
       // 字号缩放(`[size=N]` → `font-size:N%`):用 fontSize 的**相对倍数**
       // 表达,对齐网页端 —— 0 倍即视觉隐藏,不夹上下限。
@@ -312,8 +382,12 @@ class InlineFlattener {
           // 基准取块的实际基础字号(emojiBaseSize 即 baseStyle.fontSize),
           // 比 DefaultTextStyle 准;嵌套 size 以块基准计算,属可接受边界。
           style: TextStyle(fontSize: p.emojiBaseSize * scale),
-          children:
-              _build(children, p, inheritedRecognizer: inheritedRecognizer),
+          children: _build(
+            children,
+            p,
+            inheritedRecognizer: inheritedRecognizer,
+            italicTrailFix: italicTrailFix,
+          ),
         ),
       LineBreakRun() => TextSpan(
           text: '\n',

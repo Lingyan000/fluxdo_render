@@ -62,7 +62,9 @@ class _EditorDemoPageState extends State<EditorDemoPage> {
         ParagraphParser().parse(_demoHtml),
         () => 'e_${counter++}',
       ),
-    );
+    )
+      // demo 页固定即时渲染模式(显形/物化/二态全套可验)
+      ..mode = EditorMode.ir;
   }
 
   @override

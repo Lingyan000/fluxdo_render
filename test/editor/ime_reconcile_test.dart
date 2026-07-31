@@ -390,6 +390,56 @@ void main() {
       expect(state.selection!.extent.offset, 2);
     });
   });
+
+  group('ir spin 经 IME 通道(移动端退格主通道)', () {
+    test('IME 退格删出完整对:光标驻留保持字面,失焦收口折叠', () {
+      // 文档 '**bold**x',IME 退格删掉尾 'x' → '**bold**' 是完整字面对。
+      // 闭区间守卫(Vditor「移出才折叠」):caret 贴在字面区边界(9)
+      // 仍驻留,imeReplace 落地不折;失焦(选区置空)收口才折叠。
+      final (state, ime) = makeAttached(paragraphs: ['**bold**x'], caret: 9);
+      state.mode = EditorMode.ir;
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad**bold**',
+        selection: const TextSelection.collapsed(offset: 9),
+        composing: TextRange.empty,
+      ));
+      var c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, '**bold**', reason: '光标驻留字面区,不立即折叠');
+      expect(c.marks, isEmpty);
+      // 失焦收口 → 折叠为 strong
+      state.updateSelection(null);
+      c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, 'bold');
+      expect(c.marks.single.kind, MarkKind.strong);
+    });
+
+    test('composing 活跃时不 spin(预编辑文本是临时的)', () {
+      final (state, ime) = makeAttached(paragraphs: ['**bold*'], caret: 7);
+      state.mode = EditorMode.ir;
+      // 拼音进行中,文本恰好拼出 '**bold**'(composing 覆盖尾部)
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad**bold**',
+        selection: const TextSelection.collapsed(offset: 9),
+        composing: const TextRange(start: 8, end: 9),
+      ));
+      final c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, '**bold**', reason: 'composing 中不折叠');
+      expect(c.marks, isEmpty);
+    });
+
+    test('wysiwyg 下 IME 删出完整对不折叠', () {
+      final (state, ime) = makeAttached(paragraphs: ['**bold**x'], caret: 9);
+      expect(state.mode, EditorMode.wysiwyg);
+      ime.updateEditingValue(TextEditingValue(
+        text: '$pad**bold**',
+        selection: const TextSelection.collapsed(offset: 9),
+        composing: TextRange.empty,
+      ));
+      final c = (state.blocks[0] as TextBlock).content;
+      expect(c.text, '**bold**', reason: 'wysiwyg 无 spin');
+      expect(c.marks, isEmpty);
+    });
+  });
 }
 
 /// 段内软换行(cook 的 `<br>` 导入形态)必须扛得住 IME 回调。

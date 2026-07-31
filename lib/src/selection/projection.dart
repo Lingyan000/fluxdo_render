@@ -22,6 +22,11 @@ enum ProjectionKind {
   lineBreak,
   inlineCode,
 
+  /// 编辑态显形的虚拟 Markdown 定界符(EditingDelimiterRun):渲染占
+  /// text.length 个字符、逻辑投影恒为空串(与 [codePad] 同款零逻辑宽
+  /// —— 不属于内容,复制/引用/编辑坐标全不带出,光标不停在内部)。
+  editingDelimiter,
+
   /// 行内代码两侧注入的 NBSP 粘性内边距(见 kInlineCodePadChar)。
   /// 渲染占 1 字符、逻辑投影恒为空串(不属于内容,复制/引用不带出)。
   codePad,
@@ -212,7 +217,7 @@ class RenderTextProjection {
     for (final e in entries) {
       final entryContentLen = _contentLenOfEntry(e);
       if (remaining <= 0) {
-        if (entryContentLen == 0) continue; // pad/ZWSP:光标不停这
+        if (entryContentLen == 0) continue; // pad/ZWSP/虚拟定界符:光标不停这
         return e.renderStart;
       }
       if (remaining < entryContentLen) {
@@ -237,6 +242,36 @@ class RenderTextProjection {
       if (s[i] != kSoftBreakChar) n++;
     }
     return n;
+  }
+
+  /// 内容偏移 → 渲染偏移(**末端语义**)。
+  ///
+  /// 与 [renderOffsetForContent] 的差别只在边界归属:恰在某 entry 内容
+  /// 末时归属到**该 entry 的渲染末端**,不跳过其后的零内容 entry。
+  /// 区间末端(装饰框/底纹右界)用这个 —— 光标语义的延迟归属会把紧随
+  /// 其后的显形虚拟定界符/codePad 一并框进装饰里(实测:剧透虚线框把
+  /// `[/spoiler]` 包进去而开定界符在框外,不对称)。
+  int renderEndForContent(int contentOffset) {
+    var remaining = contentOffset.clamp(0, contentLength);
+    if (remaining <= 0) return 0;
+    for (final e in entries) {
+      final entryContentLen = _contentLenOfEntry(e);
+      if (entryContentLen == 0) continue;
+      if (remaining <= entryContentLen) {
+        if (e.isAtomic) return e.renderEnd;
+        var seen = 0;
+        final s = e.logicalText;
+        for (var i = 0; i < s.length; i++) {
+          if (s[i] != kSoftBreakChar) {
+            seen++;
+            if (seen == remaining) return e.renderStart + i + 1;
+          }
+        }
+        return e.renderEnd;
+      }
+      remaining -= entryContentLen;
+    }
+    return renderLength;
   }
 
   /// 渲染偏移 → 内容偏移(命中/选区结果换算到编辑坐标)。

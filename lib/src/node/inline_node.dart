@@ -37,6 +37,34 @@ class TextRun extends InlineNode {
   String toString() => 'TextRun(${text.length} chars)';
 }
 
+/// 编辑态显形的虚拟 Markdown 定界符(光标落在 mark 内/边界时两端显示的
+/// 淡色字面定界符,如 `**`/`[u]`)。
+///
+/// **纯渲染投影**:占渲染宽度但零逻辑宽度(projection 的 logicalText 为
+/// 空串)—— 文档模型/IME/选区/复制/序列化/undo 全部无感知。只由编辑
+/// 渲染路径(EditableTextContent.toInlines 的 revealMarkdownAt)产生,
+/// 阅读端和序列化永远不会出现此节点。
+@immutable
+class EditingDelimiterRun extends TextRun {
+  const EditingDelimiterRun(super.text, {this.color});
+
+  final Color? color;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EditingDelimiterRun &&
+          runtimeType == other.runtimeType &&
+          text == other.text &&
+          color == other.color;
+
+  @override
+  int get hashCode => Object.hash(text, color);
+
+  @override
+  String toString() => 'EditingDelimiterRun("$text")';
+}
+
 /// `<em>` / `<i>` 斜体,可包含嵌套行内子节点。
 @immutable
 class EmRun extends InlineNode {
