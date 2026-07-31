@@ -19,11 +19,10 @@ KeyEvent down(LogicalKeyboardKey key, {String? character}) => KeyDownEvent(
       timeStamp: Duration.zero,
     );
 
-KeyEvent up(LogicalKeyboardKey key, {bool synthesized = false}) => KeyUpEvent(
+KeyEvent up(LogicalKeyboardKey key) => KeyUpEvent(
       physicalKey: PhysicalKeyboardKey.keyV,
       logicalKey: key,
       timeStamp: Duration.zero,
-      synthesized: synthesized,
     );
 
 void main() {
@@ -63,13 +62,15 @@ void main() {
     expect(pasteCount, 1);
   });
 
-  test('完整注入序列:合成的 Ctrl 抬起不清空补偿窗口,仍认粘贴', () {
-    // 真机上 Flutter 会为「V 消息不带 Ctrl 修饰位」在 V 之前**合成**一次
-    // Ctrl 抬起。曾因作废规则不区分真假抬起,窗口在轮到 V 之前就被清空,
-    // 补偿形同虚设 —— 测试绿(上面那个用例的序列漏了这一步)真机红。
-    // 本用例固化完整序列,防止 `!event.synthesized` 被改回去。
+  test('完整注入序列:抖动式 Ctrl 抬起(<80ms)不清空补偿窗口,仍认粘贴', () async {
+    // 真机抓包的完整序列:Ctrl↓ → Ctrl↑(间隔仅 10~40ms)→ V↓ —— 抬起
+    // 发生在 V 之前,且是**普通真实事件**(synthesized==false,曾试图用
+    // 该标记区分真假抬起,被抓包证伪)。作废规则若不豁免抖动式抬起,
+    // 窗口在轮到 V 之前就被清空,补偿形同虚设 —— 测试绿(上面那个用例
+    // 的序列漏了这一步)真机红。本用例固化完整序列,防判据回退。
     send(down(LogicalKeyboardKey.controlLeft));
-    send(up(LogicalKeyboardKey.controlLeft, synthesized: true));
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    send(up(LogicalKeyboardKey.controlLeft));
     expect(send(down(LogicalKeyboardKey.keyV)), KeyEventResult.handled);
     expect(pasteCount, 1);
     // 宿主可逆路径(图片粘贴)用的宽松版判定,同一事件也应为真。
@@ -79,11 +80,13 @@ void main() {
     );
   });
 
-  test('真实的 Ctrl 抬起立即作废窗口(粘贴后纯回车不误判)', () {
+  test('正常松开 Ctrl(>80ms)立即作废窗口(粘贴后纯回车不误判)', () async {
     send(down(LogicalKeyboardKey.controlLeft));
+    // 真人按住 Ctrl 的时长远超抖动阈值(80ms),隔开再抬起
+    await Future<void>.delayed(const Duration(milliseconds: 120));
     send(up(LogicalKeyboardKey.controlLeft));
     expect(send(down(LogicalKeyboardKey.keyV)), KeyEventResult.ignored,
-        reason: '手动松开 Ctrl 是真实事件,窗口应立刻清空');
+        reason: '正常节奏的松开是真实释放,窗口应立刻清空');
     expect(pasteCount, 0);
     expect(
       primaryModifierHeldForReversibleAction(down(LogicalKeyboardKey.keyV)),
