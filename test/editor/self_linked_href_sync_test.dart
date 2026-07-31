@@ -15,6 +15,8 @@ EditableTextContent _bareLink() => EditableTextContent(
     );
 
 void main() {
+  replaceCarriedTests();
+
   test('删掉查询参数:href 跟着变', () {
     final c = _bareLink();
     final cut = c.delete(_url.indexOf('?'), _url.length);
@@ -43,5 +45,49 @@ void main() {
 
     expect(edited.text, '点我看看');
     expect(edited.marks.single.attr, _url, reason: '自定义文案不联动');
+  });
+}
+
+/// replace(选中替换)路径:carried 重建不得把裸链接撕碎。
+///
+/// delete+insert 各自按「自己当时覆盖的切片」联动 attr,拼不回整体;
+/// carried 段若再按旧 attr 罩回去,一个视觉链接会碎成两三段不同 href
+/// 的 mark(改法见 replace 的裸链接整段重建分支)。
+void replaceCarriedTests() {
+  const url = 'https://linux.do/t/topic/2659942/18?u=is_hp';
+
+  EditableTextContent bare() => EditableTextContent(
+        text: url,
+        marks: [
+          MarkSpan(start: 0, end: url.length, kind: MarkKind.link, attr: url),
+        ],
+      );
+
+  test('选中尾部查询参数直接打字:单段 mark,href 跟新文本', () {
+    final out = bare().replace(url.indexOf('?'), url.length, 'x');
+    expect(out.text, 'https://linux.do/t/topic/2659942/18x');
+    expect(out.marks.single.attr, out.text, reason: '不碎段、不留旧 href');
+    expect(out.marks.single.start, 0);
+    expect(out.marks.single.end, out.text.length);
+  });
+
+  test('选中中段替换:单段 mark,href 跟新文本', () {
+    final s = url.indexOf('topic');
+    final out = bare().replace(s, s + 5, 'x');
+    expect(out.text, 'https://linux.do/t/x/2659942/18?u=is_hp');
+    expect(out.marks.single.attr, out.text);
+  });
+
+  test('自定义文案链接的选中替换:attr 保持,不联动', () {
+    const label = '点我看看';
+    final c = EditableTextContent(
+      text: label,
+      marks: [
+        MarkSpan(start: 0, end: label.length, kind: MarkKind.link, attr: url),
+      ],
+    );
+    final out = c.replace(2, 4, '瞧瞧');
+    expect(out.text, '点我瞧瞧');
+    expect(out.marks.single.attr, url, reason: '自定义文案不联动');
   });
 }

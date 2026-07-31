@@ -1025,6 +1025,19 @@ class EditableTextContent {
         : const <MarkSpan>[];
     var out = delete(start, end).insert(start, replacement);
     for (final m in carried) {
+      // 「文本即链接」的裸链接整段重建:delete+insert 各自按**自己当时
+      // 覆盖的切片**联动 attr,拼不回一个整体 —— 若 carried 段再按旧
+      // attr 罩回去,一个视觉链接会碎成两三段不同 href 的 mark。改为
+      // 罩**编辑后完整区间**,attr 取该区间新文本(applyMark 覆盖式,
+      // 顺带把 flank 上各自联动出的局部 attr 统一掉)。
+      if (m.kind == MarkKind.link &&
+          m.attr != null &&
+          m.attr == text.substring(m.start, m.end)) {
+        final newEnd = m.end - (end - start) + replacement.length;
+        out = out.applyMark(m.start, newEnd, m.kind,
+            attr: out.text.substring(m.start, newEnd));
+        continue;
+      }
       out = out.applyMark(start, start + replacement.length, m.kind,
           attr: m.attr);
     }
