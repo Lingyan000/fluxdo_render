@@ -687,40 +687,17 @@ class EditableTextContent {
     return changed ? result : out;
   }
 
-  /// 本段是不是含「大表情行」——判据与 [_applyOnlyEmoji] 同源。
+  /// 本段是否含「大表情行」。
   ///
   /// 给渲染侧用:大表情是 32dp + 上下 0.5em 外边距,远超裸行高,段落的
   /// forceStrutHeight 双向钳制会把它压回去(真机症状:补全插入的 emoji
   /// 不放大)。渲染侧据此放开钳制,同图片原子的处理。
-  bool get isOnlyEmojiLine {
-    var count = 0;
-    var lineCount = 0;
-    var lineClean = true;
-    for (var i = 0; i < text.length; i++) {
-      if (text[i] == '\n') {
-        if (lineClean && lineCount > 0 && lineCount <= _maxOnlyEmoji) {
-          count += lineCount;
-        }
-        lineCount = 0;
-        lineClean = true;
-        continue;
-      }
-      final atom = atoms[i];
-      if (atom != null) {
-        if (atom is EmojiRun) {
-          lineCount++;
-        } else {
-          lineClean = false;
-        }
-        continue;
-      }
-      if (text[i].trim().isNotEmpty) lineClean = false;
-    }
-    if (lineClean && lineCount > 0 && lineCount <= _maxOnlyEmoji) {
-      count += lineCount;
-    }
-    return count > 0;
-  }
+  ///
+  /// 判据不重写第二份 —— 直接看编辑渲染出口([toInlines] →
+  /// [_applyOnlyEmoji])的产物,与实际渲染**构造上同源**,不会漂移。
+  /// 实例不可变,late final 缓存首算结果。
+  late final bool hasOnlyEmojiLine = toInlines(forEditing: true)
+      .any((n) => n is EmojiRun && n.isOnlyEmoji);
 
   /// 超过这个数量就不再算大表情(对齐 Discourse)。
   static const int _maxOnlyEmoji = 3;
