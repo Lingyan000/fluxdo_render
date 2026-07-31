@@ -314,7 +314,13 @@ void _trackModifierDown(KeyEvent event, {required bool isMac}) {
   // splitBlock + 宿主软换行都因「不能碰发送快捷键」让路,回车穿透给平台
   // IME 兜底插入,表现为「粘贴后回车多插一行」——这条 KeyUp 是真实的
   // (不同于 Win+V 那种合成抬起),收到就该立刻清空窗口。
-  if (event is KeyUpEvent) _lastModifierDownAt = null;
+  //
+  // **只认真实抬起**:Win+V 的注入序列里,Flutter 会为「V 消息不带 Ctrl
+  // 修饰位」合成一次 Ctrl 抬起(就是本文件上方 Win+V 那段注释描述的
+  // 现象)。不排除合成事件的话,窗口在轮到 V 之前就被清空,补偿形同虚设
+  // —— 真机复现:Win+V 粘贴完全没反应。`synthesized` 正是框架给的这个
+  // 区分位。
+  if (event is KeyUpEvent && !event.synthesized) _lastModifierDownAt = null;
 }
 
 /// 本次按键是否**产出了可打印字符**。
@@ -390,6 +396,19 @@ bool primaryModifierHeld(KeyEvent event) {
   final pressed = HardwareKeyboard.instance;
   return isMac ? pressed.isMetaPressed : pressed.isControlPressed;
 }
+
+/// 主修饰键判定的**可逆动作版**:真实状态 **或** 补偿窗口 —— 与内核
+/// [handleEditorKeyEvent] 里 primary 的口径逐字一致。
+///
+/// 宿主同样有可逆的修饰键路径(如 Ctrl+V 走图片粘贴),那些地方必须用
+/// 本函数而不是 [primaryModifierHeld]:Win+V 注入的 `V` 不带 Ctrl 修饰位,
+/// 只认真实状态会让整条粘贴路径失效(真机复现:Win+V 粘图没反应)。
+///
+/// 反过来,**发送/删除这类不可逆动作一律用 [primaryModifierHeld]** ——
+/// 补偿窗口的 2s 暴露面对可逆操作可接受,对误发帖不行(见上方口径拆分)。
+bool primaryModifierHeldForReversibleAction(KeyEvent event) =>
+    primaryModifierHeld(event) ||
+    (!_producedPrintable(event) && _isSyntheticModifiedKey(event));
 
 bool _isSyntheticModifiedKey(KeyEvent event) {
   // SendInput 注入 / IME 假抬起是 Windows 平台行为 —— 别的平台不吃补偿,
