@@ -222,6 +222,9 @@ class _EditableParagraphState extends State<EditableParagraph> {
     // != 1)就放开,不区分放大/缩小 —— 缩小时同理不该被强制拉到裸字体高。
     final hasImageAtom =
         block.content.atoms.values.any((a) => a is ImageRun);
+    // 大表情行(只有 ≤3 个 emoji)同理要放开:32dp + 上下 0.5em 外边距
+    // 远超裸行高,钳住就等于"放大效果没了"。
+    final hasOnlyEmojiLine = block.content.hasOnlyEmojiLine;
     final hasSizedText = block.content.marks.any((m) {
       if (m.kind != MarkKind.size) return false;
       final scale = EditableTextContent.parsePct(m.attr);
@@ -238,7 +241,8 @@ class _EditableParagraphState extends State<EditableParagraph> {
         result.span,
         strutStyle: StrutStyle.fromTextStyle(
           style,
-          forceStrutHeight: !hasImageAtom && !hasSizedText,
+          forceStrutHeight:
+              !hasImageAtom && !hasSizedText && !hasOnlyEmojiLine,
         ),
       ),
     );
