@@ -335,16 +335,39 @@ class EditorImeClient with TextInputClient {
 
     final value = _unformat(rawValue);
     if (value == null) {
-      // 文本不以 pad 开头。只有「恰好等于上次值去掉 pad」才是真·段首退格
-      // (IME 只删了 pad);其余(macOS attach 后的空值回显、陈旧回显)一律
-      // 视为平台状态失真 → 重喂权威状态,**绝不**触发合并(否则空回显会
-      // 把段落错误合并)。
+      // 文本不以 pad 开头,三分:
+      // 1. 「恰好等于上次值去掉 pad」= 真·段首退格(IME 只删了 pad)→ 合并;
+      // 2. 空串且上次窗口有内容 = 移动端 IME 整窗清空 → 按清空落地;
+      // 3. 其余(macOS attach 后的空值回显、陈旧回显)一律视为平台状态
+      //    失真 → 重喂权威状态,**绝不**触发合并(否则空回显会把段落
+      //    错误合并)。
       final expectedRemainder = _lastSent.text.startsWith(_padChar)
           ? _lastSent.text.substring(1)
           : null;
       if (expectedRemainder != null && rawValue.text == expectedRemainder) {
         state.sealHistory();
         state.mergeWithPrevious(blockId);
+      } else if (rawValue.text.isEmpty &&
+          expectedRemainder != null &&
+          expectedRemainder.isNotEmpty &&
+          (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS)) {
+        // 移动端 IME 整窗清空(输入法「清空」键 / IME 侧全选后删除):
+        // 平台把**含 pad 的整个窗口**删成空串。必须按清空落地 —— 早先
+        // 一律当失真重喂,清空刚生效就被旧文本覆写 = 真机"输入法清空
+        // 无效"。仅限移动端:macOS attach 后的空值回显必须维持重喂
+        // 语义(见上),否则空回显会误清段落。
+        _log('IME window cleared — apply as clear');
+        state.sealHistory();
+        final sel = state.selection;
+        if (sel != null && !sel.isCollapsed) {
+          // IME 侧全选已升格为(可能跨段的)编辑器选区 → 删整个选区
+          state.deleteSelection();
+        } else {
+          final len = state.textBlockById(blockId)?.content.length ?? 0;
+          state.imeReplace(blockId, 0, len, '', caretOffset: 0);
+        }
+        state.sealHistory();
       }
       syncFromState(show: false, force: true);
       return;

@@ -231,6 +231,83 @@ void main() {
     });
   });
 
+  group('移动端 IME 整窗清空(输入法「清空」键)', () {
+    // flutter test 环境 defaultTargetPlatform = android,即移动端路径;
+    // 显式覆写以防宿主环境差异。
+    test('整窗(含 pad)删成空串 → 当前段清空,不还原', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      final (state, ime) = makeAttached(
+        paragraphs: const ['第一段', 'second'],
+        blockIndex: 0,
+        caret: 3,
+      );
+      ime.updateEditingValue(const TextEditingValue(
+        text: '',
+        selection: TextSelection.collapsed(offset: 0),
+      ));
+      expect((state.blocks[0] as TextBlock).content.text, '',
+          reason: '清空必须落地,不得被权威状态重喂还原');
+      expect(state.blocks.length, 2, reason: '只清空,不合并段落');
+      expect(state.selection!.extent.offset, 0);
+    });
+
+    test('清空是独立 undo 步,可撤销恢复', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      final (state, ime) = makeAttached(paragraphs: const ['第一段'], caret: 3);
+      ime.updateEditingValue(const TextEditingValue(
+        text: '',
+        selection: TextSelection.collapsed(offset: 0),
+      ));
+      expect((state.blocks[0] as TextBlock).content.text, '');
+      state.undo();
+      expect((state.blocks[0] as TextBlock).content.text, '第一段');
+    });
+
+    test('IME 全选(已升格跨段选区)后清空 → 删整个选区', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      final (state, ime) = makeAttached(
+        paragraphs: const ['abcde', 'fgh'],
+        caret: 2,
+      );
+      // IME 侧全选:平台主动发全选形状选区 → 升格全文档选择(既有行为)
+      ime.updateEditingValue(TextEditingValue(
+        text: '${pad}abcde',
+        selection: const TextSelection(baseOffset: 1, extentOffset: 6),
+        composing: TextRange.empty,
+      ));
+      expect(state.selection!.isCollapsed, false);
+      // IME 删除:整窗清成空串
+      ime.updateEditingValue(const TextEditingValue(
+        text: '',
+        selection: TextSelection.collapsed(offset: 0),
+      ));
+      final total = state.blocks
+          .whereType<TextBlock>()
+          .map((b) => b.content.text)
+          .join();
+      expect(total, '', reason: '全选删除清掉全文档文本');
+    });
+
+    test('macOS 空值回显仍走重喂防御,不误清段落', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      final (state, ime) = makeAttached(paragraphs: const ['第一段'], caret: 3);
+      ime.updateEditingValue(const TextEditingValue(
+        text: '',
+        selection: TextSelection.collapsed(offset: 0),
+      ));
+      expect((state.blocks[0] as TextBlock).content.text, '第一段',
+          reason: 'macOS attach 后空回显 = 状态失真,必须重喂而非清空');
+    });
+  });
+
   group('平台 quirk', () {
     test('macOS composing collapsed → 视为无 composing', () {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
