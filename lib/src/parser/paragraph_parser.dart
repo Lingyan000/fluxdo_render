@@ -2618,6 +2618,12 @@ class ParagraphParser {
     final tag = el.localName?.toLowerCase() ?? '';
     if (tag == 'video') return _parseVideo(el, nextId);
     if (tag == 'audio') return _parseAudio(el, nextId);
+    // 部分 onebox 引擎(如 Spotify/YouTube 的 oEmbed 类)直接产出裸
+    // `<p><iframe ...></iframe></p>`,不像多数 onebox 那样包一层
+    // `<aside class="onebox">`。之前这里没认,iframe 被当成未知行内元素
+    // 丢弃,导致这类消息整条内容"消失"(网页端能显示是因为浏览器本身
+    // 会渲染任意 <iframe> 标签,不受这个解析器约束)。
+    if (tag == 'iframe') return _parseIframe(el, nextId);
     if (tag == 'div' &&
         (el.classes.contains('video-placeholder-container') ||
             el.classes.contains('video-container') ||
