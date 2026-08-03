@@ -182,5 +182,25 @@ void main() {
       final proj = buildInlineProjection(inlines);
       expect(proj.renderLength, real);
     });
+
+    testWidgets('含 hashtag 药丸偏移对齐(投影原子化与渲染 WidgetSpan 必须同步落地)',
+        (tester) async {
+      // #13/#14 拆分教训:投影侧原子化(#13)先落地而渲染侧药丸(#14)
+      // 未跟上时,本用例红(投影 1 个占位 vs 渲染按 5 个字符画)——
+      // 含 hashtag 的段落从 hashtag 起选区/复制偏移全错。两侧必须同步。
+      const inlines = [
+        TextRun('看看 '),
+        LinkRun(
+          href: '/c/dev/4',
+          hashtagRef: 'dev',
+          children: [TextRun('#开发调优')],
+        ),
+        TextRun(' 板块'),
+      ];
+      final real = await realRenderLength(tester, inlines);
+      final proj = buildInlineProjection(inlines);
+      expect(proj.renderLength, real,
+          reason: '铁律:投影与渲染逐字一致,否则 hashtag 后所有偏移错位');
+    });
   });
 }
