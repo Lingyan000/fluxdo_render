@@ -42,6 +42,10 @@ enum ProjectionKind {
   /// mentionText 两侧的 NBSP 粘性内边距,语义同 [codePad]。
   mentionPad,
   image,
+
+  /// hashtag 药丸(`#分类`/`#标签`):渲染层是一个 WidgetSpan,
+  /// 投影文本取 `#ref`(与 cooked 锚文本一致,引用/复制能匹配上)。
+  hashtag,
   spoiler,
   footnote,
   localDate,
@@ -183,6 +187,9 @@ class RenderTextProjection {
         // localDate/image 同 emoji/mention:编辑模型是一个 FFFC 哨兵原子
         // (M5/行内图);投影文本(预渲染串/alt)只用于复制/引用,
         // 不参与编辑坐标。
+        // hashtag 药丸:编辑模型里是一个 FFFC 原子(投影文本 `#ref`
+        // 只给复制/引用用)。漏了这条光标会被算进药丸内部。
+        ProjectionKind.hashtag ||
         ProjectionKind.emoji ||
         ProjectionKind.mention ||
         ProjectionKind.localDate ||

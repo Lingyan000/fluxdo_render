@@ -57,13 +57,14 @@ bool isEditableInline(InlineNode n) => switch (n) {
         :final isOneboxLink,
       ) =>
         !isAttachment &&
-            hashtagRef == null &&
+            // hashtag:原子化放行(见上面注释)
+            (hashtagRef != null ||
             // onebox 系链接(裸 URL 的 linkify 产物)可编辑:flatten 时
             // 文本替换为 href(官方 linkify 语义 —— 编辑器里显示 URL
             // 本身),序列化 text==href 走裸 URL 规则,往返无损
-            (isOneboxLink
-                ? href.isNotEmpty
-                : children.every(isEditableInline)),
+                (isOneboxLink
+                    ? href.isNotEmpty
+                    : children.every(isEditableInline))),
       // 颜色:mark 化(MarkKind.textColor/bgColor),内容照常可编辑 ——
       // 不放行的话带色的整行会被岛化成只读,光标直接消失。
       ColoredRun(:final children) => children.every(isEditableInline),
