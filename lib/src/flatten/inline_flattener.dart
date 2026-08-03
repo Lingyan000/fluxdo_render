@@ -905,6 +905,11 @@ class InlineFlattener {
           // 填满整行、不矮浮也不撑高;小一号文字在内部垂直居中。
           final lineHeight = emojiBaseSize * 1.5;
           return GestureDetector(
+            // 与 TextSpan 版同源:全局坐标给宿主锚浮层。漏掉的话点带
+            // 状态 emoji 的 mention 会读到上一次点击的陈旧坐标。
+            onTapDown: (d) {
+              lastInlineTapGlobalPosition = d.globalPosition;
+            },
             onTap: () => mentionHandler(
               ctx,
               mention.username,
