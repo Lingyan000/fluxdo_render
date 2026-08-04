@@ -77,6 +77,7 @@ class FluxdoRender extends StatefulWidget {
     this.chunkIndex = 0,
     this.trimTopMargin = false,
     this.trimBottomMargin = false,
+    this.shrinkWrapWidth = false,
   });
 
   /// Discourse cooked HTML 内容。
@@ -240,6 +241,12 @@ class FluxdoRender extends StatefulWidget {
   /// 连续渲染一致(无缝)。真正块边界(如 `<p>` 之间)的 chunk 不设,保留间距。
   final bool trimTopMargin;
   final bool trimBottomMargin;
+
+  /// 根块级列按内容宽度收缩(crossAxis=start)而非撑满(stretch)。
+  /// 聊天气泡专用:让段落收到内容自然宽,外层 ConstrainedBox 封顶,
+  /// 气泡贴合内容而非占满可用宽。默认 false(帖子/正文仍撑满,
+  /// 保证代码块/分隔线/图片按全宽排布不变)。
+  final bool shrinkWrapWidth;
 
   @override
   State<FluxdoRender> createState() => _FluxdoRenderState();
@@ -473,7 +480,9 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           docOrders: _docOrders,
         );
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: widget.shrinkWrapWidth
+          ? CrossAxisAlignment.start
+          : CrossAxisAlignment.stretch,
       children: [
         for (int i = 0; i < _nodes.length; i++)
           factory.build(
