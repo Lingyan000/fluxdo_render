@@ -12,7 +12,10 @@ library;
 import 'dart:math' as math;
 import 'dart:ui' show Color;
 
+import 'package:html/parser.dart' as html_parser;
+
 import '../../node/node.dart';
+import '../../parser/paragraph_parser.dart';
 import 'doc_converter.dart';
 import 'editable_text_content.dart';
 import 'editor_block.dart';
@@ -585,13 +588,17 @@ String _escapeLineStarts(String text) {
 
 /// 岛节点是否可无损序列化回 markdown。
 ///
-/// false 的类型(poll 选项散在 cooked 结构里无法重建 / chat 客户端 cook
-/// 不支持 / policy 属性名不定):序列化输出空串。**这不是静默丢内容**——
-/// 编辑已有帖子的导入门禁(二次 cook 等价校验,见主项目 composer_doc_codec)
-/// 会因 cooked 不等而拦下整帖,降级源码模式;编辑器内新建内容不会产生
-/// 这些岛。
+/// false 的类型(chat 客户端 cook 不支持 / policy 属性名不定):序列化
+/// 输出空串。**这不是静默丢内容**——编辑已有帖子的导入门禁(二次 cook
+/// 等价校验,见主项目 composer_doc_codec)会因 cooked 不等而拦下整帖,
+/// 降级源码模式;编辑器内新建内容不会产生这些岛。
+///
+/// poll:cooked 里选项(li[data-poll-option-id])/属性(data-poll-*)/
+/// 标题(.poll-title)俱全,可从 [PollNode.rawHtml] 重建 `[poll]` BBCode
+/// (语法经 cook 探针实测)—— rawHtml 非空即可序列化。
 bool islandSerializable(BlockNode node) => switch (node) {
-      PollNode() || ChatTranscriptNode() || PolicyNode() => false,
+      PollNode(:final rawHtml) => rawHtml.isNotEmpty,
+      ChatTranscriptNode() || PolicyNode() => false,
       _ => true,
     };
 
@@ -717,12 +724,119 @@ String serializeIslandNode(BlockNode node) {
       return svgSource;
     case DefinitionListNode(:final items):
       return _serializeDefinitionList(items);
-    case PollNode() || ChatTranscriptNode() || PolicyNode():
-      // 已知不可序列化(islandSerializable=false):选项/属性散在 cooked
-      // 结构里无法无损重建 raw。空串 —— 导入门禁负责拦整帖(编辑器内
+    case PollNode():
+      // 从 rawHtml(div.poll cooked 片段)重建 [poll] BBCode:data-poll-*
+      // → 属性串;.poll-title → `# 标题` 行;li[data-poll-option-id] →
+      // `* 选项` 行(number 型选项由 min/max/step 生成,不写选项行)。
+      // rawHtml 缺失(手工构造的节点)时输出空串,islandSerializable
+      // 同口径为 false,导入门禁拦整帖。
+      return _serializePoll(node);
+    case ChatTranscriptNode() || PolicyNode():
+      // 已知不可序列化(islandSerializable=false):chat 客户端 cook 不
+      // 支持 / policy 属性名不定。空串 —— 导入门禁负责拦整帖(编辑器内
       // 也不可能新建这些岛)。
       return '';
   }
+}
+
+/// `[poll ...]` BBCode 从 [PollNode.rawHtml](cooked div.poll)重建。
+///
+/// 属性形态经 cook 探针实测(见 tools/discourse-cook-bundle):
+/// - cooked 属性名恒小写:`chartType=pie` cook 后是 data-poll-charttype;
+///   BBCode 属性键大小写不敏感(`charttype=` 与 `chartType=` cook 等价),
+///   这里写回官方 builder 形态 `chartType=`。
+/// - `status=open` 是 cook 默认值(不写也产 data-poll-status="open"),
+///   为最小化 raw 仅在非 open 时写回。
+/// - name="poll" 是默认值,同样仅非默认时写回。
+/// - number 型:选项 li 由 min/max/step 派生,**不写选项行**(写了 cook
+///   会报错);标题行照写。
+/// - 属性顺序无关等价(cooked 输出按字母序重排),这里按官方
+///   poll-ui-builder 的输出顺序写,便于人读。
+///
+/// rawHtml 为空(手工构造节点)→ 返回空串,与 [islandSerializable]
+/// 同口径,导入门禁拦整帖。
+String _serializePoll(PollNode node) {
+  if (node.rawHtml.isEmpty) return '';
+  final root = html_parser.parseFragment(node.rawHtml).querySelector('div.poll');
+  if (root == null) return '';
+  final attrs = root.attributes;
+  String? attr(String key) {
+    final v = attrs[key]?.trim();
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  final type = attr('data-poll-type');
+  final isNumber = type == 'number';
+
+  // 属性串:对齐官方 poll-ui-builder 的输出顺序(name/type/results/
+  // min/max/step/public/chartType/groups/close/status)。值不含空格时
+  // 裸写(与官方一致),含空格加引号(cook 两种形态等价)。
+  String fmt(String key, String value) =>
+      value.contains(' ') ? ' $key="$value"' : ' $key=$value';
+
+  final sb = StringBuffer('[poll');
+  final name = attr('data-poll-name');
+  if (name != null && name != 'poll') sb.write(fmt('name', name));
+  if (type != null) sb.write(fmt('type', type));
+  final results = attr('data-poll-results');
+  if (results != null) sb.write(fmt('results', results));
+  final min = attr('data-poll-min');
+  if (min != null) sb.write(fmt('min', min));
+  final max = attr('data-poll-max');
+  if (max != null) sb.write(fmt('max', max));
+  final step = attr('data-poll-step');
+  if (step != null) sb.write(fmt('step', step));
+  final public = attr('data-poll-public');
+  if (public != null) sb.write(fmt('public', public));
+  final chartType = attr('data-poll-charttype');
+  if (chartType != null) sb.write(fmt('chartType', chartType));
+  final groups = attr('data-poll-groups');
+  if (groups != null) sb.write(fmt('groups', groups));
+  final close = attr('data-poll-close');
+  if (close != null) sb.write(fmt('close', close));
+  final status = attr('data-poll-status');
+  if (status != null && status != 'open') sb.write(fmt('status', status));
+  sb.write(']');
+
+  // 标题行:.poll-title 内是富文本 HTML(粗体/emoji/链接),走
+  // parse + 岛 inline 序列化还原 markdown(纯 text 取文本会丢格式;
+  // typographer 弯引号等原样保留 —— cook 幂等,再 cook 不二次转换)。
+  final titleEl = root.querySelector('.poll-title');
+  if (titleEl != null) {
+    final title = _pollInnerMarkdown(titleEl.innerHtml);
+    if (title.isNotEmpty) sb.write('\n# $title');
+  }
+
+  // 选项行:number 型的 li 是 min/max/step 派生物,不写回。
+  if (!isNumber) {
+    for (final li in root.querySelectorAll('li[data-poll-option-id]')) {
+      final opt = _pollInnerMarkdown(li.innerHtml);
+      if (opt.isNotEmpty) {
+        // 选项内换行(cooked <br>)写回缩进续行,与 cook 输出等价
+        sb.write('\n* ${opt.replaceAll('\n', '\n  ')}');
+      }
+    }
+  }
+
+  sb.write('\n[/poll]');
+  return sb.toString();
+}
+
+/// poll 标题/选项的 inner HTML → 行内 markdown。
+///
+/// 包一层 `<p>` 走 [ParagraphParser.parse] 复用完整 inline 解析链
+/// (emoji/链接/mention/粗斜体…),再用岛 inline 序列化器写回。多段
+/// (含 <br> 的选项)由 LineBreakRun 序列化为 `  \n`,调用方再转续行缩进。
+String _pollInnerMarkdown(String innerHtml) {
+  final nodes = ParagraphParser().parse('<p>$innerHtml</p>');
+  final buf = StringBuffer();
+  for (final n in nodes) {
+    if (n is ParagraphNode) {
+      buf.write(_serializeIslandInlines(n.inlines));
+    }
+  }
+  // LineBreakRun 的两空格硬换行对 poll 选项无意义,规整成裸换行
+  return buf.toString().replaceAll('  \n', '\n').trim();
 }
 
 /// `[quote="user, post:N, topic:M, username:real, full:true"]` 重建。

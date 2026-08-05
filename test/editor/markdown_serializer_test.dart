@@ -332,10 +332,15 @@ void main() {
       expect(md, '| x | x |\n| --- | --- |\n| x | x |');
     });
 
-    test('不可序列化类型(poll)→ 空串不崩,islandSerializable=false', () {
+    test('不可序列化类型(chat/policy、无 rawHtml 的 poll)→ 空串不崩', () {
+      // rawHtml 为空的 PollNode(手工构造)没有选项数据可重建 → 不可序列化
       const poll = PollNode(id: 'b', pollName: 'poll');
       expect(serializeIslandNode(poll), '');
       expect(islandSerializable(poll), isFalse);
+      expect(
+        islandSerializable(const ChatTranscriptNode(id: 'b', username: 'u')),
+        isFalse,
+      );
       expect(
         islandSerializable(const IframeNode(
             id: 'b', src: 'https://e.com', width: null, height: null)),

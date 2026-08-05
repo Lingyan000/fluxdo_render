@@ -1713,9 +1713,12 @@ class SvgNode extends BlockNode {
 
 /// 投票块 — `<div class="poll" data-poll-name="...">`(Discourse poll 插件)。
 ///
-/// **数据全在 API 不在 cooked**:cooked 里的 poll div 只提供 [pollName]
-/// (+ 标题文本 fallback)用来从 `post.polls` match 出真实数据(选项 /
-/// 票数 / 状态 / 用户投票)。投票交互要调后端 API。
+/// **票数/交互数据在 API 不在 cooked**:cooked 里的 poll div 提供
+/// [pollName](+ 标题文本 fallback)用来从 `post.polls` match 出真实
+/// 数据(票数 / 状态 / 用户投票),投票交互要调后端 API。但**结构数据
+/// (选项文本 / data-poll-* 属性)cooked 里是齐全的** —— 编辑器等无
+/// post 场景可从 [rawHtml] 渲染静态预览,序列化器也靠它重建 `[poll]`
+/// BBCode(见 markdown_serializer 的 _serializePoll)。
 ///
 /// 子包不持 poll 数据 / 不依赖业务 service:只产轻量节点(pollName +
 /// title + rawHtml),整个渲染+交互由主项目 [PollBuilder] 接 legacy
