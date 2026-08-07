@@ -2245,6 +2245,22 @@ class _CopyButtonState extends State<_CopyButton> {
   }
 }
 
+/// 折叠块(details / callout)动画布局位移 hook。
+///
+/// 折叠展开是就地高度变化:在 forward 增长的 sliver 半场里头部天然钉住、
+/// 内容向下展开;但在 center 双向列表的 **reverse 半场**里子项向远离
+/// center 方向生长,展开会把头部顶出视口上方(视觉 = 点击后跳到内容
+/// 底部)。子包不感知宿主的滚动结构,通过本 hook 把「动画正在改变高度
+/// 的帧」通知宿主(每个动画帧的 build 期、布局前),由宿主武装自己的
+/// 滚动锚定补偿把头部钉回原位;forward 半场位移为零,宿主补偿自动
+/// no-op。不注入时为空操作,折叠行为不变。
+abstract final class FoldShiftHook {
+  /// 宿主注入的通知回调(如:武装滚动锚定哨兵)。
+  static VoidCallback? onFrame;
+
+  static void notify() => onFrame?.call();
+}
+
 /// 折叠块 stateful 交互 widget。
 ///
 /// 折叠/展开:箭头旋转 0 → 0.25 turn + heightFactor 0 → 1,200ms easeInOut。
@@ -2284,6 +2300,8 @@ class _DetailsWidgetState extends State<_DetailsWidget>
       vsync: this,
     );
     _controller.addStatusListener(_handleAnimationStatus);
+    // 每个动画帧通知宿主:高度即将在本帧布局中变化(reverse 半场钉头部用)
+    _controller.addListener(FoldShiftHook.notify);
     _iconTurns = Tween<double>(begin: 0.0, end: 0.25).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
@@ -2297,6 +2315,7 @@ class _DetailsWidgetState extends State<_DetailsWidget>
   @override
   void dispose() {
     _controller.removeStatusListener(_handleAnimationStatus);
+    _controller.removeListener(FoldShiftHook.notify);
     _controller.dispose();
     super.dispose();
   }
@@ -2600,6 +2619,8 @@ class _FoldableCalloutWidgetState extends State<_FoldableCalloutWidget>
       duration: const Duration(milliseconds: 200),
       vsync: this,
     );
+    // 同 _DetailsWidget:动画帧高度变化通知宿主(reverse 半场钉头部)
+    _controller.addListener(FoldShiftHook.notify);
     _iconTurns = Tween<double>(begin: 0.0, end: 0.5).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeIn),
     );
@@ -2612,6 +2633,7 @@ class _FoldableCalloutWidgetState extends State<_FoldableCalloutWidget>
 
   @override
   void dispose() {
+    _controller.removeListener(FoldShiftHook.notify);
     _controller.dispose();
     super.dispose();
   }
