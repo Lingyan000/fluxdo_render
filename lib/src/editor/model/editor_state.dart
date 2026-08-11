@@ -725,15 +725,25 @@ class EditorState extends ChangeNotifier {
     // 含定界符字符(`*`/`[`…)的插入不延伸:格式符是语法不是内容,吸进
     // mark 会得到 em("123*") 这类假内容,spin 因内容含定界符折不回而
     // 永远解不开 —— 归字面平面重解析(见 hasInlineDelimiterChar 文档)。
+    // 换行同样不延伸:软换行回车(insertNewline)落进本方法,行内格式
+    // 不跨行延续 —— 否则删除线/粗体把 `\n` 吞进区间,回车后新行仍在
+    // 格式内;此时关格式再打字,闭定界符会被序列化到下一行行首
+    // (`~~123  \n~~123`),cook 解析不出,两行都成字面。
+    final hasNewline = sanitized.contains('\n');
     var content = block.content.insert(
       pos.offset,
       sanitized,
-      extendMarksAtEnd: !hasInlineDelimiterChar(sanitized) &&
+      extendMarksAtEnd: !hasNewline &&
+          !hasInlineDelimiterChar(sanitized) &&
           !_irSuppressEndExtension(block.content, pos.blockId, pos.offset) &&
           (_pendingMarks == null || _pendingAnchor != pos),
     );
-    // pending marks:命中锚点时对插入区间施加
-    if (_pendingMarks != null && _pendingAnchor == pos) {
+    // pending marks:命中锚点时对插入区间施加。回车作废 pending(回车
+    // 中断格式意图,与光标移动清 pending 同口径)—— 否则 pending 会施
+    // 到 `\n` 上,后续打字沿着它延伸,格式凭空跨行。
+    if (hasNewline) {
+      _clearPending();
+    } else if (_pendingMarks != null && _pendingAnchor == pos) {
       content = content.applyExactMarks(
         pos.offset,
         pos.offset + sanitized.length,

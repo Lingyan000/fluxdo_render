@@ -88,10 +88,15 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
         case StyledRun(:final kind, :final children):
           // TextSpan 渲染类(下划/删除/small/big/mark/monospace)偏移连续 → 递归;
           // WidgetSpan 渲染类(上/下标)渲染层占 1 ￼ → 原子投影(子文本)。
+          // kind 必须是 styledAtom 而非 text:text 契约是「renderLen ==
+          // logicalText 渲染长,可按字符切」,1 ￼ 配 n 字符投影破坏契约,
+          // 编辑坐标换算按字符走位溢出到邻接条目(光标错位)、复制部分
+          // 选区截半丢字。
           switch (kind) {
             case InlineStyleKind.superscript:
             case InlineStyleKind.subscript:
-              addPlaceholder(concatLogical(children), ProjectionKind.text);
+              addPlaceholder(
+                  concatLogical(children), ProjectionKind.styledAtom);
             default:
               walk(children);
           }

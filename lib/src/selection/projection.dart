@@ -47,6 +47,14 @@ enum ProjectionKind {
   /// 投影文本取 `#ref`(与 cooked 锚文本一致,引用/复制能匹配上)。
   hashtag,
   spoiler,
+
+  /// WidgetSpan 渲染的样式区间(上/下标):渲染占 1 个 ￼,投影是子文本
+  /// 全文(复制/引用带出)。**内容空间宽度 = 子文本长**(编辑模型里
+  /// sup/sub 是普通 mark,逐字可编辑)—— 不能登记成 kind=text:那会
+  /// 违反「文本类 renderLen == logicalText 长度」的契约,光标换算按
+  /// 字符走位直接溢出到邻接条目(真机症状:上标附近点击光标错位),
+  /// project() 部分选区还会丢字。
+  styledAtom,
   footnote,
   localDate,
   clickCount,
@@ -203,9 +211,22 @@ class RenderTextProjection {
         ProjectionKind.mentionText => 1,
         // 药丸内边距:同 codePad,不属于内容,光标不停。
         ProjectionKind.mentionPad => 0,
+        // sup/sub 原子:渲染 1 个 ￼,内容空间是子文本全长(编辑模型里
+        // sup/sub 是普通 mark,逐字可编辑)。ZWSP 软换行点剔除。
+        ProjectionKind.styledAtom => _contentLenOf(e.logicalText),
         _ when e.isAtomic => e.logicalText.length,
         _ => _contentLenOf(e.logicalText),
       };
+
+  /// 内容空间的原子性:内容↔渲染换算时**不可按渲染字符切**的 entry。
+  ///
+  /// 与 [ProjectionEntry.isAtomic](投影/复制口径)不同点只在 mentionText:
+  /// 复制要按字符切('@arch' 部分选中),但编辑坐标里它是宽 1 的原子 ——
+  /// [_contentLenOfEntry] 给 1,per-char 走位会把 '@username' 的 11 个
+  /// 渲染字符各算 1 格内容宽,mention 之后的所有点击落点全部右偏
+  /// (真机症状:点在 mention 后面的字上,光标落到十来个字符开外)。
+  static bool _contentAtomic(ProjectionEntry e) =>
+      e.isAtomic || e.kind == ProjectionKind.mentionText;
 
   /// 内容空间总长度。
   int get contentLength =>
@@ -228,7 +249,7 @@ class RenderTextProjection {
         return e.renderStart;
       }
       if (remaining < entryContentLen) {
-        if (e.isAtomic) return e.renderEnd; // 多字符原子内部 → 末端
+        if (_contentAtomic(e)) return e.renderEnd; // 多字符原子内部 → 末端
         var seen = 0;
         final s = e.logicalText;
         for (var i = 0; i < s.length; i++) {
@@ -265,7 +286,7 @@ class RenderTextProjection {
       final entryContentLen = _contentLenOfEntry(e);
       if (entryContentLen == 0) continue;
       if (remaining <= entryContentLen) {
-        if (e.isAtomic) return e.renderEnd;
+        if (_contentAtomic(e)) return e.renderEnd;
         var seen = 0;
         final s = e.logicalText;
         for (var i = 0; i < s.length; i++) {
@@ -288,7 +309,7 @@ class RenderTextProjection {
     for (final e in entries) {
       if (target <= e.renderStart) return content;
       final entryContentLen = _contentLenOfEntry(e);
-      if (e.isAtomic) {
+      if (_contentAtomic(e)) {
         if (target < e.renderEnd) return content + entryContentLen;
         content += entryContentLen;
       } else {
