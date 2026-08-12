@@ -58,6 +58,10 @@ enum ProjectionKind {
   footnote,
   localDate,
   clickCount,
+
+  /// 附件链接文件名前注入的下载图标 WidgetSpan:渲染占 1 ￼、逻辑投影
+  /// 恒为空串(渲染注入物,cooked 里没有,复制/引用不带出;同 clickCount)。
+  attachmentIcon,
   mathInline,
 }
 

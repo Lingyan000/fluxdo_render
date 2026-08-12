@@ -608,34 +608,58 @@ class InlineFlattener {
     // GestureDetector 兜底点击(WidgetSpan 不吃 TextSpan.recognizer):
     // 优先 onDownloadAttachment,否则降级 handler。图标用自己的活
     // iconCtx(Theme/onTap 都不依赖 flatten context)。
+    //
+    // **字形**:save_alt = 实心箭头落托盘,与网页端 Discourse 的 FA
+    // download 图标同形;墨迹在字盒内对称居中(64..448/512),比
+    // download_rounded(箭头+悬空横线,墨迹偏上)对齐观感稳得多。
+    //
+    // **垂直对齐**:middle 锚的是字体 ascent/descent 中线,在拉丁行里
+    // 比文字视觉中心(x-height 中点)高(诊断同 _buildEmojiSpan 注释);
+    // 附件文件名几乎恒为拉丁字符 → 下移 0.1em 补偿(截图逐像素实测
+    // 校准)。Transform 只动 paint 不动占位盒,不影响行高。
+    //
+    // **岛登记**:占位尺寸确定(0.95em 方盒 + 右 2px padding,尺寸口径
+    // 同 emoji 的 emojiBaseSize,不依赖 widget 布局)→ 登记 SpanIsland,
+    // 附件段落可进直绘缓存路径(此前因这个 WidgetSpan 被踢回 RichText)。
     if (isAttachment) {
       final interactive = ctx != null;
+      final iconSize = p.emojiBaseSize * 0.95;
+      final child = Padding(
+        padding: const EdgeInsets.only(right: 2),
+        child: Transform.translate(
+          offset: Offset(0, p.emojiBaseSize * 0.1),
+          child: Builder(
+            builder: (iconCtx) {
+              final icon = Icon(
+                Icons.save_alt,
+                size: iconSize,
+                color: Theme.of(iconCtx).colorScheme.primary,
+              );
+              if (!interactive) return icon;
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  if (onDownloadAttachment != null) {
+                    onDownloadAttachment(iconCtx, href, filename);
+                  } else {
+                    handler(iconCtx, href);
+                  }
+                },
+                child: icon,
+              );
+            },
+          ),
+        ),
+      );
       final iconSpan = WidgetSpan(
         alignment: PlaceholderAlignment.middle,
-        child: Builder(
-          builder: (iconCtx) {
-            final color = Theme.of(iconCtx).colorScheme.primary;
-            final size = (DefaultTextStyle.of(iconCtx).style.fontSize ??
-                    p.emojiBaseSize) *
-                0.95;
-            final icon = Padding(
-              padding: const EdgeInsets.only(right: 2),
-              child: Icon(Icons.download_rounded, size: size, color: color),
-            );
-            if (!interactive) return icon;
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                if (onDownloadAttachment != null) {
-                  onDownloadAttachment(iconCtx, href, filename);
-                } else {
-                  handler(iconCtx, href);
-                }
-              },
-              child: icon,
-            );
-          },
-        ),
+        child: child,
+      );
+      p.islandBySpan[iconSpan] = SpanIsland(
+        child: child,
+        width: iconSize + 2,
+        height: iconSize,
+        alignment: ui.PlaceholderAlignment.middle,
       );
       return TextSpan(
         style: TextStyle(color: linkColor),

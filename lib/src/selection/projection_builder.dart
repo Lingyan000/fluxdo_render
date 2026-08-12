@@ -100,7 +100,7 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
             default:
               walk(children);
           }
-        case LinkRun(:final children, :final hashtagRef):
+        case LinkRun(:final children, :final hashtagRef, :final isAttachment):
           // hashtag 渲染成 1 个 WidgetSpan 药丸 → 原子投影(投影文本用
           // `#ref`,与 cooked 里的锚文本一致,引用/复制能匹配上)。
           if (hashtagRef != null) {
@@ -110,6 +110,12 @@ RenderTextProjection buildInlineProjection(List<InlineNode> inlines) {
               ProjectionKind.hashtag,
             );
           } else {
+            // 附件链接:flattener 在文件名前注入 1 个下载图标 WidgetSpan
+            // (占 1 ￼),是渲染注入物、cooked 里没有 → 空投影占位
+            // (同 clickCount)。漏登记会让图标之后的全部渲染偏移错一位。
+            if (isAttachment) {
+              addPlaceholder('', ProjectionKind.attachmentIcon);
+            }
             walk(children);
           }
         case ColoredRun(:final children):

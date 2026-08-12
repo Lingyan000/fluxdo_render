@@ -23,9 +23,9 @@ void main() {
       ));
       await tester.pumpAndSettle();
       // 下载图标存在
-      expect(find.byIcon(Icons.download_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.save_alt), findsOneWidget);
       // 点击图标触发下载回调(带 filename)
-      await tester.tap(find.byIcon(Icons.download_rounded));
+      await tester.tap(find.byIcon(Icons.save_alt));
       await tester.pump();
       expect(tappedHref, '/uploads/default/1X/abc.pdf');
       expect(tappedFilename, '报告.pdf');
@@ -44,7 +44,7 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.download_rounded));
+      await tester.tap(find.byIcon(Icons.save_alt));
       await tester.pump();
       expect(linkTapped, '/uploads/default/1X/abc.pdf');
     });
