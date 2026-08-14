@@ -8,6 +8,9 @@
 ///    fwfh 原版是 loose,窄内容会导致 li 宽度逐项抖动。
 /// 2. 无序 marker 用 [ListMarkerDot](自绘形状but携带文本基线),而非 fwfh
 ///    的字形绘制 —— 沿用旧版 6px disc/circle/square 视觉,跨字体一致。
+/// 3. 支持 li 内容整体对齐([HtmlListItem.textAlign],容器 align 下放):
+///    center/right 时 content 收固有宽整体摆放,marker 跟随悬挂;
+///    默认(null)保持原铺满布局。
 ///
 /// 布局规则(与浏览器/fwfh 一致):
 /// - content 独占布局宽度(marker 不占位);
@@ -30,22 +33,33 @@ class HtmlListItem extends MultiChildRenderObjectWidget {
     required Widget child,
     Widget? marker,
     required this.textDirection,
+    this.textAlign,
   }) : super(children: [child, ?marker]);
 
   final TextDirection textDirection;
 
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _ListItemRenderObject(textDirection: textDirection);
+  /// li 内容对齐(容器 align 下放):center/right 时 content 收自然宽并整体
+  /// 居中/靠右,marker 跟随悬挂在 content 左缘外(对齐浏览器里
+  /// text-align 继承进 li 后 marker 跟随首行内容的行为);
+  /// null/left/justify 保持原有铺满布局。
+  final TextAlign? textAlign;
 
   @override
-  void updateRenderObject(BuildContext context, RenderObject renderObject) =>
-      (renderObject as _ListItemRenderObject).textDirection = textDirection;
+  RenderObject createRenderObject(BuildContext context) =>
+      _ListItemRenderObject(textDirection: textDirection, textAlign: textAlign);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderObject renderObject) {
+    (renderObject as _ListItemRenderObject)
+      ..textDirection = textDirection
+      ..textAlign = textAlign;
+  }
 
   @override
   void debugFillProperties(DiagnosticPropertiesBuilder properties) {
     super.debugFillProperties(properties);
     properties.add(DiagnosticsProperty('textDirection', textDirection));
+    properties.add(DiagnosticsProperty('textAlign', textAlign));
   }
 }
 
@@ -55,14 +69,23 @@ class _ListItemRenderObject extends RenderBox
     with
         ContainerRenderObjectMixin<RenderBox, _ListItemData>,
         RenderBoxContainerDefaultsMixin<RenderBox, _ListItemData> {
-  _ListItemRenderObject({required TextDirection textDirection})
-      : _textDirection = textDirection;
+  _ListItemRenderObject({required TextDirection textDirection, TextAlign? textAlign})
+      : _textDirection = textDirection,
+        _textAlign = textAlign;
 
   TextDirection get textDirection => _textDirection;
   TextDirection _textDirection;
   set textDirection(TextDirection value) {
     if (_textDirection == value) return;
     _textDirection = value;
+    markNeedsLayout();
+  }
+
+  TextAlign? get textAlign => _textAlign;
+  TextAlign? _textAlign;
+  set textAlign(TextAlign? value) {
+    if (_textAlign == value) return;
+    _textAlign = value;
     markNeedsLayout();
   }
 
@@ -116,35 +139,63 @@ class _ListItemRenderObject extends RenderBox
   Size _compute(RenderBox? child, BoxConstraints bc, ChildLayouter fn) {
     if (child == null) return bc.smallest;
 
+    // 居中/右对齐:content 收自然宽后整体按对齐摆放,marker 跟随 content
+    // 左缘悬挂(近似浏览器 text-align 继承进 li 的行为)。盒子自身保持满宽;
+    // 内容超宽折行时行内对齐由 InlineSpanText 的 textAlign 负责。
+    // 仅 center/right 触发;left/justify 与原布局一致。
+    final aligned = bc.hasBoundedWidth &&
+        (textAlign == TextAlign.center || textAlign == TextAlign.right);
+
     // content 收 tight 宽(约束有界时)→ li 等宽铺满,对齐旧 Row+Expanded;
     // 无界(如被放进横向滚动)退回原约束取自然宽。
-    final childBc =
-        bc.hasBoundedWidth ? bc.tighten(width: bc.maxWidth) : bc;
+    // 对齐形态:tight 到内容固有宽(不超过可用宽)—— 段落类 render
+    // (RenderParagraph)在 loose 有界约束下会铺满 maxWidth,收不出自然宽。
+    final childBc = aligned
+        ? BoxConstraints.tightFor(
+            width: child
+                .computeMaxIntrinsicWidth(bc.maxWidth)
+                .clamp(0.0, bc.maxWidth),
+          )
+        : bc.hasBoundedWidth
+            ? bc.tighten(width: bc.maxWidth)
+            : bc;
     final childData = child.parentData! as _ListItemData;
     final childSize = fn(child, childBc);
     final marker = childData.nextSibling;
     // marker 松约束取自然宽度 → 任意位数永不换行(悬挂,不占 content 宽)。
     final markerSize = marker != null ? fn(marker, bc.loosen()) : Size.zero;
     final height = childSize.height > 0 ? childSize.height : markerSize.height;
-    final size = bc.constrain(Size(childSize.width, height));
+    final size = aligned
+        ? Size(bc.maxWidth, height)
+        : bc.constrain(Size(childSize.width, height));
 
-    if (identical(fn, ChildLayoutHelper.layoutChild) && marker != null) {
-      const baseline = TextBaseline.alphabetic;
-      // 基线对齐:marker 基线贴 content 首行基线;拿不到基线时回退顶对齐。
-      final markerDistance =
-          marker.getDistanceToBaseline(baseline, onlyReal: true) ??
-              markerSize.height;
-      final childDistance =
-          child.getDistanceToBaseline(baseline, onlyReal: true) ??
-              markerDistance;
+    if (identical(fn, ChildLayoutHelper.layoutChild)) {
+      // content 水平偏移:对齐形态按剩余空间居中/靠右,否则贴左缘。
+      final childDx = !aligned
+          ? 0.0
+          : textAlign == TextAlign.center
+              ? ((bc.maxWidth - childSize.width) / 2).clamp(0.0, bc.maxWidth)
+              : (bc.maxWidth - childSize.width).clamp(0.0, bc.maxWidth);
+      childData.offset = Offset(childDx, 0);
 
-      final markerData = marker.parentData! as _ListItemData;
-      markerData.offset = Offset(
-        textDirection == TextDirection.ltr
-            ? -markerSize.width - kGapVsMarker
-            : childSize.width + kGapVsMarker,
-        childDistance - markerDistance,
-      );
+      if (marker != null) {
+        const baseline = TextBaseline.alphabetic;
+        // 基线对齐:marker 基线贴 content 首行基线;拿不到基线时回退顶对齐。
+        final markerDistance =
+            marker.getDistanceToBaseline(baseline, onlyReal: true) ??
+                markerSize.height;
+        final childDistance =
+            child.getDistanceToBaseline(baseline, onlyReal: true) ??
+                markerDistance;
+
+        final markerData = marker.parentData! as _ListItemData;
+        markerData.offset = Offset(
+          textDirection == TextDirection.ltr
+              ? childDx - markerSize.width - kGapVsMarker
+              : childDx + childSize.width + kGapVsMarker,
+          childDistance - markerDistance,
+        );
+      }
     }
 
     return size;

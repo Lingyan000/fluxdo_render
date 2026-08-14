@@ -551,12 +551,14 @@ class NodeFactory {
         children: [
           HtmlListItem(
             textDirection: textDirection,
+            textAlign: list.textAlign,
             marker: _buildMarker(list, index, markerStyle, markerColor),
             child: InlineSpanText(
               inlines: item.inlines,
               baseStyle: baseStyle.copyWith(height: 1.5),
               documentOrder: docOrderOf(item),
               chunkIndex: chunkIndex,
+              textAlign: list.textAlign,
               flattener: _inlineFlattener,
               linkHandler: linkHandler,
               onDownloadAttachment: onDownloadAttachment,
@@ -3027,33 +3029,55 @@ class _TableWidget extends StatelessWidget {
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Container(
-          width: totalWidth,
-          decoration: BoxDecoration(
-            border: Border.all(color: borderColor, width: 1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (headerRow != null)
-                  _buildRow(context, theme, headerRow, columnWidths,
-                      borderColor,
-                      isHeader: true),
-                bodyWidget,
-                if (showInfoBar)
-                  _buildInfoBar(context, theme, borderColor, node.rows.length),
-              ],
-            ),
-          ),
+    // 容器对齐下放(legacy align 行为):表格盒子比视口窄时整体居中/靠右,
+    // 超宽时仍可横向滚动(ConstrainedBox minWidth 撑满,Align 才生效)。
+    final tableAlign = node.textAlign;
+    final tableBox = Container(
+      width: totalWidth,
+      decoration: BoxDecoration(
+        border: Border.all(color: borderColor, width: 1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (headerRow != null)
+              _buildRow(context, theme, headerRow, columnWidths,
+                  borderColor,
+                  isHeader: true),
+            bodyWidget,
+            if (showInfoBar)
+              _buildInfoBar(context, theme, borderColor, node.rows.length),
+          ],
         ),
       ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: tableAlign == null
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: tableBox,
+            )
+          : LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints:
+                      BoxConstraints(minWidth: constraints.maxWidth),
+                  child: Align(
+                    alignment: tableAlign == TextAlign.right
+                        ? Alignment.centerRight
+                        : Alignment.center,
+                    widthFactor: 1,
+                    child: tableBox,
+                  ),
+                ),
+              ),
+            ),
     );
   }
 
@@ -3236,7 +3260,9 @@ class _TableWidget extends StatelessWidget {
                   ? const TextStyle(fontWeight: FontWeight.w600)
                   : const TextStyle(),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                // stretch(铺满 cell 宽):cell/容器下放的 textAlign 才能
+                // 在段落内生效;默认左对齐内容视觉上与 start 一致。
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   for (final b in cell.children) childFactory.build(context, b),

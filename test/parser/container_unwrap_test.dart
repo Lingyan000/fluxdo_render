@@ -112,5 +112,57 @@ void main() {
         expect(p.textAlign, TextAlign.center);
       }
     });
+
+    test('div[align=center] 包 ul:列表与嵌套子列表都继承居中', () {
+      final result = parser.parse(
+        '<div align="center"><ul><li>一层<ul><li>二层</li></ul></li></ul></div>',
+      );
+      final list = result.whereType<ListNode>().single;
+      expect(list.textAlign, TextAlign.center);
+      final sub = list.items.single.children!.single;
+      expect(sub.textAlign, TextAlign.center);
+    });
+
+    test('div[align=center] 包 table:表格盒子居中 + cell 段落级联居中', () {
+      final result = parser.parse(
+        '<div align="center"><table><thead><tr><th>站点</th></tr></thead>'
+        '<tbody><tr><td>ONE</td></tr></tbody></table></div>',
+      );
+      final table = result.whereType<TableNode>().single;
+      expect(table.textAlign, TextAlign.center);
+      for (final row in table.rows) {
+        for (final cell in row) {
+          expect(cell.children.whereType<ParagraphNode>().single.textAlign,
+              TextAlign.center);
+        }
+      }
+    });
+
+    test('cell 自身 align 优先于容器下放', () {
+      final result = parser.parse(
+        '<div align="center"><table><tbody><tr>'
+        '<td style="text-align:right">右</td><td>随容器</td>'
+        '</tr></tbody></table></div>',
+      );
+      final cells = result.whereType<TableNode>().single.rows.single;
+      expect(cells[0].children.whereType<ParagraphNode>().single.textAlign,
+          TextAlign.right);
+      expect(cells[1].children.whereType<ParagraphNode>().single.textAlign,
+          TextAlign.center);
+    });
+
+    test('table 自身 align:仅盒子对齐,不级联 cell', () {
+      final result = parser.parse(
+        '<table align="right"><tbody><tr><td>x</td></tr></tbody></table>',
+      );
+      final table = result.whereType<TableNode>().single;
+      expect(table.textAlign, TextAlign.right);
+      expect(
+          table.rows.single.single.children
+              .whereType<ParagraphNode>()
+              .single
+              .textAlign,
+          isNull);
+    });
   });
 }

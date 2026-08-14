@@ -178,6 +178,7 @@ class ListNode extends BlockNode {
     required this.items,
     this.depth = 0,
     this.start = 1,
+    this.textAlign,
   });
 
   /// true = `<ol>`(有序,marker 是数字),false = `<ul>`(无序,marker 是 ·)
@@ -193,6 +194,10 @@ class ListNode extends BlockNode {
   /// 第 i 项 marker = `start + i`。Discourse 续接列表会产出 `start="2"` 等。
   final int start;
 
+  /// 列表整体对齐 — 来自 `<div align>` / `<center>` 容器的对齐下放
+  /// (近似 CSS text-align 继承:li 内容居中/靠右,marker 跟随内容)。
+  final TextAlign? textAlign;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -201,15 +206,18 @@ class ListNode extends BlockNode {
           ordered == other.ordered &&
           depth == other.depth &&
           start == other.start &&
+          textAlign == other.textAlign &&
           listEquals(items, other.items);
 
   @override
-  int get hashCode => Object.hash(ordered, depth, start, Object.hashAll(items));
+  int get hashCode =>
+      Object.hash(ordered, depth, start, textAlign, Object.hashAll(items));
 
   @override
   String toString() =>
       'ListNode($id, ${ordered ? "ol" : "ul"}, depth=$depth, '
-      '${start == 1 ? "" : "start=$start, "}${items.length} items)';
+      '${start == 1 ? "" : "start=$start, "}${items.length} items'
+      '${textAlign == null ? "" : ", $textAlign"})';
 }
 
 /// 引用块 — `<blockquote>`,内部含任意 BlockNode 子节点(支持嵌套)。
@@ -1472,6 +1480,7 @@ class TableNode extends BlockNode {
     required this.rows,
     required this.columnCount,
     this.hasHeader = false,
+    this.textAlign,
   });
 
   /// 全部行(含 header 行)。`hasHeader=true` 时第一行就是 header,
@@ -1488,6 +1497,11 @@ class TableNode extends BlockNode {
   /// 是否有表头行(`<thead>` 存在 或 第一行全 `<th>`)。
   final bool hasHeader;
 
+  /// 表格整体对齐 — 来自 `<div align>` / `<center>` 容器的对齐下放
+  /// (legacy align 行为:表格盒子整体居中/靠右;cell 内容对齐在 parse
+  /// 时已按 cell 自身 align 优先、容器对齐兜底 写进 cell 的段落子节点)。
+  final TextAlign? textAlign;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1495,6 +1509,7 @@ class TableNode extends BlockNode {
           runtimeType == other.runtimeType &&
           columnCount == other.columnCount &&
           hasHeader == other.hasHeader &&
+          textAlign == other.textAlign &&
           listEquals(rows.map(List.unmodifiable).toList(),
               other.rows.map(List.unmodifiable).toList());
 
@@ -1502,13 +1517,15 @@ class TableNode extends BlockNode {
   int get hashCode => Object.hash(
         columnCount,
         hasHeader,
+        textAlign,
         Object.hashAll(rows.map(Object.hashAll)),
       );
 
   @override
   String toString() =>
       'TableNode($id, ${rows.length} rows × $columnCount cols'
-      '${hasHeader ? ", with header" : ""})';
+      '${hasHeader ? ", with header" : ""}'
+      '${textAlign == null ? "" : ", $textAlign"})';
 }
 
 /// Discourse policy 区块 — `<div class="policy" data-*="...">正文</div>`。

@@ -740,8 +740,8 @@ class ParagraphParser {
       });
 
   /// 容器(div[align] / center)拆壳时把容器对齐下放到子块:仅填充**无自身
-  /// 对齐**的段落/标题(子块显式 align/style 优先,近似 CSS text-align 继承)。
-  /// 其余块类型(图组/表格/引用…)不受 text-align 影响,原样返回。
+  /// 对齐**的块(子块/cell 显式 align/style 优先,近似 CSS text-align 继承)。
+  /// 覆盖段落/标题/列表/表格;其余块类型(图组/引用…)原样返回。
   BlockNode _inheritAlign(BlockNode node, TextAlign align) {
     if (node is ParagraphNode && node.textAlign == null) {
       return ParagraphNode(
@@ -755,7 +755,56 @@ class ParagraphParser {
         textAlign: align,
       );
     }
+    if (node is ListNode) return _inheritListAlign(node, align);
+    if (node is TableNode) return _inheritTableAlign(node, align);
     return node;
+  }
+
+  /// 列表对齐下放:本层 + 递归嵌套子列表(li 内 ul/ol)与块级 li 的子块
+  /// (浏览器里 text-align 同样继承进嵌套 li)。
+  ListNode _inheritListAlign(ListNode node, TextAlign align) {
+    final items = [
+      for (final item in node.items)
+        ListItem(
+          inlines: item.inlines,
+          children: item.children == null
+              ? null
+              : List.unmodifiable(item.children!
+                  .map((sub) => _inheritListAlign(sub, align))),
+          blocks: item.blocks == null
+              ? null
+              : List.unmodifiable(
+                  item.blocks!.map((b) => _inheritAlign(b, align))),
+        ),
+    ];
+    return ListNode(
+      id: node.id,
+      ordered: node.ordered,
+      items: List.unmodifiable(items),
+      depth: node.depth,
+      start: node.start,
+      textAlign: node.textAlign ?? align,
+    );
+  }
+
+  /// 表格对齐下放:表格盒子整体对齐 + 级联进每个 cell 的子块(浏览器里
+  /// text-align 继承进 td/th;cell 自身 align 在 _parseTableRow 已写入,优先)。
+  TableNode _inheritTableAlign(TableNode node, TextAlign align) {
+    final rows = [
+      for (final row in node.rows)
+        List<TableCellData>.unmodifiable(row.map((cell) => TableCellData(
+              children: List.unmodifiable(
+                  cell.children.map((b) => _inheritAlign(b, align))),
+              isHeader: cell.isHeader,
+            ))),
+    ];
+    return TableNode(
+      id: node.id,
+      rows: List.unmodifiable(rows),
+      columnCount: node.columnCount,
+      hasHeader: node.hasHeader,
+      textAlign: node.textAlign ?? align,
+    );
   }
 
   /// `<p>` 是否「无可见内容」(空段落候选,可能渲染为空行 BlankLineNode)。
@@ -2173,10 +2222,13 @@ class ParagraphParser {
       rows: List.unmodifiable(rows.map(List<TableCellData>.unmodifiable)),
       columnCount: columnCount,
       hasHeader: hasHeader,
+      textAlign: _readTextAlign(tableEl),
     );
   }
 
   /// 解析 `<tr>` 内的 `<th>` / `<td>`,每个 cell 走 _parseBlocks 递归。
+  /// cell 自身的 align/style=text-align(markdown `---:` 列对齐即此形态)
+  /// 下放到 cell 内无自身对齐的子块,优先级高于容器级联的对齐。
   ///
   /// [forceHeader]:thead 内的 tr,即使是 `<td>` 也算 header。
   List<TableCellData> _parseTableRow(
@@ -2190,7 +2242,11 @@ class ParagraphParser {
       final tag = child.localName?.toLowerCase() ?? '';
       if (tag != 'th' && tag != 'td') continue;
       final isHeader = forceHeader || tag == 'th';
-      final children = _parseBlocks(child.nodes, nextId, nextImageIndex);
+      var children = _parseBlocks(child.nodes, nextId, nextImageIndex);
+      final cellAlign = _readTextAlign(child);
+      if (cellAlign != null) {
+        children = children.map((b) => _inheritAlign(b, cellAlign)).toList();
+      }
       cells.add(TableCellData(
         children: List.unmodifiable(children),
         isHeader: isHeader,
