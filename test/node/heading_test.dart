@@ -69,5 +69,32 @@ void main() {
       expect(result[1], isA<HeadingNode>());
       expect(result[2], isA<ParagraphNode>());
     });
+
+    test('Discourse 标题锚点 name 提取到 anchorName', () {
+      // 服务端 cook 产物:`<h2><a name="…" class="anchor" href="#…"></a>标题</h2>`
+      final result = parser.parse(
+        '<h2><a name="p-123-h-2" class="anchor" href="#p-123-h-2" '
+        'aria-label="锚点"></a>章节</h2>',
+      );
+      final h = result[0] as HeadingNode;
+      expect(h.anchorName, 'p-123-h-2');
+      // 锚点 <a> 不进 inlines(纯导航节点)
+      expect(h.inlines, [const TextRun('章节')]);
+    });
+
+    test('无锚点 heading anchorName 为 null', () {
+      final result = parser.parse('<h2>title</h2>');
+      expect((result[0] as HeadingNode).anchorName, isNull);
+    });
+
+    test('anchorName 参与 ==/hashCode', () {
+      const a = HeadingNode(
+          id: 'b_0', level: 2, inlines: [TextRun('x')], anchorName: 'h-1');
+      const b = HeadingNode(
+          id: 'b_9', level: 2, inlines: [TextRun('x')], anchorName: 'h-1');
+      const c = HeadingNode(id: 'b_0', level: 2, inlines: [TextRun('x')]);
+      expect(a, b);
+      expect(a == c, isFalse);
+    });
   });
 }

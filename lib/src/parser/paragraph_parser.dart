@@ -374,6 +374,17 @@ class ParagraphParser {
               case 'h1' || 'h2' || 'h3' || 'h4' || 'h5' || 'h6':
                 final level = int.parse(tag.substring(1));
                 final inlines = <InlineNode>[];
+                // 标题锚点(`<h2><a name="p-123-h-x-1" class="anchor"…></a>…`):
+                // inline 收集时会跳过(见 case 'a' 注释),这里把 name 单独
+                // 留下,供阅读侧 TOC 构树 / `#锚点` 深链定位。
+                String? anchorName;
+                for (final child in node.children) {
+                  if (child.localName == 'a' &&
+                      child.classes.contains('anchor')) {
+                    anchorName = child.attributes['name'];
+                    break;
+                  }
+                }
                 for (final child in node.nodes) {
                   _collectInlineFromAnyNode(child, inlines, nextImageIndex);
                 }
@@ -383,6 +394,7 @@ class ParagraphParser {
                   level: level,
                   inlines: List.unmodifiable(inlines),
                   textAlign: _readTextAlign(node),
+                  anchorName: anchorName,
                 ));
               case 'ol' when node.classes.contains('footnotes-list'):
                 // 客户端 cook 的脚注区形态:裸 <ol class="footnotes-list">
@@ -753,6 +765,7 @@ class ParagraphParser {
         level: node.level,
         inlines: node.inlines,
         textAlign: align,
+        anchorName: node.anchorName,
       );
     }
     if (node is ListNode) return _inheritListAlign(node, align);

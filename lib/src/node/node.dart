@@ -83,6 +83,7 @@ class HeadingNode extends BlockNode {
     required this.level,
     required this.inlines,
     this.textAlign,
+    this.anchorName,
   }) : assert(level >= 1 && level <= 6, 'heading level must be 1..6');
 
   /// 标题级别,1-6。
@@ -94,6 +95,11 @@ class HeadingNode extends BlockNode {
   /// 块级对齐(同 ParagraphNode)。
   final TextAlign? textAlign;
 
+  /// Discourse 标题锚点名(cooked 里 `<h2><a name="p-123-h-xxx-1"
+  /// class="anchor">` 的 name)。服务端 cook 时生成,阅读侧 TOC 构树与
+  /// `#锚点` 深链定位用;编辑器往返后丢失(重新 cook 会再生成,无需保留)。
+  final String? anchorName;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -101,10 +107,12 @@ class HeadingNode extends BlockNode {
           runtimeType == other.runtimeType &&
           level == other.level &&
           textAlign == other.textAlign &&
+          anchorName == other.anchorName &&
           listEquals(inlines, other.inlines);
 
   @override
-  int get hashCode => Object.hash(level, textAlign, Object.hashAll(inlines));
+  int get hashCode =>
+      Object.hash(level, textAlign, anchorName, Object.hashAll(inlines));
 
   @override
   String toString() => 'HeadingNode($id, h$level, ${inlines.length} inlines'

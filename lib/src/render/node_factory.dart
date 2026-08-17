@@ -21,6 +21,7 @@ import 'package:flutter/services.dart';
 import '../flatten/inline_flattener.dart';
 import '../node/node.dart';
 import '../selection/projection.dart';
+import '../widget/heading_anchor.dart';
 import 'block_text_styles.dart';
 import 'code_block_handler.dart';
 import 'emoji_handler.dart';
@@ -371,28 +372,34 @@ class NodeFactory {
     final em = baseStyle.fontSize ?? 14;
     final headingStyle = headingStyleFor(baseStyle, node.level);
     final margin = em * kHeadingMargin[node.level - 1];
-    return Padding(
-      padding: EdgeInsets.only(
-        top: trimTop ? 0 : margin,
-        bottom: trimBottom ? 0 : margin,
-      ),
-      child: InlineSpanText(
-        inlines: node.inlines,
-        baseStyle: headingStyle,
-        documentOrder: docOrderOf(node),
-        chunkIndex: chunkIndex,
-        textAlign: node.textAlign,
-        flattener: _inlineFlattener,
-        linkHandler: linkHandler,
-        onDownloadAttachment: onDownloadAttachment,
-        emojiImageBuilder: emojiImageBuilder,
-        mentionTapHandler: mentionTapHandler,
-        imageContentBuilder: imageContentBuilder,
-        footnoteTapHandler: footnoteTapHandler,
-        localDateBuilder: localDateBuilder,
+    // 锚点注册包装:无 HeadingAnchorScope 时(编辑器/分享卡等)零开销,
+    // 话题阅读侧借它实现 TOC 跳转与 scroll-spy。
+    return HeadingAnchorRegistrar(
+      nodeId: node.id,
+      chunkIndex: chunkIndex,
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: trimTop ? 0 : margin,
+          bottom: trimBottom ? 0 : margin,
+        ),
+        child: InlineSpanText(
+          inlines: node.inlines,
+          baseStyle: headingStyle,
+          documentOrder: docOrderOf(node),
+          chunkIndex: chunkIndex,
+          textAlign: node.textAlign,
+          flattener: _inlineFlattener,
+          linkHandler: linkHandler,
+          onDownloadAttachment: onDownloadAttachment,
+          emojiImageBuilder: emojiImageBuilder,
+          mentionTapHandler: mentionTapHandler,
+          imageContentBuilder: imageContentBuilder,
+          footnoteTapHandler: footnoteTapHandler,
+          localDateBuilder: localDateBuilder,
 
-        mathInlineBuilder: mathInlineBuilder,
-        totalImagesInPost: totalImagesInPost,
+          mathInlineBuilder: mathInlineBuilder,
+          totalImagesInPost: totalImagesInPost,
+        ),
       ),
     );
   }
