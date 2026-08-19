@@ -2033,18 +2033,11 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
     syncSpoilerDeps();
   }
 
-  void _reveal() {
-    if (spoilerRevealed) return;
-    setState(() => spoilerRevealed = true);
-    syncSpoilerTicker();
-  }
+  /// 点击处坐标 —— 揭开涟漪的圆心(onTapDown 采集,onTap 时启动动画)。
+  Offset _tapDownPosition = Offset.zero;
 
-  void _hide() {
-    if (!spoilerRevealed) return;
-    setState(() => spoilerRevealed = false);
-    syncSpoilerTicker();
-  }
-
+  void _onTap() =>
+      revealSpoiler(_tapDownPosition, context.size ?? Size.zero);
   @override
   void dispose() {
     disposeSpoilerTicker();
@@ -2057,19 +2050,42 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     if (spoilerRevealed) {
-      // 揭示态与未揭示态**同几何**(都只内容 + 上下 8 margin,无额外 padding/边框)
-      // → 揭示前后不抖动。
+      // 揭示后**不再回遮**(二次点击隐藏已移除)—— 方便选中/复制文本、
+      // 点 spoiler 内图片看大图。揭示态与遮蔽态**同几何**(都只内容 +
+      // 上下 8 margin)→ 切换不抖动。
       return Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
-        child: GestureDetector(onTap: _hide, child: widget.child),
+        child: widget.child,
       );
     }
-    // 未揭示:隐藏内容撑尺寸 + 上层遮罩(shader 粒子云 / reduce-motion 静态灰块),点击露出。
+    // 未揭示:隐藏内容撑尺寸 + 上层遮罩(shader 粒子云 / reduce-motion 静态
+    // 灰块)。点击触发涟漪揭开动画(Telegram 同款:圆形裁剪自点击处扩散,
+    // 内容随圆扩大显形,遮罩同步淡出),动画结束才进入揭示态。
     final isDark = theme.brightness == Brightness.dark;
     final bg = theme.scaffoldBackgroundColor;
+    final Widget mask = spoilerReduceMotion
+        // reduce-motion:静态灰块遮罩(可见、隐内容,无动画)。
+        ? DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          )
+        : RepaintBoundary(
+            child: CustomPaint(
+              painter: SpoilerEffectPainter(
+                time: spoilerTime,
+                seed: _seed,
+                shader: _shader,
+                isDark: isDark,
+                backgroundColor: bg,
+              ),
+            ),
+          );
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: _reveal,
+      onTapDown: (d) => _tapDownPosition = d.localPosition,
+      onTap: _onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
         child: ClipRRect(
@@ -2077,33 +2093,37 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
           child: Stack(
             fit: StackFit.passthrough,
             children: [
-              Visibility(
-                visible: false,
-                maintainSize: true,
-                maintainAnimation: true,
-                maintainState: true,
-                child: widget.child,
-              ),
+              // 内容层:遮蔽时不可见撑尺寸;揭开动画中随圆形裁剪逐步显形。
+              if (spoilerRevealing)
+                ValueListenableBuilder<double>(
+                  valueListenable: spoilerRevealProgress,
+                  builder: (context, progress, child) => ClipPath(
+                    clipper: SpoilerRevealClipper(
+                      origin: spoilerRevealOrigin ?? Offset.zero,
+                      progress: progress,
+                    ),
+                    child: child,
+                  ),
+                  child: widget.child,
+                )
+              else
+                Visibility(
+                  visible: false,
+                  maintainSize: true,
+                  maintainAnimation: true,
+                  maintainState: true,
+                  child: widget.child,
+                ),
+              // 遮罩层:揭开动画中整体淡出。
               Positioned.fill(
-                child: spoilerReduceMotion
-                    // reduce-motion:静态灰块遮罩(可见、隐内容,无动画)。
-                    ? DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
+                child: spoilerRevealing
+                    ? ValueListenableBuilder<double>(
+                        valueListenable: spoilerRevealProgress,
+                        builder: (context, progress, child) =>
+                            Opacity(opacity: 1.0 - progress, child: child),
+                        child: mask,
                       )
-                    : RepaintBoundary(
-                        child: CustomPaint(
-                          painter: SpoilerEffectPainter(
-                            time: spoilerTime,
-                            seed: _seed,
-                            shader: _shader,
-                            isDark: isDark,
-                            backgroundColor: bg,
-                          ),
-                        ),
-                      ),
+                    : mask,
               ),
             ],
           ),

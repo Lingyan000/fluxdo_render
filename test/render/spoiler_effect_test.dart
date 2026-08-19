@@ -51,4 +51,60 @@ void main() {
     // 卸载以 dispose Ticker(避免活动 ticker 跨测试)。
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('点击揭开:涟漪动画 → 揭示;二次点击不回遮', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: FluxdoRender(cookedHtml: spoilerHtml)),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(effectPainter(), findsWidgets);
+
+    // 点击 spoiler → 进入揭开动画:遮罩仍在(淡出中)+ 涟漪圆形裁剪。
+    await tester.tap(find.text('42'));
+    await tester.pump();
+    expect(effectPainter(), findsWidgets, reason: '动画未结束,遮罩仍在淡出');
+    expect(
+      find.byWidgetPredicate(
+          (w) => w is ClipPath && w.clipper is SpoilerRevealClipper),
+      findsOneWidget,
+      reason: '揭开动画应挂 SpoilerRevealClipper 圆形裁剪',
+    );
+
+    // 推进过动画时长(行内 spoiler 对角线小 → clamp 下限 250ms)→ 揭示态。
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(effectPainter(), findsNothing, reason: '动画结束应完全揭示');
+
+    // 二次点击不回遮(方便选中/复制)。
+    await tester.tap(find.text('42'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(effectPainter(), findsNothing, reason: '揭示后不再回遮');
+  });
+
+  testWidgets('块级 spoiler:点击揭开 → 揭示后无回遮手势', (tester) async {
+    const blockHtml = '<div class="spoiler"><p>secret</p></div>';
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: FluxdoRender(cookedHtml: blockHtml)),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(effectPainter(), findsWidgets);
+
+    // 块级内容藏在 Visibility(offstage)里,find.text 找不到 → 记遮罩中心,
+    // 两次点击都用同一坐标。
+    final center = tester.getCenter(effectPainter().first);
+    await tester.tapAt(center);
+    await tester.pump();
+    // 块级 spoiler 宽度大 → 动画时长 250~550ms,推进 700ms 必结束。
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(effectPainter(), findsNothing, reason: '动画结束应完全揭示');
+
+    await tester.tapAt(center);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(effectPainter(), findsNothing, reason: '揭示后不再回遮');
+  });
 }

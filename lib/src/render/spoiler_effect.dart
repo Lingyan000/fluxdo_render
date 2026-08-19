@@ -13,6 +13,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -48,6 +49,16 @@ mixin SpoilerTickerGate<T extends StatefulWidget>
   bool spoilerRevealed = false;
   bool spoilerReduceMotion = false;
 
+  /// 揭开涟漪动画(Telegram `SpoilerEffect.startRipple` 同款):点击后
+  /// 以点击处为圆心、区域对角线为最大半径做圆形裁剪扩散,内容随圆
+  /// 扩大显形、粒子遮罩同步淡出;时长 clamp(对角线×0.3, 250, 550)ms,
+  /// 结束后 [spoilerRevealed] 才置真(此前仍是遮蔽态 + 动画层)。
+  bool spoilerRevealing = false;
+  final ValueNotifier<double> spoilerRevealProgress = ValueNotifier(0);
+  Offset? spoilerRevealOrigin;
+  Duration? _revealClockStart;
+  double _revealDurationMs = 250;
+
   /// initState 里调用。
   void initSpoilerTicker() {
     _gateTicker = createTicker(_onSpoilerTick);
@@ -78,8 +89,49 @@ mixin SpoilerTickerGate<T extends StatefulWidget>
     }
   }
 
+  /// 点击揭开:记录点击原点并启动涟漪动画(reduce-motion 下直接揭示,
+  /// 无动画)。[localPosition] / [size] 为点击坐标与遮罩区域尺寸 ——
+  /// 动画时长按 Telegram 公式由对角线推出,坐标作圆形裁剪圆心。
+  void revealSpoiler(Offset localPosition, Size size) {
+    if (spoilerRevealed || spoilerRevealing) return;
+    if (spoilerReduceMotion) {
+      setState(() => spoilerRevealed = true);
+      syncSpoilerTicker();
+      return;
+    }
+    final diag =
+        math.sqrt(size.width * size.width + size.height * size.height);
+    _revealDurationMs = (diag * 0.3).clamp(250.0, 550.0);
+    spoilerRevealOrigin = localPosition;
+    spoilerRevealProgress.value = 0;
+    _revealClockStart = null;
+    setState(() => spoilerRevealing = true);
+    syncSpoilerTicker();
+  }
+
   void _onSpoilerTick(Duration elapsed) {
     if (!mounted || spoilerRevealed) return;
+    // 揭开动画进行中:跳过节流(短动画要满帧率)与离屏门控,推进涟漪
+    // 进度;粒子场继续走全局时钟(淡出中仍在漂移)。到点一次性置揭示态,
+    // syncSpoilerTicker 随即停表。
+    if (spoilerRevealing) {
+      _revealClockStart ??= elapsed;
+      final p = (elapsed - _revealClockStart!).inMicroseconds /
+          (_revealDurationMs * 1000);
+      if (p >= 1) {
+        spoilerRevealProgress.value = 1;
+        setState(() {
+          spoilerRevealing = false;
+          spoilerRevealed = true;
+        });
+        syncSpoilerTicker();
+        return;
+      }
+      spoilerRevealProgress.value = p;
+      _lastTick = elapsed;
+      spoilerTime.value = SpoilerShader.timeSeconds;
+      return;
+    }
     if (elapsed - _lastTick < _tickInterval) return; // ~30fps 节流
     if (!_isOnScreen()) {
       _gateTicker?.stop();
@@ -123,6 +175,7 @@ mixin SpoilerTickerGate<T extends StatefulWidget>
     _gateTicker?.dispose();
     _gateTicker = null;
     spoilerTime.dispose();
+    spoilerRevealProgress.dispose();
   }
 }
 
@@ -256,4 +309,27 @@ class SpoilerEffectPainter extends CustomPainter {
       old.seed != seed ||
       old.shader != shader ||
       old.time != time;
+}
+
+/// 揭开涟漪圆形裁剪 —— 以点击处为圆心、「区域对角线 × progress」为半径
+/// 的圆(对齐 Telegram `SpoilerEffect.getRipplePath`)。配合遮罩层淡出,
+/// 形成"从点击处散开"的揭开动画。
+class SpoilerRevealClipper extends CustomClipper<Path> {
+  const SpoilerRevealClipper({required this.origin, required this.progress});
+
+  final Offset origin;
+  final double progress;
+
+  @override
+  Path getClip(Size size) {
+    final maxRadius =
+        math.sqrt(size.width * size.width + size.height * size.height);
+    return Path()
+      ..addOval(Rect.fromCircle(
+          center: origin, radius: maxRadius * progress.clamp(0.0, 1.0)));
+  }
+
+  @override
+  bool shouldReclip(SpoilerRevealClipper old) =>
+      old.progress != progress || old.origin != origin;
 }

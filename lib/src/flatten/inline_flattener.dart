@@ -1121,18 +1121,11 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     syncSpoilerDeps();
   }
 
-  void _reveal() {
-    if (spoilerRevealed) return;
-    setState(() => spoilerRevealed = true);
-    syncSpoilerTicker();
-  }
+  /// 点击处坐标 —— 揭开涟漪的圆心(onTapDown 采集,onTap 时启动动画)。
+  Offset _tapDownPosition = Offset.zero;
 
-  void _hide() {
-    if (!spoilerRevealed) return;
-    setState(() => spoilerRevealed = false);
-    syncSpoilerTicker();
-  }
-
+  void _onTap() =>
+      revealSpoiler(_tapDownPosition, context.size ?? Size.zero);
   @override
   void dispose() {
     disposeSpoilerTicker();
@@ -1146,37 +1139,65 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     final scheme = theme.colorScheme;
     final richText = Text.rich(TextSpan(children: widget.spans));
     if (spoilerRevealed) {
-      // 揭示态与未揭示态**同尺寸**(都只内容,无额外 padding/decoration)→ 不抖动。
-      return GestureDetector(onTap: _hide, child: richText);
+      // 揭示后**不再回遮**(二次点击隐藏已移除)—— 方便选中/复制文本。
+      // 揭示态与遮蔽态**同尺寸**(都只内容,无额外 padding/decoration)→ 不抖动。
+      return richText;
     }
-    // 遮蔽态:文字占布局(Opacity 0)+ 上层遮罩(shader 粒子云 / reduce-motion 静态块),点击散开。
+    // 遮蔽态:文字占布局(Opacity 0)+ 上层遮罩(shader 粒子云 / reduce-motion
+    // 静态块)。点击触发涟漪揭开动画(Telegram 同款:圆形裁剪自点击处扩散,
+    // 内容随圆扩大显形,遮罩同步淡出),动画结束才进入揭示态。
     final isDark = theme.brightness == Brightness.dark;
     final bg = theme.scaffoldBackgroundColor;
+    final Widget mask = spoilerReduceMotion
+        ? DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(3),
+            ),
+          )
+        : RepaintBoundary(
+            child: CustomPaint(
+              painter: SpoilerEffectPainter(
+                time: spoilerTime,
+                seed: _seed,
+                shader: _shader,
+                isDark: isDark,
+                backgroundColor: bg,
+                borderRadius: 3,
+              ),
+            ),
+          );
     return GestureDetector(
-      onTap: _reveal,
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (d) => _tapDownPosition = d.localPosition,
+      onTap: _onTap,
       child: Stack(
         children: [
-          Opacity(opacity: 0.0, child: richText),
+          // 内容层:遮蔽时透明占布局;揭开动画中随圆形裁剪逐步显形。
+          if (spoilerRevealing)
+            ValueListenableBuilder<double>(
+              valueListenable: spoilerRevealProgress,
+              builder: (context, progress, child) => ClipPath(
+                clipper: SpoilerRevealClipper(
+                  origin: spoilerRevealOrigin ?? Offset.zero,
+                  progress: progress,
+                ),
+                child: child,
+              ),
+              child: richText,
+            )
+          else
+            Opacity(opacity: 0.0, child: richText),
+          // 遮罩层:揭开动画中整体淡出。
           Positioned.fill(
-            child: spoilerReduceMotion
-                ? DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
+            child: spoilerRevealing
+                ? ValueListenableBuilder<double>(
+                    valueListenable: spoilerRevealProgress,
+                    builder: (context, progress, child) =>
+                        Opacity(opacity: 1.0 - progress, child: child),
+                    child: mask,
                   )
-                : RepaintBoundary(
-                    child: CustomPaint(
-                      painter: SpoilerEffectPainter(
-                        time: spoilerTime,
-                        seed: _seed,
-                        shader: _shader,
-                        isDark: isDark,
-                        backgroundColor: bg,
-                        borderRadius: 3,
-                      ),
-                    ),
-                  ),
+                : mask,
           ),
         ],
       ),
