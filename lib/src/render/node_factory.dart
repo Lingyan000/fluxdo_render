@@ -3050,11 +3050,28 @@ class _TableWidget extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (headerRow != null)
-              _buildRow(context, theme, headerRow, columnWidths,
-                  borderColor,
-                  isHeader: true),
-            bodyWidget,
+            // 列分隔竖线整表通高绘制(原为 cell 左边框 + IntrinsicHeight
+            // stretch 逐行撑满):cell 内容可以是任意块节点(SVG→LayoutBuilder、
+            // 嵌套大表格→ListView),IntrinsicHeight 的固有尺寸测量会对它们
+            // 抛 "does not support returning intrinsic dimensions",debug 下
+            // 整棵子树 layout 中断级联崩溃。通高绘制视觉等价,还省掉每行
+            // 双倍布局测量。infoBar 行无 cell 分割,不参与竖线。
+            CustomPaint(
+              foregroundPainter: _TableColumnDividerPainter(
+                columnWidths: columnWidths,
+                color: borderColor,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (headerRow != null)
+                    _buildRow(context, theme, headerRow, columnWidths,
+                        borderColor,
+                        isHeader: true),
+                  bodyWidget,
+                ],
+              ),
+            ),
             if (showInfoBar)
               _buildInfoBar(context, theme, borderColor, node.rows.length),
           ],
@@ -3109,19 +3126,28 @@ class _TableWidget extends StatelessWidget {
     for (var i = 0; i < sampleCount; i++) {
       final row = node.rows[i];
       for (var col = 0; col < row.length && col < node.columnCount; col++) {
-        final text = _cellText(row[col]);
-        if (text.isEmpty) continue;
-        final style = row[col].isHeader
-            ? baseStyle.copyWith(fontWeight: FontWeight.w600)
-            : baseStyle;
-        final painter = TextPainter(
-          text: TextSpan(text: text, style: style),
-          textDirection: TextDirection.ltr,
-          maxLines: 1,
-        )..layout();
-        final measured = painter.width + _kTableCellPadding.horizontal;
+        final cell = row[col];
+        final text = _cellText(cell);
+        // 图片 cell 文本为空,但 <img width> 声明了期望显示宽 —— 不参与
+        // 采样会退化到 minColWidth(60),229px 手机截图缩成 44px 缩略图。
+        // 对齐浏览器 table 布局:列宽按内容(文本或图片声明宽)自然撑开。
+        final imageW = _cellMaxImageWidth(cell);
+        if (text.isEmpty && imageW == null) continue;
+        var contentW = imageW ?? 0;
+        if (text.isNotEmpty) {
+          final style = cell.isHeader
+              ? baseStyle.copyWith(fontWeight: FontWeight.w600)
+              : baseStyle;
+          final painter = TextPainter(
+            text: TextSpan(text: text, style: style),
+            textDirection: TextDirection.ltr,
+            maxLines: 1,
+          )..layout();
+          if (painter.width > contentW) contentW = painter.width;
+          painter.dispose();
+        }
+        final measured = contentW + _kTableCellPadding.horizontal;
         if (measured > widths[col]) widths[col] = measured;
-        painter.dispose();
       }
     }
     // clamp
@@ -3130,6 +3156,65 @@ class _TableWidget extends StatelessWidget {
     }
     _columnWidthsCache[node] = (style: baseStyle, widths: widths);
     return widths;
+  }
+
+  /// cell 内图片声明的显示宽(`<img width>`)最大值,用于列宽采样。
+  /// 无图片或未声明宽度返回 null;递归范围与 [_cellText] 一致。
+  double? _cellMaxImageWidth(TableCellData cell) {
+    double? maxW;
+    void visit(double? w) {
+      if (w != null && w > 0 && (maxW == null || w > maxW!)) maxW = w;
+    }
+
+    void scanInlines(List<InlineNode> nodes) {
+      for (final n in nodes) {
+        switch (n) {
+          case ImageRun(:final width):
+            visit(width);
+          case EmRun(:final children):
+          case StrongRun(:final children):
+          case StyledRun(:final children):
+          case ColoredRun(:final children):
+          case SizedRun(:final children):
+          case LinkRun(:final children):
+          case SpoilerRun(:final children):
+            scanInlines(children);
+          default:
+            break;
+        }
+      }
+    }
+
+    void scanBlock(BlockNode b) {
+      switch (b) {
+        case ParagraphNode(:final inlines):
+        case HeadingNode(:final inlines):
+          scanInlines(inlines);
+        case ListNode(:final items):
+          for (final item in items) {
+            scanInlines(item.inlines);
+          }
+        case BlockquoteNode(:final children):
+        case QuoteCardNode(:final children):
+        case SpoilerBlockNode(:final children):
+        case DetailsNode(:final children):
+        case CalloutNode(:final children):
+          for (final c in children) {
+            scanBlock(c);
+          }
+        case ImageGridNode(:final images):
+          for (final img in images) {
+            visit(img.width);
+          }
+        default:
+          break;
+      }
+    }
+
+    for (final c in cell.children) {
+      scanBlock(c);
+    }
+    return maxW;
   }
 
   /// 从 cell.children 提纯文本(用于列宽测量,不参与实际渲染)
@@ -3221,22 +3306,19 @@ class _TableWidget extends StatelessWidget {
                 bottom: BorderSide(color: borderColor, width: 1),
               ),
       ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (var col = 0; col < node.columnCount; col++)
-              _buildCell(
-                context,
-                theme,
-                col < row.length ? row[col] : null,
-                columnWidths[col],
-                borderColor,
-                isLeftBorder: col > 0,
-                isHeaderRow: isHeader,
-              ),
-          ],
-        ),
+      // 无 IntrinsicHeight + stretch:原因见 _TableColumnDividerPainter。
+      // 行高由最高 cell 自然撑开,cell 自身无装饰依赖等高拉伸。
+      child: Row(
+        children: [
+          for (var col = 0; col < node.columnCount; col++)
+            _buildCell(
+              context,
+              theme,
+              col < row.length ? row[col] : null,
+              columnWidths[col],
+              isHeaderRow: isHeader,
+            ),
+        ],
       ),
     );
   }
@@ -3245,20 +3327,12 @@ class _TableWidget extends StatelessWidget {
     BuildContext context,
     ThemeData theme,
     TableCellData? cell,
-    double width,
-    Color borderColor, {
-    required bool isLeftBorder,
+    double width, {
     required bool isHeaderRow,
   }) {
     return Container(
       width: width,
-      decoration: isLeftBorder
-          ? BoxDecoration(
-              border: Border(
-                left: BorderSide(color: borderColor, width: 1),
-              ),
-            )
-          : null,
+      // 无左边框:列分隔竖线由 _TableColumnDividerPainter 整表统画。
       padding: _kTableCellPadding,
       child: cell == null
           ? const SizedBox.shrink()
@@ -3305,6 +3379,44 @@ class _TableWidget extends StatelessWidget {
   }
 }
 
+/// 表格列分隔竖线(从表头贯穿到表尾的通高 1px 竖线)。
+///
+/// 原方案是 cell 左边框 + 行外套 IntrinsicHeight(stretch 撑满行高);但 cell
+/// 内容是任意块节点,SVG(LayoutBuilder)、嵌套大表格(ListView→RenderViewport)
+/// 等不支持固有尺寸测量,IntrinsicHeight 一探就问
+/// "does not support returning intrinsic dimensions" —— debug 断言中断
+/// layout 后,上层逐节点 "RenderBox was not laid out" 级联崩溃。竖线本来
+/// 就贯穿全表,整表画一次与逐 cell stretch 视觉完全等价。
+class _TableColumnDividerPainter extends CustomPainter {
+  _TableColumnDividerPainter({required this.columnWidths, required this.color});
+
+  final List<double> columnWidths;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (columnWidths.length < 2) return;
+    final paint = Paint()..color = color;
+    var x = 0.0;
+    // 列边界处 1px 竖线,覆盖区域与原 cell 左边框(占 cell 内左缘 1px)一致
+    for (var i = 0; i < columnWidths.length - 1; i++) {
+      x += columnWidths[i];
+      canvas.drawRect(Rect.fromLTWH(x, 0, 1, size.height), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_TableColumnDividerPainter oldDelegate) {
+    if (oldDelegate.color != color ||
+        oldDelegate.columnWidths.length != columnWidths.length) {
+      return true;
+    }
+    for (var i = 0; i < columnWidths.length; i++) {
+      if (oldDelegate.columnWidths[i] != columnWidths[i]) return true;
+    }
+    return false;
+  }
+}
 /// Discourse policy 区块 fallback 卡(主项目不注入 policyBuilder 时)。
 ///
 /// 视觉对齐 legacy `_PolicyWidget`:
