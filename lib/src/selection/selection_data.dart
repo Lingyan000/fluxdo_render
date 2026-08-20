@@ -2,14 +2,15 @@
 ///
 /// 子包只产出 plainText + 选区矩形 + 可选代码块语言,**不依赖主项目的
 /// HtmlTextMapper / 引用 UI**。复制/引用的接线:
-/// - 复制:子包自带 toolbar 内部用 `Clipboard.setData`,代码块带 ```lang 包裹。
+/// - 复制:子包自带 toolbar 内部用 `Clipboard.setData`,选区覆盖完整代码块时带 ```lang 包裹。
 /// - 引用:子包 toolbar 调 [QuoteRequestCallback] 把 plainText 交回主项目,
 ///   主项目用现有 QuoteSelectionHelper → HtmlTextMapper → QuoteBuilder 转引用。
 library;
 
 import 'package:flutter/widgets.dart';
 
-/// 选区完全落在单个代码块内时携带的上下文(复制时包 ```lang)。
+/// 选区恰好覆盖单个代码块**全部内容**时携带的上下文(复制时包 ```lang);
+/// 只选中块内部分文本时为 null。
 @immutable
 class CodeSelectionInfo {
   const CodeSelectionInfo({this.language});
@@ -51,7 +52,7 @@ class SelectionData {
   /// 各高亮矩形(全局坐标),可用于精细定位或调试。
   final List<Rect> globalRects;
 
-  /// 选区完全落在单个代码块内时非 null。
+  /// 选区恰好覆盖单个代码块全部内容时非 null(部分选中为 null)。
   final CodeSelectionInfo? code;
 
   @override

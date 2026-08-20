@@ -8,7 +8,7 @@
 /// 复制/全选 label 走 MaterialLocalizations 自动本地化。
 ///
 /// 按钮集(对齐 SDK getSelectableButtonItems :298-338 顺序,再接自有项):
-/// - 复制(子包内 Clipboard.setData,代码块带 ```lang)
+/// - 复制(子包内 Clipboard.setData,选区覆盖完整代码块时带 ```lang)
 /// - 全选(回调交上层 SelectionNavigator.selectAll,移动端保持 toolbar 重定位)
 /// - 复制引用 / 引用(回调交主项目,null 时隐藏)
 /// - ProcessText 用户应用工具(仅 Android,系统翻译/搜索等,SDK :1752-1774)

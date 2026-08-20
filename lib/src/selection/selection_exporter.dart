@@ -1,7 +1,7 @@
 /// 选区导出 —— DocumentSelection → SelectionData(plainText + 矩形 + 代码块语言)。
 ///
 /// plainText 按 visualOrder 遍历各块,用映射表投影,块间加 `\n`(对齐
-/// HtmlTextMapper 块级换行)。选区完全落单代码块时带 language。
+/// HtmlTextMapper 块级换行)。选区恰好覆盖单个代码块全部内容时带 language。
 library;
 
 import 'package:flutter/rendering.dart';
@@ -73,11 +73,16 @@ class SelectionExporter {
     );
   }
 
+  /// 选区**恰好覆盖单个代码块的全部内容**时才携带语言(复制包 ```lang)。
+  /// 只选中块内部分文本时返回 null → 复制为纯文本,不追加 ```。
   CodeSelectionInfo? _codeInfoIfSingleCodeBlock(List<BlockRange> ranges) {
     if (ranges.length != 1) return null;
-    final lang = registry.logicalById(ranges.first.id)?.codeLanguage;
-    if (lang == null) return null;
-    return CodeSelectionInfo(language: lang);
+    final block = registry.logicalById(ranges.first.id);
+    if (block == null || block.codeLanguage == null) return null;
+    final r = ranges.first;
+    final coversWholeBlock = r.start == 0 && r.end >= block.renderLength;
+    if (!coversWholeBlock) return null;
+    return CodeSelectionInfo(language: block.codeLanguage);
   }
 
   /// 按文档序返回选区两端点的 DocumentPosition(拖手柄时固定一端、动另一端)。

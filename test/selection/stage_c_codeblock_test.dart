@@ -38,14 +38,26 @@ void main() {
     // projection 是 code 原文
     expect(h.projection.projectAll(), 'print("hi")\nreturn 0');
 
-    // 选中代码块前 5 字符 → 导出带 python language
+    // 部分选中(前 5 字符)→ 导出为纯文本,code=null(复制不追加 ```)
     c.selection = DocumentSelection(
       base: DocumentPosition(blockId: h.id, renderOffset: 0),
       extent: DocumentPosition(blockId: h.id, renderOffset: 5),
     );
-    final data = SelectionExporter(c.registry).export(c.selection);
+    var data = SelectionExporter(c.registry).export(c.selection);
     expect(data, isNotNull);
     expect(data!.plainText, 'print');
+    expect(data.code, isNull);
+
+    // 完整选中整个代码块 → 导出带 python language(复制包 ```python)
+    final len = h.projection.renderLength;
+    c.selection = DocumentSelection(
+      base: DocumentPosition(blockId: h.id, renderOffset: 0),
+      extent: DocumentPosition(blockId: h.id, renderOffset: len),
+    );
+    data = SelectionExporter(c.registry).export(c.selection);
+    expect(data, isNotNull);
+    expect(data!.plainText.replaceAll('\u200B', ''),
+        'print("hi")\nreturn 0');
     expect(data.code, isNotNull);
     expect(data.code!.language, 'python');
   });

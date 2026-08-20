@@ -261,8 +261,8 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     );
   }
 
-  /// 复制当前选区到剪贴板(Cmd/Ctrl+C)。与 toolbar「复制」同口径:代码块带
-  /// ```` ```lang ````。复制后**保留选区**(桌面习惯,不清除)。
+  /// 复制当前选区到剪贴板(Cmd/Ctrl+C)。与 toolbar「复制」同口径:选区覆盖
+  /// 完整代码块时带 ```` ```lang ````。复制后**保留选区**(桌面习惯,不清除)。
   void _copySelection() {
     final sel = widget.controller.selection;
     if (sel == null) return;
