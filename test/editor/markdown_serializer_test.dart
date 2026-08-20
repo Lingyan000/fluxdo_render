@@ -5,9 +5,11 @@ import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/editor/model/editable_text_content.dart';
+import 'package:fluxdo_render/src/editor/model/doc_converter.dart';
 import 'package:fluxdo_render/src/editor/model/editor_block.dart';
 import 'package:fluxdo_render/src/editor/model/markdown_serializer.dart';
 import 'package:fluxdo_render/src/node/node.dart';
+import 'package:fluxdo_render/src/parser/paragraph_parser.dart';
 
 TextBlock tb(
   String text, {
@@ -221,6 +223,145 @@ void main() {
       expect(docToMarkdown([tb('- 不是列表')]), r'\- 不是列表');
       expect(docToMarkdown([tb('1. 不是列表')]), r'\1. 不是列表');
       expect(docToMarkdown([tb('> 不是引用')]), r'\> 不是引用');
+    });
+  });
+
+  group('spoiler 块规则防吞后缀', () {
+    // 背景见 _spoilerBlockGuardSuffix:cook 的 spoiler 块规则会吞掉
+    // 「行首 [spoiler] 开、行尾 [/spoiler] 闭」的单行段落(整段变
+    // <div class="spoiler">),与行内 span 的原始 cooked 不等,导入门禁
+    // 因此拦下整帖。修复 = 该形态行尾补两个空格(硬换行标记)。
+    test('整段 sole-spoiler:行尾补双空格(用户实报形态)', () {
+      // raw `[spoiler]吃[/spoiler]␠␠\n␠␠\n␠␠\n参考参考` 的 cook 产物:
+      // <p><span class="spoiler">吃</span></p><p>参考参考</p>
+      final spoilerPara = tb('吃', marks: const [
+        MarkSpan(start: 0, end: 1, kind: MarkKind.spoilerInline),
+      ]);
+      expect(
+        docToMarkdown([spoilerPara, tb('参考参考')]),
+        '[spoiler]吃[/spoiler]  \n\n参考参考',
+      );
+      // 唯一块/文档末尾同样补(EOF 双空格实测仍走行内规则)
+      expect(
+        docToMarkdown([spoilerPara]),
+        '[spoiler]吃[/spoiler]  ',
+      );
+    });
+
+    test('行中开/段中闭:不构成块规则形态,不加空格', () {
+      // 开标签不在行首(前面有文字)→ 块规则不命中,加空格反而污染 raw
+      expect(
+        docToMarkdown([
+          tb('参考吃', marks: const [
+            MarkSpan(start: 2, end: 3, kind: MarkKind.spoilerInline),
+          ])
+        ]),
+        '参考[spoiler]吃[/spoiler]',
+      );
+      // 闭标签不在段尾(后面还有文字)
+      expect(
+        docToMarkdown([
+          tb('吃喝', marks: const [
+            MarkSpan(start: 0, end: 1, kind: MarkKind.spoilerInline),
+          ])
+        ]),
+        '[spoiler]吃[/spoiler]喝',
+      );
+      // 空段落
+      expect(docToMarkdown([tb('')]), '');
+    });
+
+    test('标题不适用(inline-only,块规则永不命中)', () {
+      expect(
+        docToMarkdown([
+          tb('吃', marks: const [
+            MarkSpan(start: 0, end: 1, kind: MarkKind.spoilerInline),
+          ], kind: TextBlockKind.heading, headingLevel: 2)
+        ]),
+        '## [spoiler]吃[/spoiler]',
+      );
+    });
+
+    test('列表项:同样补后缀', () {
+      expect(
+        docToMarkdown([
+          tb('吃', marks: const [
+            MarkSpan(start: 0, end: 1, kind: MarkKind.spoilerInline),
+          ], kind: TextBlockKind.listItem)
+        ]),
+        '- [spoiler]吃[/spoiler]  ',
+      );
+    });
+
+    test('容器内段落:同样补后缀(quote 内实测块规则会吞)', () {
+      expect(
+        docToMarkdown([
+          TextBlock(
+            id: 'e_q',
+            content: EditableTextContent(
+              text: '吃',
+              marks: const [
+                MarkSpan(start: 0, end: 1, kind: MarkKind.spoilerInline),
+              ],
+            ),
+            containers: const [QuoteFrame(groupId: 'g1')],
+          ),
+        ]),
+        '> [spoiler]吃[/spoiler]  ',
+      );
+    });
+
+    test('相邻双 spoiler(首开尾合不同 mark):同样补后缀', () {
+      // `[spoiler]吃[/spoiler][spoiler]喝[/spoiler]` 单行同样命中块规则
+      // (实测:整行被吞进一个 div),必须补
+      expect(
+        docToMarkdown([
+          tb('吃喝', marks: const [
+            MarkSpan(start: 0, end: 1, kind: MarkKind.spoilerInline),
+            MarkSpan(start: 1, end: 2, kind: MarkKind.spoilerInline),
+          ])
+        ]),
+        '[spoiler]吃[/spoiler][spoiler]喝[/spoiler]  ',
+      );
+    });
+
+    test('同区间嵌套(spoiler 外层样式):后缀在闭合标签之后', () {
+      expect(
+        docToMarkdown([
+          tb('吃', marks: const [
+            MarkSpan(start: 0, end: 1, kind: MarkKind.spoilerInline),
+            MarkSpan(start: 0, end: 1, kind: MarkKind.strong),
+          ])
+        ]),
+        '[spoiler]**吃**[/spoiler]  ',
+      );
+    });
+
+    test('硬换行结尾不重复补(换行自带行尾上下文)', () {
+      // spoiler mark 覆盖到硬换行前结束:text 以 \n 收尾,序列化产物
+      // 以 `  \n` 收尾,块规则本就不命中
+      expect(
+        docToMarkdown([
+          tb('吃\n喝', marks: const [
+            MarkSpan(start: 0, end: 1, kind: MarkKind.spoilerInline),
+          ])
+        ]),
+        '[spoiler]吃[/spoiler]  \n喝',
+      );
+    });
+
+    test('导入管线端到端:span.spoiler cooked → doc → raw 带后缀', () {
+      // 复刻导入门禁的纯 Dart 侧(cook 在 JS bundle,测试环境跑不了):
+      // parser 摊平 → blockNodesToDoc → docToMarkdown
+      final nodes = ParagraphParser().parse(
+        '<p><span class="spoiler">吃</span></p>\n<p>参考参考</p>',
+      );
+      var n = 0;
+      final doc = blockNodesToDoc(nodes, () => 'e_${n++}');
+      expect(
+        docToMarkdown(doc),
+        '[spoiler]吃[/spoiler]  \n\n参考参考',
+      );
     });
   });
 

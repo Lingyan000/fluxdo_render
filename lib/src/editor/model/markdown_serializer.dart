@@ -141,8 +141,58 @@ String _serializeTextBlock(TextBlock block) {
 
   if (block.isHeading) {
     text = '${'#' * block.headingLevel} $text';
+  } else {
+    // 段落(块级解析上下文)末尾防 spoiler 块规则吞行,详见
+    // [_spoilerBlockGuardSuffix]
+    text += _spoilerBlockGuardSuffix(block.content);
   }
   return text;
+}
+
+/// 段尾 spoiler 防吞后缀:命中 cook 块规则形态时补两个尾随空格。
+///
+/// cook bundle 探针实测,spoiler BBCode 的**块规则**命中条件是:
+/// 单行内容恰为 `[spoiler]…[/spoiler]` —— 开标签在行首、闭标签紧贴
+/// 行尾(行尾连一个空格都不能有)。行内 SpoilerRun 写回后若恰好构成
+/// 这一形态,重 cook 会被吞成块级 `<div class="spoiler">`,与原始
+/// cooked(`<p><span class="spoiler">…</span></p>`)结构不等 —— 富文本
+/// 导入门禁(二次 cook 等价对比)因此拦下整帖,整帖降级源码模式。
+/// 用户写 `[spoiler]吃[/spoiler]␠␠`(行尾双空格硬换行)再空行分段时
+/// 正中此坑:cook 走行内规则产出 span,而序列化丢掉了行尾空格,
+/// 写回变成块规则形态。
+///
+/// 修复:命中形态的段落行尾补回两个空格 —— 闭标签不再紧贴行尾,
+/// 块规则不命中,行内规则接管,与原 cooked 一致。实测对照(仅行尾
+/// 两空格之差):
+/// - `[spoiler]吃[/spoiler]` → `<div class="spoiler"><p>吃</p></div>`
+/// - `[spoiler]吃[/spoiler]␠␠` → `<p><span class="spoiler">吃</span></p>`
+///
+/// 判据用 mark 模型(而非匹配产物字符串):存在 spoilerInline mark
+/// **始于 offset 0**(开标签在行首)且存在 spoilerInline mark**终于
+/// text.length**(闭标签在段尾)。两个 mark 可以不是同一个 —— 相邻
+/// `[spoiler]吃[/spoiler][spoiler]喝[/spoiler]` 的首开尾合同样命中
+/// 块规则(实测:整行被吞进一个 div)。行中开的
+/// `参考[spoiler]吃[/spoiler]`、段中闭的 `[spoiler]吃[/spoiler]参考`
+/// 都不构成块规则形态,不加空格。
+///
+/// 适用范围:块级解析上下文 —— 顶层/容器(quote/spoiler/details/quote
+/// 卡/callout)内段落与列表项(实测:这些上下文里块规则都会吞,后缀
+/// 都能保住行内形态,且不影响子列表挂接与后文分段)。**不适用**于
+/// inline-only 上下文:标题(块规则永不命中)与表格单元格/poll 选项
+/// 等岛 inline(同理由);岛化列表([_serializeListNode],项内可能挂
+/// 块级子节点的续行,后缀会干扰挂接)不加 —— 残余缺口由导入门禁
+/// 兜底降级,不丢内容。
+String _spoilerBlockGuardSuffix(EditableTextContent content) {
+  final text = content.text;
+  if (text.isEmpty) return '';
+  var opensAtStart = false;
+  var closesAtEnd = false;
+  for (final m in content.marks) {
+    if (m.kind != MarkKind.spoilerInline) continue;
+    if (m.start == 0) opensAtStart = true;
+    if (m.end == text.length) closesAtEnd = true;
+  }
+  return (opensAtStart && closesAtEnd) ? '  ' : '';
 }
 
 String _serializeListRun(List<TextBlock> run) {
@@ -191,7 +241,10 @@ String _serializeListRun(List<TextBlock> run) {
     markerWidth.add(marker.length);
 
     final indent = ' ' * indentOf(b.depth);
-    lines.add('$indent$marker${_inlineToMarkdown(b.content)}');
+    // 列表项内容同样是块级解析上下文(`- [spoiler]x[/spoiler]` 实测
+    // 会被块规则吞成 li 内 div),同样补防吞后缀
+    lines.add('$indent$marker${_inlineToMarkdown(b.content)}'
+        '${_spoilerBlockGuardSuffix(b.content)}');
   }
   segments.add(lines);
   return segments
