@@ -274,7 +274,7 @@ class SelectionToolbar {
     if (detector == null) return false;
     final text = data.plainText.trim();
     if (text.isEmpty) return false;
-    return detector(text);
+    return detector(text, codeLanguage: data.code?.language);
   }
 
   void hide() {

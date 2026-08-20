@@ -79,4 +79,9 @@ typedef DecryptRequestCallback = void Function(String plainText);
 
 /// 密文特征判定 —— 由主项目注入(与主项目 crypto 引擎同源的嗅探逻辑),
 /// 决定「解密」按钮是否对当前选区显示。
-typedef DecryptTextDetector = bool Function(String plainText);
+/// [codeLanguage] 为选区所在代码块的 fence 语言标记(如 ```enc),
+/// 主项目可据此把整块标记内容视为可解密(哪怕只选中了片段)。
+typedef DecryptTextDetector = bool Function(
+  String plainText, {
+  String? codeLanguage,
+});
