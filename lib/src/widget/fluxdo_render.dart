@@ -71,6 +71,8 @@ class FluxdoRender extends StatefulWidget {
     this.onQuoteRequest,
     this.onCopyQuoteRequest,
     this.onCopyToast,
+    this.onDecryptRequest,
+    this.decryptTextDetector,
     this.imageIndexOffset = 0,
     this.footnotesHtml,
     this.selectionScopeId,
@@ -216,6 +218,10 @@ class FluxdoRender extends StatefulWidget {
 
   /// 复制完成 —— 子包复制到剪贴板后通知主项目弹 toast(可选)。
   final CopyToastCallback? onCopyToast;
+
+  /// 「解密」回调与密文特征判定(主项目注入;null 时 toolbar 隐藏该按钮)
+  final DecryptRequestCallback? onDecryptRequest;
+  final DecryptTextDetector? decryptTextDetector;
 
   /// 图片 indexInPost 起始偏移(长帖分 chunk 时,该 chunk 之前所有 chunk 的
   /// 图片总数),使图片 heroTag / 画廊索引对齐整帖。整帖渲染时为 0。
@@ -441,6 +447,8 @@ class _FluxdoRenderState extends State<FluxdoRender> {
           onQuoteRequest: widget.onQuoteRequest,
           onCopyQuoteRequest: widget.onCopyQuoteRequest,
           onCopyToast: widget.onCopyToast,
+          onDecryptRequest: widget.onDecryptRequest,
+          decryptTextDetector: widget.decryptTextDetector,
           child: column,
         ),
       ),

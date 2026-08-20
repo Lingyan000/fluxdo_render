@@ -73,3 +73,10 @@ typedef QuoteRequestCallback = void Function(String plainText);
 
 /// 复制完成回调 —— 子包复制到剪贴板后通知主项目弹 toast(可选)。
 typedef CopyToastCallback = void Function();
+
+/// 解密请求回调 —— toolbar 点「解密」时调,把选区 plainText 交回主项目。
+typedef DecryptRequestCallback = void Function(String plainText);
+
+/// 密文特征判定 —— 由主项目注入(与主项目 crypto 引擎同源的嗅探逻辑),
+/// 决定「解密」按钮是否对当前选区显示。
+typedef DecryptTextDetector = bool Function(String plainText);

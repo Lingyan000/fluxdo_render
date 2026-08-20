@@ -27,6 +27,8 @@ class SelectionContentLayer extends StatefulWidget {
     required this.onCopyQuoteRequest,
     required this.onCopyToast,
     required this.child,
+    this.onDecryptRequest,
+    this.decryptTextDetector,
     this.chunkIndex = 0,
   });
 
@@ -34,6 +36,10 @@ class SelectionContentLayer extends StatefulWidget {
   final QuoteRequestCallback? onQuoteRequest;
   final QuoteRequestCallback? onCopyQuoteRequest;
   final CopyToastCallback? onCopyToast;
+
+  /// 「解密」回调与密文特征判定(主项目注入;null 时 toolbar 不显示该按钮)
+  final DecryptRequestCallback? onDecryptRequest;
+  final DecryptTextDetector? decryptTextDetector;
   final Widget child;
 
   /// 本层所在 chunk 的文档序号(整帖渲染为 0)。用于尺寸变化后判断「本层是否
@@ -254,6 +260,13 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
               widget.onCopyQuoteRequest!.call(plainText);
               widget.controller.clear();
             },
+      onDecrypt: widget.onDecryptRequest == null
+          ? null
+          : (plainText) {
+              widget.onDecryptRequest!.call(plainText);
+              widget.controller.clear();
+            },
+      decryptTextDetector: widget.decryptTextDetector,
       onCopied: () {
         widget.onCopyToast?.call();
         widget.controller.clear(); // 复制后清选区(与引用/复制引用一致)

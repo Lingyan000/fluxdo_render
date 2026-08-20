@@ -35,9 +35,12 @@ class SelectionToolbar {
     this.onCopyQuote,
     this.onSelectAll,
     this.onProcessTextDone,
+    this.onDecrypt,
+    this.decryptTextDetector,
     this.tapRegionGroupId,
     this.copyQuoteLabel = '复制引用',
     this.quoteLabel = '引用',
+    this.decryptLabel = '解密',
   });
 
   final BuildContext context;
@@ -58,11 +61,19 @@ class SelectionToolbar {
   /// ProcessText 动作执行完毕(上层清选区,对齐 SDK 执行后 hideToolbar)。
   final VoidCallback? onProcessTextDone;
 
+  /// 「解密」回调 —— 把选区纯文本交回主项目打开解密面板。
+  /// null 或 [decryptTextDetector] 判定非密文时不显示该按钮。
+  final DecryptRequestCallback? onDecrypt;
+
+  /// 密文特征判定(主项目注入,与主项目 crypto 嗅探逻辑同源)。
+  final DecryptTextDetector? decryptTextDetector;
+
   /// 与内容层同一 TapRegion groupId —— 点 toolbar 不触发内容的 onTapOutside。
   final Object? tapRegionGroupId;
 
   final String copyQuoteLabel;
   final String quoteLabel;
+  final String decryptLabel;
 
   OverlayEntry? _entry;
 
@@ -218,6 +229,14 @@ class SelectionToolbar {
           // 不在此 hide:上层按平台决定保持重定位(移动端)或收起(桌面)。
           onPressed: onSelectAll,
         ),
+      if (_showDecrypt(data))
+        ContextMenuButtonItem(
+          label: decryptLabel,
+          onPressed: () {
+            onDecrypt!(data.plainText);
+            hide();
+          },
+        ),
       if (onCopyQuote != null)
         ContextMenuButtonItem(
           label: copyQuoteLabel,
@@ -246,6 +265,16 @@ class SelectionToolbar {
           },
         ),
     ];
+  }
+  /// 「解密」按钮显隐：回调注入且选中文本命中密文特征(ENC1/OpenSSL/
+  /// 纯 Base64/Hex/摩斯)。特征逻辑由主项目注入,子包不重复实现。
+  bool _showDecrypt(SelectionData data) {
+    if (onDecrypt == null) return false;
+    final detector = decryptTextDetector;
+    if (detector == null) return false;
+    final text = data.plainText.trim();
+    if (text.isEmpty) return false;
+    return detector(text);
   }
 
   void hide() {
