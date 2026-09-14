@@ -413,16 +413,6 @@ bool _hasCrossingMarks(List<MarkSpan> marks) {
 /// `mailto:` 同 `http://` 待遇:裸邮箱被 linkify 成
 /// `href=mailto:user@example.com` + 无 scheme 锚文本,裸化写回后重 cook
 /// 仍产同一个 mailto 链接,往返稳定。
-bool _isBareUrlText(String text, String href) {
-  if (text == href) return true;
-  for (final scheme in const ['http://', 'mailto:']) {
-    if (href.startsWith(scheme) && href.substring(scheme.length) == text) {
-      return true;
-    }
-  }
-  return false;
-}
-
 String _inlineToMarkdown(EditableTextContent content) {
   final text = content.text;
   if (text.isEmpty) return '';
@@ -436,10 +426,7 @@ String _inlineToMarkdown(EditableTextContent content) {
   // `_` 等被转义即断链)。
   final bareLinks = <MarkSpan>{
     for (final m in content.marks)
-      if (m.kind == MarkKind.link &&
-          m.attr != null &&
-          m.attr!.isNotEmpty &&
-          _isBareUrlText(text.substring(m.start, m.end), m.attr!))
+      if (content.isBareLink(m))
         m,
   };
 
@@ -547,7 +534,9 @@ String _inlineToMarkdown(EditableTextContent content) {
           (closes[i]?.any(bareLinks.contains) ?? false);
       buf.write(inCode || inBareLink || closesBareLink
           ? ch
-          : _escapeInline(ch, i, text));
+          : ch == '\\' && activeHas(MarkKind.link)
+              ? r'\\'
+              : _escapeInline(ch, i, text));
     }
   }
   // 收尾:未闭合的全部闭合(理论 marks 都有 end,防御)

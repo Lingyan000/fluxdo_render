@@ -599,7 +599,15 @@ class EditorState extends ChangeNotifier {
     if (a.length != b.length) return false;
     final rest = [...b];
     for (final m in a) {
-      if (!rest.remove(m)) return false;
+      if (rest.remove(m)) continue;
+      // 旧调用方未声明来源的自定义标题链接，物化重折叠后会明确为
+      // 显式链接；同名链接已在物化入口排除，这里只允许 null → false。
+      final index = rest.indexWhere((old) =>
+          m.kind == MarkKind.link && old.kind == m.kind &&
+          m.isAutoLink == false && old.isAutoLink == null &&
+          old.start == m.start && old.end == m.end && old.attr == m.attr);
+      if (index < 0) return false;
+      rest.removeAt(index);
     }
     return true;
   }
@@ -1444,7 +1452,8 @@ class EditorState extends ChangeNotifier {
     final newBlocks = [..._blocks];
     newBlocks[i] = block.copyWith(
       content: block.content
-          .applyMark(from.offset, to.offset, MarkKind.link, attr: href),
+          .applyMark(from.offset, to.offset, MarkKind.link,
+              attr: href, isAutoLink: false),
     );
     _commit(newBlocks, _selection, groupWithPrevious: false);
     sealHistory();
@@ -1797,7 +1806,8 @@ class EditorState extends ChangeNotifier {
     final content = block.content
         .delete(start, end)
         .insert(start, label)
-        .applyMark(start, start + label.length, MarkKind.link, attr: href);
+        .applyMark(start, start + label.length, MarkKind.link,
+            attr: href, isAutoLink: false);
     final newBlocks = [..._blocks];
     newBlocks[i] = block.copyWith(content: content);
     _commit(

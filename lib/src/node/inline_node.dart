@@ -288,6 +288,7 @@ class LinkRun extends InlineNode {
     this.hashtagRef,
     this.hashtagIcon,
     this.isOneboxLink = false,
+    this.editorLinkSource,
   });
 
   /// 已解析的链接 URL(parser 阶段不做 CDN 重写,显示给 LinkHandler)。
@@ -328,6 +329,10 @@ class LinkRun extends InlineNode {
   /// 独行 onebox 展开资格)。markdown 序列化一律写回裸 [href]。
   final bool isOneboxLink;
 
+  /// 编辑模型的来源侧表：外层 null 表示普通 cooked 节点；record 存在
+  /// 时按 children 导入并透传其中三态，不能把样式分片再次扩成完整 href。
+  final ({bool? isAutoLink})? editorLinkSource;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -340,11 +345,13 @@ class LinkRun extends InlineNode {
           hashtagRef == other.hashtagRef &&
           hashtagIcon == other.hashtagIcon &&
           isOneboxLink == other.isOneboxLink &&
+          editorLinkSource == other.editorLinkSource &&
           listEquals(children, other.children);
 
   @override
   int get hashCode => Object.hash(href, isAttachment, filename, origHref,
-      hashtagRef, hashtagIcon, isOneboxLink, Object.hashAll(children));
+      hashtagRef, hashtagIcon, isOneboxLink, editorLinkSource,
+      Object.hashAll(children));
 
   @override
   String toString() => 'LinkRun($href'

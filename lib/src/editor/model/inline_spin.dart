@@ -143,7 +143,8 @@ SpinResult spinInlineMarks(
         .delete(contentEnd, matchEnd)
         .delete(hit.start, openEnd)
         .applyMark(hit.start, hit.start + hit.contentLen, hit.kind,
-            attr: hit.attr);
+            attr: hit.attr,
+            isAutoLink: hit.kind == MarkKind.link ? false : null);
     pos = _remapCaret(pos, hit.start, openEnd, contentEnd, matchEnd);
     exclusions = [
       for (final (s, e) in exclusions)
@@ -180,7 +181,7 @@ SpinResult spinInlineMarks(
 /// 公开给状态层做「进入物化」的簇判定(materializeClusterAt)——
 /// 物化准入与 spin 折叠能力必须同口径,否则展开了折不回去。
 bool isRefoldableMark(EditableTextContent c, MarkSpan m) {
-  if (m.kind == MarkKind.inlineCode) return false;
+  if (m.kind == MarkKind.inlineCode || c.isBareLink(m)) return false;
   final inner = c.text.substring(m.start, m.end);
   if (m.kind == MarkKind.link) {
     // link 可物化(点击进入改 href 的主路径),但 label 含原子哨兵的
