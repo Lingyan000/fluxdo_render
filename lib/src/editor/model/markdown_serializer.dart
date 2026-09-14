@@ -540,7 +540,14 @@ String _inlineToMarkdown(EditableTextContent content) {
       buf.write('  \n');
     } else {
       final inBareLink = active.any(bareLinks.contains);
-      buf.write(inCode || inBareLink ? ch : _escapeInline(ch, i, text));
+      // 裸 URL 后的闭括号保持字面值；转义用的反斜杠会被 linkify
+      // 吞进 URL。其他上下文（例如显式链接的锚文本）仍正常转义。
+      final closesBareLink = ch == ']' &&
+          !activeHas(MarkKind.link) &&
+          (closes[i]?.any(bareLinks.contains) ?? false);
+      buf.write(inCode || inBareLink || closesBareLink
+          ? ch
+          : _escapeInline(ch, i, text));
     }
   }
   // 收尾:未闭合的全部闭合(理论 marks 都有 end,防御)

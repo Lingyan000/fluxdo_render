@@ -6,9 +6,39 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/editor.dart';
 import 'package:fluxdo_render/fluxdo_render.dart'
-    show LinkRun, ParagraphNode, TextRun;
+    show LinkRun, ParagraphNode, ParagraphParser, TextRun;
 
 void main() {
+  test('加载中的自动链接按裸 href 导入，不把 URL 编码差异当自定义标题', () {
+    final nodes = ParagraphParser().parse(
+      '<p>[<a href="https://github.com/%5C" '
+      'class="inline-onebox-loading">https://github.com/\\</a>]('
+      '<a href="https://github.com">https://github.com</a>)</p>',
+    );
+    final paragraph = nodes.single as ParagraphNode;
+    final link = paragraph.inlines.whereType<LinkRun>().first;
+    expect(link.isOneboxLink, isTrue);
+    var n = 0;
+    final doc = blockNodesToDoc(nodes, () => 'e_${n++}');
+    expect(docToMarkdown(doc),
+        r'\[https://github.com/%5C](https://github.com)');
+  });
+
+  test('裸链接之后的闭括号不转义，避免反斜杠被吸入地址', () {
+    const url = 'https://example.com/path';
+    final block = TextBlock(
+      id: 'e_0',
+      content: EditableTextContent(
+        text: '[$url]',
+        marks: [
+          MarkSpan(start: 1, end: 1 + url.length,
+              kind: MarkKind.link, attr: url),
+        ],
+      ),
+    );
+    expect(docToMarkdown([block]), r'\[https://example.com/path]');
+  });
+
   test('inline-onebox 链接导入为可编辑 mark(文本=href)', () {
     const url = 'https://linux.do/t/topic/2587100';
     final doc = blockNodesToDoc(

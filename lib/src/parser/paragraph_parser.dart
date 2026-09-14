@@ -2459,9 +2459,12 @@ class ParagraphParser {
             href: href,
             children: List.unmodifiable(children),
             // onebox 系链接:inline-onebox(行内,锚文本=动态取回的页面
-            // 标题)与 onebox(未展开的裸链)。raw 里都是裸 URL ——
+            // 标题)、inline-onebox-loading(标题尚未加载)与 onebox
+            // (未展开的裸链)。loading 的锚文本可能已 URL 解码，不能
+            // 用 text == href 判别裸链。raw 里都是裸 URL ——
             // 序列化写回裸 href,不能固化 `[标题](url)` 形态。
             isOneboxLink: el.classes.contains('inline-onebox') ||
+                el.classes.contains('inline-onebox-loading') ||
                 el.classes.contains('onebox'),
           ));
         }
