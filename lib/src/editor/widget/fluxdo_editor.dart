@@ -857,8 +857,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// 统一回喂;期间 setEditingState 会打断系统手势)。
   bool _floatingCursor = false;
 
-  /// Start 时的光标中心(全局;Update 的 offset 以此为基准累加)。
-  Offset? _floatingBase;
+  /// 上次平台/虚拟指针累计输入；转为增量后从限位位置继续移动，
+  /// 不积攒越界位移，保证贴边后反向立即响应。
+  Offset _floatingLastOffset = Offset.zero;
   Offset _floatingPos = Offset.zero;
   OverlayEntry? _floatingGhost;
 
@@ -937,7 +938,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     if (sel == null) return false;
     _floatingCursor = true;
     _floatingExtendBase = extend ? sel.base : null;
-    _floatingBase = rect.center;
+    _floatingLastOffset = initialOffset;
     _floatingPos = _clampFloatingPosition(rect.center + initialOffset, vp);
     widget.state.sealHistory();
     _collapsedHandle?.hide();
@@ -949,14 +950,15 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   /// 浮动位置更新([accumulated] = 相对起步点的累计位移)。
   void _floatingUpdate(Offset accumulated) {
-    final base = _floatingBase;
-    if (!_floatingCursor || base == null) return;
+    if (!_floatingCursor) return;
+    final delta = accumulated - _floatingLastOffset;
+    _floatingLastOffset = accumulated;
     final visible = _visibleContentRect();
     if (visible == null || visible.isEmpty) {
       _stopAutoScroll();
       return;
     }
-    final pos = _clampFloatingPosition(base + accumulated, visible);
+    final pos = _clampFloatingPosition(_floatingPos + delta, visible);
     _floatingPos = pos;
     _floatingGhost?.markNeedsBuild();
     // 实光标就近吸附(EditableText 的灰色残影等价物:吸附位即落点)
@@ -981,7 +983,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   void _floatingEnd() {
     if (!_floatingCursor) return;
     _floatingCursor = false;
-    _floatingBase = null;
+    _floatingLastOffset = Offset.zero;
     _floatingExtendBase = null;
     _stopAutoScroll();
     _removeFloatingGhost();
@@ -991,6 +993,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     // 浮动拖动的延迟 ir 收口在此结算(落点补物化/离开折叠)。
     final beforeRev = widget.state.docRevision;
     widget.state.commitDeferredIrReconcile();
+    // 最后一帧吸附在布局后完成，下一帧不能再因同一落点启动 ensure 动画；
+    // 拖动滚动到此结束，后续编辑或键盘尺寸变化仍可正常触发避让。
+    _lastEnsuredKey = (widget.state.docRevision, widget.state.selection);
     _ime.syncFromState(
       show: false,
       force: widget.state.docRevision != beforeRev,
@@ -1344,7 +1349,20 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     // 拖拽点全局没动、内容滚过去了 → 用当前拖拽点重新命中,让被拖端
     // (或 collapsed 光标/浮动吸附点)随滚动继续走;否则只滚屏不扩选。
     if (_floatingCursor) {
-      _applyFloatingHit(drag);
+      // ticker 在布局前运行；图片加载或滚动可能已令段落布局失效。
+      // 等本帧布局完成再读取几何，同时按滚动后的正文范围重新限位。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_floatingCursor) return;
+        final visible = _visibleContentRect();
+        if (visible == null || visible.isEmpty) {
+          _stopAutoScroll();
+          return;
+        }
+        _floatingPos = _clampFloatingPosition(_floatingPos, visible);
+        _floatingGhost?.markNeedsBuild();
+        _applyFloatingHit(_floatingPos);
+        _updateAutoScroll(_floatingPos);
+      });
     } else if (_handles?.isShowing ?? false) {
       _handles!.reapplyDrag();
     } else if (_collapsedHandle?.isShowing ?? false) {
