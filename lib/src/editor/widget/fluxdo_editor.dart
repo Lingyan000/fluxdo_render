@@ -333,6 +333,9 @@ class FluxdoEditor extends StatefulWidget {
     this.onImageAtomOpenRequest,
     this.onGridImageSelectionChanged,
     this.onGridImageOpenRequest,
+    this.onAddGridImages,
+    this.addingImageGrids = const {},
+    this.gridControlSurfaceBuilder,
     this.onCaretRectChanged,
     this.onLinkCaret,
     this.onIslandSelected,
@@ -349,6 +352,9 @@ class FluxdoEditor extends StatefulWidget {
   });
 
   final EditorState state;
+  final ValueChanged<String>? onAddGridImages;
+  final Set<String> addingImageGrids;
+  final Widget Function(BuildContext, Widget)? gridControlSurfaceBuilder;
 
   /// 宿主提供统一对象工具栏时，隐藏块内重复的操作浮层。
   final bool objectToolbarManaged;
@@ -607,6 +613,24 @@ class _FluxdoEditorState extends State<FluxdoEditor>
         _explicitObjectTarget = null;
       }
     }
+    final gridSelection = _gridImageSel;
+    final selectedImage = _lastGridImageSel?.image;
+    if (gridSelection != null && selectedImage != null) {
+      final index = widget.state.indexOfBlock(gridSelection.$1);
+      final block = index < 0 ? null : widget.state.blocks[index];
+      if (block is IslandBlock && block.node is ImageGridNode) {
+        final images = (block.node as ImageGridNode).images;
+        final moved = images.indexWhere(
+          (image) => identical(image, selectedImage),
+        );
+        if (moved >= 0) {
+          _gridImageSel = (gridSelection.$1, moved);
+        } else if (gridSelection.$2 >= images.length ||
+            images[gridSelection.$2].src != selectedImage.src) {
+          _setGridImageSelection(null);
+        }
+      }
+    }
     if (kDebugMode) _editFrameWatch = Stopwatch()..start();
     // 打字/退格(IME 平台增量应用中)→ 收触摸选区 UI(系统同款:输入
     // 即隐手柄;实际显隐由帧后 _syncHandlesAndContextBar 收敛)。
@@ -741,6 +765,17 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       final selectionMoved = widget.state.selection != _gridSelBaseline;
       if (!stillIsland || gsel.$2 >= imagesLen || selectionMoved) {
         _setGridImageSelection(null);
+      }
+    }
+
+    final currentGrid = _gridImageSel;
+    if (currentGrid != null) {
+      final snapshot = _gridKeys[currentGrid.$1]?.currentState?.selectionFor(
+        currentGrid.$2,
+      );
+      if (snapshot != null && snapshot != _lastGridImageSel) {
+        _lastGridImageSel = snapshot;
+        widget.onGridImageSelectionChanged?.call(snapshot);
       }
     }
 
@@ -2747,8 +2782,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// grid 内瓦片拖拽排序落地:结构命令重排 + 子选中下标跟随(被拖图
   /// 落位 to;from→to 之间的图让位漂移一格)。
   void _onGridReorder(String islandId, int from, int to) {
-    if (!reorderImageInGrid(widget.state, islandId, from, to)) return;
     final sel = _gridImageSel;
+    if (!reorderImageInGrid(widget.state, islandId, from, to)) return;
     if (sel == null || sel.$1 != islandId) return;
     var s = sel.$2;
     if (s == from) {
@@ -3075,18 +3110,49 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                       ib.id,
                       () => GlobalKey<EditorImageGridState>(),
                     ),
-                    onSecondaryMenu: (image, position) => _secondaryObjectMenu(
-                      EditorGridImageTarget(
-                        ib.id,
-                        image.imageIndex,
-                        image.image.src,
-                      ),
-                      position,
-                    ),
+                    onSecondaryMenu: widget.onObjectMenuRequested == null
+                        ? null
+                        : (image, position) => _secondaryObjectMenu(
+                            EditorGridImageTarget(
+                              ib.id,
+                              image.imageIndex,
+                              image.image.src,
+                            ),
+                            position,
+                          ),
                     node: ib.node as ImageGridNode,
+                    onAddImages: widget.onAddGridImages == null
+                        ? null
+                        : () => widget.onAddGridImages!(ib.id),
+                    addingImages: widget.addingImageGrids.contains(ib.id),
+                    controlSurfaceBuilder: widget.gridControlSurfaceBuilder,
+                    onImageMenu: widget.onObjectMenuRequested == null
+                        ? null
+                        : (image, anchor) {
+                            _setGridImageSelection(image);
+                            if (widget.onObjectMenuRequested != null) {
+                              widget.onObjectMenuRequested!(
+                                EditorObjectMenuRequest(
+                                  target: EditorGridImageTarget(
+                                    ib.id,
+                                    image.imageIndex,
+                                    image.image.src,
+                                  ),
+                                  globalAnchorRect: anchor,
+                                  transient: true,
+                                ),
+                              );
+                            } else {
+                              _requestObjectMenu();
+                            }
+                          },
                     islandId: ib.id,
                     showSelectionControls: !widget.objectToolbarManaged,
-                    onContextMenu: _requestObjectMenu,
+                    onContextMenu:
+                        widget.onObjectMenuRequested != null ||
+                            widget.onObjectContextMenuRequest != null
+                        ? _requestObjectMenu
+                        : null,
                     onSelectGrid: widget.objectToolbarManaged
                         ? () {
                             _selectObject(EditorBlockTarget(ib.id));
