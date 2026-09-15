@@ -144,9 +144,7 @@ class EditorImeClient with TextInputClient {
   void syncFromState({bool show = true, bool force = false}) {
     final sel = state.selection;
     if (sel == null) {
-      // Object selection or dismissal invalidates the old text input target.
-      // Late IME updates must not resurrect its caret or edit its paragraph.
-      detach();
+      _suspendTextTarget();
       return;
     }
     if (!sel.isSingleBlock) {
@@ -155,7 +153,10 @@ class EditorImeClient with TextInputClient {
       return;
     }
     final block = state.textBlockById(sel.extent.blockId);
-    if (block == null) return; // 岛/幽灵块:IME 窗口不喂值
+    if (block == null) {
+      _suspendTextTarget();
+      return;
+    }
 
     final value = _format(
       TextEditingValue(
@@ -314,11 +315,23 @@ class EditorImeClient with TextInputClient {
     }
   }
 
+  /// Keep an already visible keyboard during object/menu interaction, but
+  /// remove its document target so late input cannot edit the previous block.
+  void _suspendTextTarget() {
+    if (_attachedBlockId == null) return;
+    _attachedBlockId = null;
+    _recentSent.clear();
+    _lastSent = _format(
+      const TextEditingValue(selection: TextSelection.collapsed(offset: 0)),
+    );
+    if (_connection?.attached ?? false) _connection!.setEditingState(_lastSent);
+  }
+
   void _updateEditingValueImpl(TextEditingValue rawValue) {
     final blockId = _attachedBlockId;
     if (blockId == null) return;
     if (state.selection == null) {
-      detach();
+      _suspendTextTarget();
       return;
     }
     _log(
@@ -406,11 +419,7 @@ class EditorImeClient with TextInputClient {
     // caret 跟随剥换行修正:剥掉的 '\n' 都在插入段内,caret 之前每剥一个
     // 就左移一位 —— 否则后续 diff 锚定与 imeReplace 落点全部右偏。
     var caret = value.selection.extentOffset;
-    final rawDiff = diffWithCaret(
-      prev.text,
-      sanitizedText,
-      caret,
-    );
+    final rawDiff = diffWithCaret(prev.text, sanitizedText, caret);
     if (rawDiff != null && rawDiff.inserted.contains('\n')) {
       final withoutBreaks = rawDiff.inserted.replaceAll('\n', '');
       if (withoutBreaks.isEmpty && rawDiff.oldEnd == rawDiff.start) {
@@ -420,7 +429,8 @@ class EditorImeClient with TextInputClient {
         return;
       }
       // 混合变更:只剥**插入段内**的换行,既有换行不动。
-      sanitizedText = sanitizedText.substring(0, rawDiff.start) +
+      sanitizedText =
+          sanitizedText.substring(0, rawDiff.start) +
           withoutBreaks +
           sanitizedText.substring(rawDiff.start + rawDiff.inserted.length);
       for (var i = 0; i < rawDiff.inserted.length; i++) {
@@ -431,11 +441,7 @@ class EditorImeClient with TextInputClient {
     }
 
     // 三段式 diff(对比上次值,caret 锚定):公共前缀/后缀 → 中段即变更。
-    final diff = diffWithCaret(
-      prev.text,
-      sanitizedText,
-      caret,
-    );
+    final diff = diffWithCaret(prev.text, sanitizedText, caret);
 
     var composing = value.composing;
     // macOS 中文 IME quirk(appflowy non_delta_input_service.dart L274):
@@ -535,8 +541,10 @@ class EditorImeClient with TextInputClient {
       diff.start,
       diff.oldEnd,
       cleanInserted,
-      caretOffset:
-          (caret - phantomCount).clamp(0, sanitizedText.length - phantomCount),
+      caretOffset: (caret - phantomCount).clamp(
+        0,
+        sanitizedText.length - phantomCount,
+      ),
       composing: composing,
     );
 

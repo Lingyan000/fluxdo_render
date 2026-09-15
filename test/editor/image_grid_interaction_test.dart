@@ -90,7 +90,7 @@ List<String> order(EditorState state, [String id = 'grid']) =>
         .toList();
 
 void main() {
-  testWidgets('选中网格图片断开旧输入连接，点回正文后重新正常输入', (tester) async {
+  testWidgets('选中网格图片保留键盘但清空输入目标，点回正文后正常输入', (tester) async {
     final actions = FluxdoEditorContentActions();
     final state = await pumpGrid(tester, actions: actions);
     await tester.tap(find.text('后面的正文'), kind: PointerDeviceKind.mouse);
@@ -99,7 +99,17 @@ void main() {
     actions.selectObject(const EditorGridImageTarget('grid', 0, 'a'));
     await tester.pump();
     expect(state.selection, isNull);
-    expect(tester.testTextInput.hasAnyClients, isFalse);
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    final before = state.blocks;
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: ' 迟到的输入',
+        selection: TextSelection.collapsed(offset: 6),
+      ),
+    );
+    await tester.pump();
+    expect(state.blocks, before);
+    expect(state.selection, isNull);
     await tester.tap(find.text('后面的正文'), kind: PointerDeviceKind.mouse);
     await tester.pump();
     expect(tester.testTextInput.hasAnyClients, isTrue);

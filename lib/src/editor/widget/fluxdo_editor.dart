@@ -339,6 +339,7 @@ class FluxdoEditor extends StatefulWidget {
     this.addingImageGrids = const {},
     this.gridControlSurfaceBuilder,
     this.onCaretRectChanged,
+    this.onEditingActivity,
     this.caretViewportInsets = EdgeInsets.zero,
     this.onLinkCaret,
     this.onIslandSelected,
@@ -363,6 +364,9 @@ class FluxdoEditor extends StatefulWidget {
   /// keyboard space they occupy). Combined with the platform keyboard bounds,
   /// so one coordinator handles caret visibility without double subtraction.
   final EdgeInsets caretViewportInsets;
+
+  /// Confirmed text interaction or platform text input, including undocked IME.
+  final VoidCallback? onEditingActivity;
 
   /// 宿主提供统一对象工具栏时，隐藏块内重复的操作浮层。
   final bool objectToolbarManaged;
@@ -644,6 +648,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     // 打字/退格(IME 平台增量应用中)→ 收触摸选区 UI(系统同款:输入
     // 即隐手柄;实际显隐由帧后 _syncHandlesAndContextBar 收敛)。
     if (_ime.isApplyingPlatformUpdate) {
+      widget.onEditingActivity?.call();
       _touchSelection = false;
       _wantCollapsedBar = false;
     }
@@ -2164,6 +2169,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       return;
     }
     if (!wasPending) return;
+    widget.onEditingActivity?.call();
     final before = widget.state.docRevision;
     widget.state.commitDeferredIrReconcile();
     if (widget.state.docRevision != before) {
