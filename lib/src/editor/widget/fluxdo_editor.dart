@@ -18,12 +18,13 @@ import 'package:flutter/gestures.dart'
         LongPressGestureRecognizer,
         PanGestureRecognizer,
         PointerDeviceKind,
+        PointerEvent,
         TapGestureRecognizer,
         kDoubleTapTimeout,
         kDoubleTapSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'
-    show BoxHitTestResult, RenderMetaData, RenderParagraph;
+    show BoxHitTestResult, RenderMetaData, RenderParagraph, ScrollDirection;
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart';
 
@@ -55,6 +56,7 @@ import '../model/editor_object.dart';
 import 'editor_object_frame.dart';
 import 'editable_paragraph.dart';
 import 'editor_caret.dart';
+import 'editor_caret_reveal.dart';
 import 'editor_code_block.dart';
 import 'editor_collapsed_handle.dart';
 import 'editor_container_shell.dart';
@@ -337,6 +339,7 @@ class FluxdoEditor extends StatefulWidget {
     this.addingImageGrids = const {},
     this.gridControlSurfaceBuilder,
     this.onCaretRectChanged,
+    this.caretViewportInsets = EdgeInsets.zero,
     this.onLinkCaret,
     this.onIslandSelected,
     this.keyEventInterceptor,
@@ -355,6 +358,11 @@ class FluxdoEditor extends StatefulWidget {
   final ValueChanged<String>? onAddGridImages;
   final Set<String> addingImageGrids;
   final Widget Function(BuildContext, Widget)? gridControlSurfaceBuilder;
+
+  /// Host overlays measured inward from the scroll viewport (including any
+  /// keyboard space they occupy). Combined with the platform keyboard bounds,
+  /// so one coordinator handles caret visibility without double subtraction.
+  final EdgeInsets caretViewportInsets;
 
   /// 宿主提供统一对象工具栏时，隐藏块内重复的操作浮层。
   final bool objectToolbarManaged;
@@ -536,6 +544,11 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   @override
   void didUpdateWidget(covariant FluxdoEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.caretViewportInsets != widget.caretViewportInsets) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _afterFrame();
+      });
+    }
     if (oldWidget.contentActions != widget.contentActions) {
       if (oldWidget.contentActions?._state == this) {
         oldWidget.contentActions!._state = null;
@@ -549,16 +562,12 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     super.didChangeDependencies();
     _ime.updateViewId(View.of(context).viewId);
     _bindScrollPosition();
-    // 键盘 inset 变化(弹出/收起动画每帧):清 ensure key + 帧后重算,
-    // 光标跟着键盘上沿浮起(MediaQuery 依赖由这次读取建立)。
-    final inset = MediaQuery.maybeOf(context)?.viewInsets.bottom ?? 0;
-    if (inset != _lastViewInsetBottom) {
-      _lastViewInsetBottom = inset;
-      _lastEnsuredKey = null;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _afterFrame();
-      });
-    }
+    // Keyboard/window changes only reveal a caret we were already following.
+    // Recompute geometry after layout; the tracker preserves reading elsewhere.
+    MediaQuery.maybeOf(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _afterFrame();
+    });
   }
 
   @override
@@ -657,13 +666,17 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   /// 上一次观察到的 primary 焦点态(区分三态迁移用)。
   bool _hadPrimaryFocus = false;
+  bool _hasHadPrimaryFocus = false;
 
   void _onFocusChanged() {
     final primary = _focusNode.hasPrimaryFocus;
     if (primary) {
-      // 聚焦编辑器正文(Tab / 点击 / 从 cell 输入框回来):恢复光标可编辑。
-      // 无选区时落到文档末尾(常规编辑器语义)。
-      if (widget.state.selection == null) {
+      // 仅首次聚焦初始化光标。选中网格图片/关闭对象菜单会主动清空
+      // 文字选区，路由恢复焦点不能把这种空选区重新解释为「跳到文末」。
+      if (!_hasHadPrimaryFocus &&
+          widget.state.selection == null &&
+          _gridImageSel == null &&
+          _explicitObjectTarget == null) {
         final last = widget.state.blocks.last;
         widget.state.updateSelection(
           EditorSelection.collapsed(
@@ -671,6 +684,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
           ),
         );
       }
+      _hasHadPrimaryFocus = true;
       _ime.syncFromState();
     } else if (_hadPrimaryFocus) {
       // 焦点离开编辑器正文(→ 子输入框如表格 cell,或 → 编辑器外):
@@ -1134,7 +1148,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     widget.state.commitDeferredIrReconcile();
     // 最后一帧吸附在布局后完成，下一帧不能再因同一落点启动 ensure 动画；
     // 拖动滚动到此结束，后续编辑或键盘尺寸变化仍可正常触发避让。
-    _lastEnsuredKey = (widget.state.docRevision, widget.state.selection);
+    _caretReveal.suppressNext(widget.state.caretRevealKey);
     _ime.syncFromState(
       show: false,
       force: widget.state.docRevision != beforeRev,
@@ -1359,13 +1373,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   // 软键盘 ensureVisible(S5)
   // -----------------------------------------------------------------
 
-  /// 上次 ensure 的 (docRevision, selection) —— 同 key 不重滚(纯滚动帧
-  /// 不产生新 key,无"用户滚走又被拉回"的反馈环)。
-  (int, EditorSelection?)? _lastEnsuredKey;
-
-  /// 记录的键盘 inset —— 键盘弹出动画期间变化,清 key 让光标跟着键盘
-  /// 上沿浮起。
-  double _lastViewInsetBottom = 0;
+  final _caretReveal = EditorCaretRevealTracker();
 
   /// 光标越出可见区(视口 ∩ 键盘上方)时滚动到可见。仅折叠光标态
   /// (打字/点击);非折叠选区(手柄态)不自动滚 —— 用户在看选区。
@@ -1381,12 +1389,18 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     if (_handleDragging || _floatingCursor) return;
     final sel = widget.state.selection;
     if (sel == null || !sel.isCollapsed) return;
-    final key = (widget.state.docRevision, sel);
-    if (key == _lastEnsuredKey) return;
-    _lastEnsuredKey = key;
-
-    final visible = _visibleViewportRect();
+    final visible = _visibleViewportRect(forCaret: true);
     if (visible == null) return;
+    final userScrolling = pos.userScrollDirection != ScrollDirection.idle;
+    if (!_caretReveal.shouldReveal(
+      key: widget.state.caretRevealKey,
+      caret: caretGlobal,
+      viewport: visible,
+      userScrolling: userScrolling,
+      autoScrolling: pos.isScrollingNotifier.value && !userScrolling,
+    )) {
+      return;
+    }
     const pad = 24.0;
     final visBottom = visible.bottom - pad;
     final visTop = visible.top + pad;
@@ -1412,11 +1426,14 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   }
 
   /// 宿主滚动视口的全局矩形(键盘遮挡部分已截掉)。
-  Rect? _visibleViewportRect() {
+  Rect? _visibleViewportRect({bool forCaret = false}) {
     final scrollableCtx = Scrollable.maybeOf(context)?.context;
     final vpBox = scrollableCtx?.findRenderObject();
     if (vpBox is! RenderBox || !vpBox.attached || !vpBox.hasSize) return null;
-    final vpRect = vpBox.localToGlobal(Offset.zero) & vpBox.size;
+    final bounds = vpBox.localToGlobal(Offset.zero) & vpBox.size;
+    final vpRect = forCaret
+        ? widget.caretViewportInsets.deflateRect(bounds)
+        : bounds;
     final mq = MediaQuery.maybeOf(context);
     final screenH = mq?.size.height ?? vpRect.bottom;
     final kbTop = screenH - (mq?.viewInsets.bottom ?? 0);
@@ -1431,7 +1448,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     final root = _rootKey.currentContext?.findRenderObject();
     if (root is! RenderBox || !root.attached || !root.hasSize) return null;
     var bounds = root.localToGlobal(Offset.zero) & root.size;
-    final viewport = _visibleViewportRect();
+    final viewport = _visibleViewportRect(forCaret: true);
     if (viewport != null) bounds = bounds.intersect(viewport);
     final mq = MediaQuery.maybeOf(context);
     if (mq != null) {
@@ -2024,8 +2041,19 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// 期间显形压住:down 落进 mark 不能当帧显形 —— 若随后长按/滚动
   /// 接管,闪出的定界符又缩回去(闪烁),回流还让手势命中坐标漂移。
   bool _tapPending = false;
+  TapDownDetails? _pendingTouchTap;
 
   void _onTapDown(TapDownDetails details) {
+    // 触屏的 tapDown 在竞技场裁决前就会触发。按住片刻再滚动时，
+    // 不得提前改选区、抢焦点或弹键盘；确认 tapUp 后再统一落光标。
+    if (details.kind != PointerDeviceKind.mouse) {
+      _pendingTouchTap = details;
+      return;
+    }
+    _beginTap(details);
+  }
+
+  void _beginTap(TapDownDetails details) {
     _pendingImageTap = null;
     _pendingImageKind = details.kind;
     _tapUpConsumed = false;
@@ -2083,7 +2111,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     // 但「展开」两件事延迟到松手(Vditor:落下后才展开):
     // - 物化(deferIrReconcile,tapUp 结算);
     // - 显形(_tapPending 压住 revealMarkdownAt,tapUp 放开)。
-    // 长按/滚动随后接管(tapCancel)时光标留在按下位,形态不变。
+    // 鼠标拖选随后接管(tapCancel)时形态不变；触屏到 tapUp 才走这里。
     _touchSelection =
         details.kind == PointerDeviceKind.touch ||
         details.kind == PointerDeviceKind.stylus;
@@ -2102,6 +2130,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// (物化落点 mark 簇/折叠离开的字面)+ 放开显形。这是 ir 展开唯一
   /// 的指针触发点。
   void _onTapUp(TapUpDetails details) {
+    final touchTap = _pendingTouchTap;
+    _pendingTouchTap = null;
+    if (touchTap != null) _beginTap(touchTap);
     final imageTap = _pendingImageTap;
     _pendingImageTap = null;
     if (imageTap != null) {
@@ -2165,6 +2196,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// tap 输给竞技场(长按/滚动/拖选接管)→ 不展开:光标留在按下位,
   /// 延迟收口作废(形态零变化;后续手势自己驱动选区)。
   void _onTapCancel() {
+    _pendingTouchTap = null;
+    _lastTapTime = null;
+    _lastTapGlobal = null;
     _pendingImageTap = null;
     _lastImageClickTime = null;
     _tapUpConsumed = false;
@@ -3364,7 +3398,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
         // RawGestureDetector 按输入设备分流(阅读端 selection_gesture_layer
         // 同款口径):
         // - tap:全设备(落光标/图原子选中/双击选词);
-        // - pan 拖选:**仅鼠标/触控板** —— 触摸的 pan 根本不进竞技场,
+        // - pan 拖选:**仅鼠标按键拖动** —— 触控板双指 pan/zoom 和
+        //   触摸的 pan 不进竞技场，触控板按住点击拖动仍上报 mouse。
         //   竖向滑动完全让给宿主滚动(此前触屏滚页面被编辑器拦成拖选);
         //   回调里判 kind 早退没用,recognizer 赢了竞技场滚动照样被劫持,
         //   必须构造期 supportedDevices 分流;
@@ -3381,14 +3416,15 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                     ..onSecondaryTapUp = _onSecondaryTapUp
                     ..onTapCancel = _onTapCancel,
                 ),
-            PanGestureRecognizer:
-                GestureRecognizerFactoryWithHandlers<PanGestureRecognizer>(
-                  () => PanGestureRecognizer(
+            _ContentPanGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                  _ContentPanGestureRecognizer
+                >(
+                  () => _ContentPanGestureRecognizer(
                     debugOwner: this,
-                    supportedDevices: const {
-                      PointerDeviceKind.mouse,
-                      PointerDeviceKind.trackpad,
-                    },
+                    canStartAt: (point) =>
+                        !_hitsSelfManagedRegion(point) &&
+                        !_hitsIslandRegion(point),
                   ),
                   (r) => r
                     ..onStart = _onPanStart
@@ -3461,4 +3497,18 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       ),
     );
   }
+}
+
+/// Child editors, islands and their controls own their pointer sequences.
+/// Reject before entering the arena: returning from onStart is too late and
+/// would still cancel a child's button tap after a small mouse movement.
+class _ContentPanGestureRecognizer extends PanGestureRecognizer {
+  _ContentPanGestureRecognizer({required this.canStartAt, super.debugOwner})
+    : super(supportedDevices: const {PointerDeviceKind.mouse});
+
+  final bool Function(Offset) canStartAt;
+
+  @override
+  bool isPointerAllowed(PointerEvent event) =>
+      super.isPointerAllowed(event) && canStartAt(event.position);
 }

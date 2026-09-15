@@ -345,133 +345,104 @@ class EditorImageGridState extends State<EditorImageGrid> {
         ),
       ),
     );
-    final body = MouseRegion(
-      cursor: widget.onReorder != null
-          ? SystemMouseCursors.grab
-          : SystemMouseCursors.click,
-      onEnter: (_) {
-        if (_desktop && _dragging == null) setState(() => _hovered = index);
-      },
-      onExit: (_) {
-        if (_hovered == index) setState(() => _hovered = null);
-      },
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _select(index),
-        onSecondaryTapUp: (details) =>
-            _menu(index, details.globalPosition & Size.zero, secondary: true),
-        child: SizedBox(
-          key: _keyFor(index),
-          width: size,
-          height: size,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              photo(),
-              if (selected)
-                IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.primary.withValues(alpha: .14),
-                      borderRadius: BorderRadius.circular(8),
+    final controls = Positioned(
+      right: 4,
+      top: 4,
+      child: Visibility(
+        visible: toolsVisible,
+        maintainState: true,
+        child: TextFieldTapRegion(
+          child: _surface(
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  key: ValueKey('grid-image-view-${widget.islandId}-$index'),
+                  tooltip: '查看图片',
+                  style: IconButton.styleFrom(
+                    minimumSize: Size.square(buttonSize),
+                    maximumSize: Size.square(buttonSize),
+                    padding: const EdgeInsets.all(6),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: widget.onImageOpen == null
+                      ? null
+                      : () {
+                          final selected = selectionFor(index);
+                          if (selected != null) {
+                            widget.onImageOpen!(selected);
+                          }
+                        },
+                  icon: const Icon(Icons.open_in_full_rounded, size: 18),
+                ),
+                Builder(
+                  builder: (buttonContext) => IconButton(
+                    key: ValueKey('grid-image-more-${widget.islandId}-$index'),
+                    tooltip: '图片操作',
+                    style: IconButton.styleFrom(
+                      minimumSize: Size.square(buttonSize),
+                      maximumSize: Size.square(buttonSize),
+                      padding: const EdgeInsets.all(6),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
+                    onPressed: () {
+                      final box = buttonContext.findRenderObject() as RenderBox;
+                      _menu(index, box.localToGlobal(Offset.zero) & box.size);
+                    },
+                    icon: const Icon(Icons.more_horiz_rounded, size: 20),
                   ),
                 ),
-              Positioned(
-                left: 6,
-                bottom: 6,
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: .5),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 3,
-                      ),
-                      child: Text(
-                        '${index + 1}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 4,
-                top: 4,
-                child: Visibility(
-                  visible: toolsVisible,
-                  maintainState: true,
-                  child: TextFieldTapRegion(
-                    child: _surface(
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            key: ValueKey(
-                              'grid-image-view-${widget.islandId}-$index',
-                            ),
-                            tooltip: '查看图片',
-                            style: IconButton.styleFrom(
-                              minimumSize: Size.square(buttonSize),
-                              maximumSize: Size.square(buttonSize),
-                              padding: const EdgeInsets.all(6),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: widget.onImageOpen == null
-                                ? null
-                                : () {
-                                    final selected = selectionFor(index);
-                                    if (selected != null) {
-                                      widget.onImageOpen!(selected);
-                                    }
-                                  },
-                            icon: const Icon(
-                              Icons.open_in_full_rounded,
-                              size: 18,
-                            ),
-                          ),
-                          Builder(
-                            builder: (buttonContext) => IconButton(
-                              key: ValueKey(
-                                'grid-image-more-${widget.islandId}-$index',
-                              ),
-                              tooltip: '图片操作',
-                              style: IconButton.styleFrom(
-                                minimumSize: Size.square(buttonSize),
-                                maximumSize: Size.square(buttonSize),
-                                padding: const EdgeInsets.all(6),
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              onPressed: () {
-                                final box =
-                                    buttonContext.findRenderObject()
-                                        as RenderBox;
-                                _menu(
-                                  index,
-                                  box.localToGlobal(Offset.zero) & box.size,
-                                );
-                              },
-                              icon: const Icon(
-                                Icons.more_horiz_rounded,
-                                size: 20,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+    final body = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _select(index),
+      onSecondaryTapUp: (details) =>
+          _menu(index, details.globalPosition & Size.zero, secondary: true),
+      child: SizedBox(
+        key: _keyFor(index),
+        width: size,
+        height: size,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            photo(),
+            if (selected)
+              IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: .14),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            Positioned(
+              left: 6,
+              bottom: 6,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: .5),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 3,
+                    ),
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -554,55 +525,69 @@ class EditorImageGridState extends State<EditorImageGrid> {
             onDragEnd: (_) => _endDrag(),
             child: dragChild,
           );
-    return DragTarget<_GridImageDrag>(
-      onWillAcceptWithDetails: (details) =>
-          canReorder && _accepts(details.data),
-      onMove: (details) {
-        if (!_accepts(details.data)) return;
-        final rect = selectionFor(index)?.globalRect;
-        if (rect == null) return;
-        final next = (
-          index,
-          (details.offset + details.data.anchor).dx >= rect.center.dx,
-        );
-        if (_dropTarget != next) setState(() => _dropTarget = next);
+    return MouseRegion(
+      cursor: widget.onReorder != null
+          ? SystemMouseCursors.grab
+          : SystemMouseCursors.click,
+      onEnter: (_) {
+        if (_desktop && _dragging == null) setState(() => _hovered = index);
       },
-      onLeave: (_) {
-        if (_dropTarget?.$1 == index) setState(() => _dropTarget = null);
+      onExit: (_) {
+        if (_hovered == index) setState(() => _hovered = null);
       },
-      onAcceptWithDetails: (details) {
-        if (!canReorder || !_accepts(details.data)) return;
-        widget.onReorder!(
-          details.data.from,
-          _destination(
-            details.data,
+      child: DragTarget<_GridImageDrag>(
+        onWillAcceptWithDetails: (details) =>
+            canReorder && _accepts(details.data),
+        onMove: (details) {
+          if (!_accepts(details.data)) return;
+          final rect = selectionFor(index)?.globalRect;
+          if (rect == null) return;
+          final next = (
             index,
-            details.offset + details.data.anchor,
-          ),
-        );
-      },
-      builder: (context, candidates, _) => Stack(
-        clipBehavior: Clip.none,
-        children: [
-          draggable,
-          if (candidates.isNotEmpty && _dropTarget?.$1 == index)
-            Positioned(
-              top: 0,
-              bottom: 0,
-              left: _dropTarget!.$2 ? null : -5,
-              right: _dropTarget!.$2 ? -5 : null,
-              width: 3,
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  key: ValueKey('grid-drop-${widget.islandId}-$index'),
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    borderRadius: BorderRadius.circular(2),
+            (details.offset + details.data.anchor).dx >= rect.center.dx,
+          );
+          if (_dropTarget != next) setState(() => _dropTarget = next);
+        },
+        onLeave: (_) {
+          if (_dropTarget?.$1 == index) setState(() => _dropTarget = null);
+        },
+        onAcceptWithDetails: (details) {
+          if (!canReorder || !_accepts(details.data)) return;
+          widget.onReorder!(
+            details.data.from,
+            _destination(
+              details.data,
+              index,
+              details.offset + details.data.anchor,
+            ),
+          );
+        },
+        builder: (context, candidates, _) => Stack(
+          clipBehavior: Clip.none,
+          children: [
+            draggable,
+            // Controls are siblings of the drag surface: a press on a button
+            // never registers with Draggable, even if the pointer then moves.
+            controls,
+            if (candidates.isNotEmpty && _dropTarget?.$1 == index)
+              Positioned(
+                top: 0,
+                bottom: 0,
+                left: _dropTarget!.$2 ? null : -5,
+                right: _dropTarget!.$2 ? -5 : null,
+                width: 3,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    key: ValueKey('grid-drop-${widget.islandId}-$index'),
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

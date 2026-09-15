@@ -143,8 +143,14 @@ class EditorImeClient with TextInputClient {
   /// 偏离我们发出的 _lastSent,`value != _lastSent` 判不出来)。
   void syncFromState({bool show = true, bool force = false}) {
     final sel = state.selection;
-    if (sel == null || !sel.isSingleBlock) {
-      // 无光标/跨段选区:M1 简化 —— 保持连接但不喂值更新;
+    if (sel == null) {
+      // Object selection or dismissal invalidates the old text input target.
+      // Late IME updates must not resurrect its caret or edit its paragraph.
+      detach();
+      return;
+    }
+    if (!sel.isSingleBlock) {
+      // 跨段选区:保持连接但不喂值更新;
       // 跨段删除由键盘路径处理后回到单段,再走这里同步。
       return;
     }
@@ -311,6 +317,10 @@ class EditorImeClient with TextInputClient {
   void _updateEditingValueImpl(TextEditingValue rawValue) {
     final blockId = _attachedBlockId;
     if (blockId == null) return;
+    if (state.selection == null) {
+      detach();
+      return;
+    }
     _log(
       'recv text="${rawValue.text}" sel=${rawValue.selection.baseOffset}'
       '..${rawValue.selection.extentOffset} '

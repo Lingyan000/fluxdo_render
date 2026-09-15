@@ -90,6 +90,52 @@ List<String> order(EditorState state, [String id = 'grid']) =>
         .toList();
 
 void main() {
+  testWidgets('选中网格图片断开旧输入连接，点回正文后重新正常输入', (tester) async {
+    final actions = FluxdoEditorContentActions();
+    final state = await pumpGrid(tester, actions: actions);
+    await tester.tap(find.text('后面的正文'), kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    actions.selectObject(const EditorGridImageTarget('grid', 0, 'a'));
+    await tester.pump();
+    expect(state.selection, isNull);
+    expect(tester.testTextInput.hasAnyClients, isFalse);
+    await tester.tap(find.text('后面的正文'), kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: ' 后面的正文继续',
+        selection: TextSelection.collapsed(offset: 8),
+      ),
+    );
+    await tester.pump();
+    expect(state.textBlockById('text')!.content.text, '后面的正文继续');
+    expect(order(state), ['a', 'b', 'c']);
+    state.undo();
+    await tester.pump();
+    expect(state.textBlockById('text')!.content.text, '后面的正文');
+  });
+
+  testWidgets('图片操作按钮按下后轻微移动不应启动图片拖拽', (tester) async {
+    final menus = <EditorObjectMenuRequest>[];
+    final state = await pumpGrid(tester, onMenu: menus.add);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.moveTo(gridState(tester).selectionFor(0)!.globalRect.center);
+    await tester.pump();
+    final button = find.byKey(const ValueKey('grid-image-more-grid-0'));
+    final point = tester.getCenter(button);
+    await mouse.down(point);
+    await mouse.moveTo(point + const Offset(3, 2));
+    await tester.pump();
+    expect(find.text('a'), findsOneWidget, reason: '不应生成图片拖拽预览');
+    await mouse.up();
+    await tester.pump();
+    expect(menus, hasLength(1));
+    expect(order(state), ['a', 'b', 'c']);
+    await mouse.removePointer();
+  });
+
   for (final change in ['mode', 'add', 'remove', 'resize', 'drag']) {
     testWidgets('悬浮提示显示时改变图片网格结构不能在布局中重挂浮层 $change', (tester) async {
       final state = await pumpGrid(
@@ -121,7 +167,7 @@ void main() {
       } else if (change == 'resize') {
         tester.view.physicalSize = const Size(400, 900);
       } else {
-        await mouse.down(tester.getCenter(more));
+        await mouse.down(gridState(tester).selectionFor(0)!.globalRect.center);
         await mouse.moveBy(const Offset(30, 20));
       }
       await tester.pump();

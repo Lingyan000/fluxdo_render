@@ -30,3 +30,4 @@ export 'src/editor/widget/editor_collapsed_handle.dart'
     show kCollapsedHandleKey;
 export 'src/editor/widget/editor_toolbar.dart';
 export 'src/editor/widget/fluxdo_editor.dart';
+export 'src/editor/widget/editor_caret_reveal.dart';

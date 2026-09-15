@@ -120,6 +120,10 @@ class _HistoryEntry {
   final EditorSelection? selection;
 }
 
+/// A snapshot of the editing location and its text block. Unrelated document
+/// changes must not request scrolling back to a caret the user scrolled away from.
+typedef EditorCaretRevealKey = (EditorSelection?, TextBlock?);
+
 /// 编辑器状态机。
 class EditorState extends ChangeNotifier {
   EditorState({required List<EditorBlock> blocks})
@@ -176,6 +180,13 @@ class EditorState extends ChangeNotifier {
 
   EditorSelection? _selection;
   EditorSelection? get selection => _selection;
+
+  /// Used by caret scrolling. The block snapshot also detects edits that keep
+  /// the same offset, unlike selection alone.
+  EditorCaretRevealKey get caretRevealKey => (
+    _selection,
+    _selection == null ? null : textBlockById(_selection!.extent.blockId),
+  );
 
   /// 当前块内的 composing 区间(编辑文本坐标),empty = 无。
   TextRange _composing = TextRange.empty;

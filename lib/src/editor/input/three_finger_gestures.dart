@@ -17,7 +17,7 @@
 /// 文本编辑手势。)
 ///
 /// 与既有手势的关系:编辑器现有 tap/longPress 是单指、pan 已用
-/// supportedDevices 限定给 mouse/trackpad,多指手势位是空的,不冲突。
+/// supportedDevices 限定给 mouse,触控板 pan/zoom 完全交给滚动容器。
 library;
 
 import 'package:flutter/gestures.dart';
@@ -69,6 +69,11 @@ class ThreeFingerGestureRecognizer extends ScaleGestureRecognizer {
     onUpdate = _handleUpdate;
     onEnd = _handleEnd;
   }
+
+  // ScaleGestureRecognizer 单独接收 pan/zoom，不受触屏 supportedDevices
+  // 限制；必须在入竞技场前拒绝，否则双指滚动会被当成缩放并吞掉。
+  @override
+  bool isPointerPanZoomAllowed(PointerPanZoomStartEvent event) => false;
 
   /// 实时跟踪每根手指位置 —— scale 噪声太大,只能自己算跨度。
   final Map<int, Offset> _points = {};
