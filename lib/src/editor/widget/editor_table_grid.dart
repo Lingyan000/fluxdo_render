@@ -53,6 +53,7 @@ class EditorTableGrid extends StatefulWidget {
     required this.onChanged,
     this.selected = false,
     this.onSelectRequest,
+    this.onContextMenu,
   });
 
   final TableNode node;
@@ -66,6 +67,7 @@ class EditorTableGrid extends StatefulWidget {
   /// 左上角选择柄点击 → 编辑器整选本表格块(选中后退格/Delete 删整表;
   /// cell 区自管让路后这是块级选择的唯一入口)。
   final VoidCallback? onSelectRequest;
+  final VoidCallback? onContextMenu;
 
   @override
   State<EditorTableGrid> createState() => _EditorTableGridState();
@@ -94,8 +96,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
 
   /// 柄/加条的"活跃"判定:桌面 = hover;触屏 = 编辑/选中态常显。
   bool get _handlesActive =>
-      _hoverGrid ||
-      (!_hoverCapable && (_editing != null || widget.selected));
+      _hoverGrid || (!_hoverCapable && (_editing != null || widget.selected));
 
   @override
   void initState() {
@@ -125,7 +126,11 @@ class _EditorTableGridState extends State<EditorTableGrid> {
             c < row.length ? tableCellToMarkdown(row[c]) : '',
         ],
     ];
-    if (_cells.isEmpty) _cells = [['']];
+    if (_cells.isEmpty) {
+      _cells = [
+        [''],
+      ];
+    }
   }
 
   @override
@@ -138,9 +143,8 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   int get _rows => _cells.length;
   int get _cols => _cells.isEmpty ? 0 : _cells.first.length;
 
-  void _emit() => widget.onChanged(
-        tableGridToMarkdown(_cells, hasHeader: _hasHeader),
-      );
+  void _emit() =>
+      widget.onChanged(tableGridToMarkdown(_cells, hasHeader: _hasHeader));
 
   // -----------------------------------------------------------------
   // cell 编辑
@@ -261,9 +265,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
       // 斜杠/插入菜单同款)
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: scheme.outlineVariant.withValues(alpha: 0.5),
-        ),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       color: scheme.surfaceContainerLow,
       items: [
@@ -271,11 +273,13 @@ class _EditorTableGridState extends State<EditorTableGrid> {
           PopupMenuItem<String>(
             value: value,
             height: 38,
-            child: Row(children: [
-              Icon(icon, size: 15, color: scheme.onSurfaceVariant),
-              const SizedBox(width: 10),
-              Text(label, style: const TextStyle(fontSize: 13)),
-            ]),
+            child: Row(
+              children: [
+                Icon(icon, size: 15, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Text(label, style: const TextStyle(fontSize: 13)),
+              ],
+            ),
           ),
       ],
     );
@@ -340,18 +344,20 @@ class _EditorTableGridState extends State<EditorTableGrid> {
             // 顶部列柄条(hover 表格淡显全部,hover 该列高亮)
             Padding(
               padding: const EdgeInsets.only(left: _kHandleThickness + 2),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                for (var c = 0; c < _cols; c++)
-                  _ColHandle(
-                    opacity: !_handlesActive
-                        ? 0
-                        : (_hoverCol == c ? 1.0 : 0.35),
-                    width: _kCellWidth + (c > 0 ? 1 : 0),
-                    onTapDown: (pos) => _showColMenu(c, pos),
-                    onHover: (h) =>
-                        setState(() => _hoverCol = h ? c : null),
-                  ),
-              ]),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var c = 0; c < _cols; c++)
+                    _ColHandle(
+                      opacity: !_handlesActive
+                          ? 0
+                          : (_hoverCol == c ? 1.0 : 0.35),
+                      width: _kCellWidth + (c > 0 ? 1 : 0),
+                      onTapDown: (pos) => _showColMenu(c, pos),
+                      onHover: (h) => setState(() => _hoverCol = h ? c : null),
+                    ),
+                ],
+              ),
             ),
             // IntrinsicHeight:stretch 的右缘加列条随表格高(Column 的
             // 无界高约束下 stretch 会要求无限高 → 布局崩)
@@ -394,54 +400,76 @@ class _EditorTableGridState extends State<EditorTableGrid> {
         _hoverRow = null;
         _hoverCol = null;
       }),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: body,
-          ),
-          // 左上角块级选择柄(hover 或已选中显示;在 MetaData 外 ——
-          // 点击走编辑器整选,选中后退格删整表)
-          if (widget.onSelectRequest != null &&
-              (_handlesActive || widget.selected))
-            Positioned(
-              left: -2,
-              top: -6,
-              child: Material(
-                type: MaterialType.transparency,
-                child: Tooltip(
-                  message: '选中表格(选中后退格删除)',
-                  child: InkWell(
-                    onTap: widget.onSelectRequest,
-                    borderRadius: BorderRadius.circular(4),
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: widget.selected
-                            ? scheme.primary
-                            : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                          color: widget.selected
-                              ? scheme.primary
-                              : scheme.outlineVariant,
-                        ),
+      child: widget.onContextMenu != null
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                MetaData(
+                  metaData: kEditorSelfManagedRegion,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
                       ),
-                      child: Icon(
-                        Icons.drag_indicator,
-                        size: 12,
-                        color: widget.selected
-                            ? scheme.onPrimary
-                            : scheme.onSurfaceVariant,
-                      ),
+                      onPressed: () {
+                        widget.onSelectRequest?.call();
+                        widget.onContextMenu!();
+                      },
+                      icon: const Icon(Icons.more_horiz_rounded, size: 20),
+                      label: const Text('表格操作'),
                     ),
                   ),
                 ),
-              ),
+                body,
+              ],
+            )
+          : Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Padding(padding: const EdgeInsets.only(top: 4), child: body),
+                // 左上角块级选择柄(hover 或已选中显示;在 MetaData 外 ——
+                // 点击走编辑器整选,选中后退格删整表)
+                if (widget.onSelectRequest != null &&
+                    (_handlesActive || widget.selected))
+                  Positioned(
+                    left: -2,
+                    top: -6,
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: Tooltip(
+                        message: '选中表格(选中后退格删除)',
+                        child: InkWell(
+                          onTap: widget.onSelectRequest,
+                          borderRadius: BorderRadius.circular(4),
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: widget.selected
+                                  ? scheme.primary
+                                  : scheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: widget.selected
+                                    ? scheme.primary
+                                    : scheme.outlineVariant,
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.drag_indicator,
+                              size: 12,
+                              color: widget.selected
+                                  ? scheme.onPrimary
+                                  : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-        ],
-      ),
     );
   }
 
@@ -476,11 +504,10 @@ class _EditorTableGridState extends State<EditorTableGrid> {
               child: Container(
                 decoration: BoxDecoration(
                   color: isHeader
-                      ? scheme.surfaceContainerHighest
-                          .withValues(alpha: 0.55)
+                      ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
                       : (widget.selected
-                          ? scheme.primary.withValues(alpha: 0.06)
-                          : null),
+                            ? scheme.primary.withValues(alpha: 0.06)
+                            : null),
                   border: r > 0
                       ? Border(top: BorderSide(color: borderColor))
                       : null,
@@ -493,11 +520,11 @@ class _EditorTableGridState extends State<EditorTableGrid> {
                         decoration: c > 0
                             ? BoxDecoration(
                                 border: Border(
-                                    left: BorderSide(color: borderColor)),
+                                  left: BorderSide(color: borderColor),
+                                ),
                               )
                             : null,
-                        child:
-                            _buildCell(r, c, isHeader, textStyle, scheme),
+                        child: _buildCell(r, c, isHeader, textStyle, scheme),
                       ),
                   ],
                 ),
@@ -536,8 +563,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
           cursorHeight: 15,
           decoration: const InputDecoration(
             isDense: true,
-            contentPadding:
-                EdgeInsets.symmetric(horizontal: 7, vertical: 7),
+            contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 7),
             border: InputBorder.none,
           ),
           onSubmitted: (_) => _commitCell(),
@@ -558,8 +584,8 @@ class _EditorTableGridState extends State<EditorTableGrid> {
             text.isEmpty ? ' ' : text,
             style: text.isEmpty
                 ? style.copyWith(
-                    color:
-                        scheme.onSurfaceVariant.withValues(alpha: 0.4))
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                  )
                 : style,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -604,8 +630,9 @@ class _ColHandle extends StatelessWidget {
                 width: 28,
                 height: 5,
                 decoration: BoxDecoration(
-                  color: scheme.onSurfaceVariant
-                      .withValues(alpha: opacity >= 1 ? 0.7 : 0.45),
+                  color: scheme.onSurfaceVariant.withValues(
+                    alpha: opacity >= 1 ? 0.7 : 0.45,
+                  ),
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -648,8 +675,9 @@ class _RowHandle extends StatelessWidget {
                 width: 5,
                 height: 22,
                 decoration: BoxDecoration(
-                  color: scheme.onSurfaceVariant
-                      .withValues(alpha: opacity >= 1 ? 0.7 : 0.45),
+                  color: scheme.onSurfaceVariant.withValues(
+                    alpha: opacity >= 1 ? 0.7 : 0.45,
+                  ),
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -708,8 +736,7 @@ class _EdgeAddBarState extends State<_EdgeAddBar> {
         child: Icon(
           Icons.add,
           size: 11,
-          color:
-              _hover ? scheme.primary : scheme.onSurfaceVariant,
+          color: _hover ? scheme.primary : scheme.onSurfaceVariant,
         ),
       ),
     );

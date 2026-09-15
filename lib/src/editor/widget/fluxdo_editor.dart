@@ -22,7 +22,8 @@ import 'package:flutter/gestures.dart'
         kDoubleTapTimeout,
         kDoubleTapSlop;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show BoxHitTestResult, RenderMetaData;
+import 'package:flutter/rendering.dart'
+    show BoxHitTestResult, RenderMetaData, RenderParagraph;
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart';
 
@@ -40,6 +41,8 @@ import '../../selection/hit_tester.dart';
 import '../../selection/selection_exporter.dart';
 import '../../selection/selection_geometry.dart';
 import '../../selection/selection_handles.dart';
+import '../../selection/selection_highlight_painter.dart'
+    show mergeSelectionBoxesByLine;
 import '../../selection/selection_magnifier.dart';
 import '../../selection/selection_registry.dart';
 import '../../selection/selection_scope.dart';
@@ -48,6 +51,8 @@ import '../input/editor_key_handler.dart';
 import '../input/three_finger_gestures.dart';
 import '../model/editor_image_commands.dart';
 import '../model/editor_state.dart';
+import '../model/editor_object.dart';
+import 'editor_object_frame.dart';
 import 'editable_paragraph.dart';
 import 'editor_caret.dart';
 import 'editor_code_block.dart';
@@ -260,6 +265,52 @@ class FluxdoEditorContentActions {
   void cut() => _state?._clipboardCut();
 
   void paste() => _state?._clipboardPaste();
+
+  void selectObject(EditorObjectTarget target, {bool showMenu = false}) {
+    _state?._selectObject(target);
+    if (showMenu) _state?._requestObjectMenu();
+  }
+
+  /// 宿主滚动层暂时屏蔽正文时，仍可按全局鼠标位置打开对象菜单。
+  void showObjectMenuAt(Offset position) => _state?._onSecondaryTapUp(
+    TapUpDetails(globalPosition: position, kind: PointerDeviceKind.mouse),
+  );
+
+  /// Visible painted content in global coordinates, measured only on demand.
+  /// Line and image bounds leave usable blank space beside short content.
+  List<Rect> visibleContentRects() =>
+      _state?._visiblePaintedRects() ?? const [];
+
+  Rect? visibleViewportRect() => _state?._visibleViewportRect();
+
+  EditorObjectSelection? get objectSelection =>
+      _state?._computeObjectSelection();
+
+  void continueAfterDocument() => _state?._continueAfterDocument();
+
+  /// The outer block, including the paragraph/grid that contains an image.
+  Rect? objectBounds(EditorObjectTarget target) {
+    final state = _state;
+    if (state == null) return null;
+    final object = resolveEditorObject(state.widget.state, target);
+    if (object == null) return null;
+    final key = target is EditorContainerTarget
+        ? state._containerKeys[(target.groupId, object.blocks.first.id)]
+        : state._blockKeys[target.blockId];
+    return state._objectRect(key);
+  }
+
+  /// Block/container hit testing for desktop hover affordances. Read-only:
+  /// never modifies the text selection, focus, or document revision.
+  EditorObjectSelection? blockAt(Offset position, {double leadingSlop = 0}) =>
+      _state?._blockAt(position, leadingSlop: leadingSlop);
+
+  void clearObjectSelection() {
+    _state?._explicitObjectTarget = null;
+    _state?._setGridImageSelection(null);
+    _editorState?.updateSelection(null);
+    _state?._ime.syncFromState(show: false);
+  }
 }
 
 class FluxdoEditor extends StatefulWidget {
@@ -288,9 +339,25 @@ class FluxdoEditor extends StatefulWidget {
     this.keyEventInterceptor,
     this.virtualPointer,
     this.contentActions,
+    this.objectToolbarManaged = false,
+    this.emptyParagraphHint,
+    this.emptyParagraphHintKey,
+    this.showTrailingParagraph = false,
+    this.onObjectContextMenuRequest,
+    this.onObjectSelectionChanged,
+    this.onObjectMenuRequested,
   });
 
   final EditorState state;
+
+  /// 宿主提供统一对象工具栏时，隐藏块内重复的操作浮层。
+  final bool objectToolbarManaged;
+  final String? emptyParagraphHint;
+  final Key? emptyParagraphHintKey;
+  final bool showTrailingParagraph;
+  final VoidCallback? onObjectContextMenuRequest;
+  final ValueChanged<EditorObjectSelection?>? onObjectSelectionChanged;
+  final ValueChanged<EditorObjectMenuRequest>? onObjectMenuRequested;
 
   final TextStyle? baseTextStyle;
 
@@ -411,6 +478,21 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   /// 岛容器 key(整选矩形上抛用;按块 id 稳定)。
   final Map<String, GlobalKey> _islandKeys = {};
+  final Map<String, GlobalKey> _blockKeys = {};
+  final Map<(String, String), GlobalKey> _containerKeys = {};
+  final Map<String, GlobalKey<EditorImageGridState>> _gridKeys = {};
+  EditorObjectTarget? _explicitObjectTarget;
+  EditorObjectSelection? _lastObjectSelection;
+  bool _objectGeometryScheduled = false;
+
+  void _scheduleObjectGeometry() {
+    if (_lastObjectSelection == null || _objectGeometryScheduled) return;
+    _objectGeometryScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _objectGeometryScheduled = false;
+      if (mounted) _afterFrame();
+    });
+  }
 
   /// 编辑器局部坐标系的光标矩形 + 配对修订号(帧后由 hit_tester 计算)。
   ///
@@ -518,6 +600,13 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   void _onStateChanged() {
     if (!mounted) return;
+    final explicit = _explicitObjectTarget;
+    if (explicit != null) {
+      final object = resolveEditorObject(widget.state, explicit);
+      if (object == null || object.selection != widget.state.selection) {
+        _explicitObjectTarget = null;
+      }
+    }
     if (kDebugMode) _editFrameWatch = Stopwatch()..start();
     // 打字/退格(IME 平台增量应用中)→ 收触摸选区 UI(系统同款:输入
     // 即隐手柄;实际显隐由帧后 _syncHandlesAndContextBar 收敛)。
@@ -587,7 +676,11 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
     // 失焦时高亮层也清掉(选区数据保留在 EditorState,聚焦回来即恢复);
     // 焦点在 cell 输入框时同理(hasPrimaryFocus)。
-    _controller.selection = _focusNode.hasPrimaryFocus
+    final imageSelection = _computeImageAtomSelection();
+    _controller.outlineSelection = imageSelection != null;
+    _controller.selection =
+        (_focusNode.hasPrimaryFocus || imageSelection != null) &&
+            _explicitObjectTarget == null
         ? _toDocumentSelection(widget.state.selection)
         : null;
 
@@ -615,7 +708,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
 
     // 图片原子选中态上抛(变化才通知;rect 变化也算 —— 浮层跟随)
-    final imgSel = _computeImageAtomSelection();
+    final imgSel = imageSelection;
     if (imgSel != _lastImageAtomSel) {
       _lastImageAtomSel = imgSel;
       widget.onImageAtomSelectionChanged?.call(imgSel);
@@ -651,6 +744,11 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       }
     }
 
+    final objectSelection = _computeObjectSelection();
+    if (objectSelection != _lastObjectSelection) {
+      _lastObjectSelection = objectSelection;
+      widget.onObjectSelectionChanged?.call(objectSelection);
+    }
     _syncHandlesAndContextBar();
   }
 
@@ -685,6 +783,12 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   /// 帧后统一收敛手柄/动作条显隐(唯一真源:state.selection + 触摸来源)。
   void _syncHandlesAndContextBar() {
+    if (_explicitObjectTarget != null || _gridImageSel != null) {
+      _handles?.hide();
+      _collapsedHandle?.hide();
+      _contextBar?.hide();
+      return;
+    }
     final sel = widget.state.selection;
     final touchReady = _touchSelection && _focusNode.hasPrimaryFocus;
     final showRange =
@@ -1075,7 +1179,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   }
 
   /// 按当前选区几何弹动作条(复制/剪切/粘贴/全选)。
-  void _showContextBarForSelection() {
+  void _showContextBarForSelection({Offset? anchor}) {
     final docSel = _controller.selection;
     if (docSel == null) return;
     final data = SelectionExporter(_controller.registry).export(docSel);
@@ -1084,7 +1188,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       context: context,
       tapRegionGroupId: _controller,
     )).show(
-      selectionBounds: data.globalBounds,
+      selectionBounds: anchor == null
+          ? data.globalBounds
+          : Rect.fromLTWH(anchor.dx, anchor.dy, 0, 0),
       items: [
         ContextMenuButtonItem(
           type: ContextMenuButtonType.copy,
@@ -1114,6 +1220,16 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             // 全选后保持触摸态,手柄/动作条按新选区重弹
           },
         ),
+        if (widget.onObjectSelectionChanged != null)
+          ContextMenuButtonItem(
+            label: '块操作',
+            onPressed: () {
+              final id = widget.state.selection?.extent.blockId;
+              if (id == null) return;
+              _selectObject(EditorBlockTarget(id));
+              _requestObjectMenu();
+            },
+          ),
       ],
     );
   }
@@ -1140,6 +1256,16 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             _wantCollapsedBar = false;
           },
         ),
+        if (widget.onObjectSelectionChanged != null)
+          ContextMenuButtonItem(
+            label: '块操作',
+            onPressed: () {
+              final id = widget.state.selection?.extent.blockId;
+              if (id == null) return;
+              _selectObject(EditorBlockTarget(id));
+              _requestObjectMenu();
+            },
+          ),
       ],
     );
   }
@@ -1275,7 +1401,12 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     final mq = MediaQuery.maybeOf(context);
     if (mq != null) {
       bounds = bounds.intersect(
-        Rect.fromLTRB(0, 0, mq.size.width, mq.size.height - mq.viewInsets.bottom),
+        Rect.fromLTRB(
+          0,
+          0,
+          mq.size.width,
+          mq.size.height - mq.viewInsets.bottom,
+        ),
       );
     }
     return bounds;
@@ -1380,7 +1511,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// 当前恰好整选的单岛(选区 = 岛 0..1)→ 岛块 + 全局矩形;其余 null。
   IslandSelection? _computeIslandSelection() {
     final norm = widget.state.normalizedSelection();
-    if (norm == null || !_focusNode.hasPrimaryFocus) return null;
+    if (norm == null) return null;
     final (from, to) = norm;
     if (from.blockId != to.blockId) return null;
     if (from.offset != 0 || to.offset != 1) return null;
@@ -1526,6 +1657,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   TextAffinity _caretAffinity = TextAffinity.downstream;
 
   Rect? _computeLocalCaretRect() {
+    if (_explicitObjectTarget != null) return null;
     final sel = widget.state.selection;
     // hasPrimaryFocus:焦点在表格 cell 等子输入框时编辑器光标必须消失
     // (否则与 TextField 自己的光标形成双光标)。浮动/虚拟指针进行中
@@ -1848,6 +1980,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// 本次按下已被专用路径消费(自管区/岛区/图原子整选/双击选词/无命中)
   /// → 松手(tapUp)不再落光标。
   bool _tapUpConsumed = false;
+  Offset? _pendingImageTap;
+  PointerDeviceKind? _pendingImageKind;
+  DateTime? _lastImageClickTime;
+  (String, int)? _lastImageClick;
 
   /// tap 序列进行中(down 已落光标,等 up 结算展开 / cancel 作废)。
   /// 期间显形压住:down 落进 mark 不能当帧显形 —— 若随后长按/滚动
@@ -1855,6 +1991,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   bool _tapPending = false;
 
   void _onTapDown(TapDownDetails details) {
+    _pendingImageTap = null;
+    _pendingImageKind = details.kind;
     _tapUpConsumed = false;
     // 点在表格网格等自管交互区:编辑器手势完全让路 —— 抢焦点/设选区/
     // 弹 IME 都不做(否则:选区兜底跳到邻块 + 编辑器光标与 cell
@@ -1881,7 +2019,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
 
     // 图片原子探测(**先于落光标**,官方 NodeSelection 语义)
-    if (_trySelectImageAtomAt(hit.$1, details.globalPosition)) {
+    if (_trySelectImageAtomAt(hit.$1, details.globalPosition, select: false)) {
+      _pendingImageTap = details.globalPosition;
       _tapUpConsumed = true;
       return;
     }
@@ -1928,6 +2067,30 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// (物化落点 mark 簇/折叠离开的字面)+ 放开显形。这是 ir 展开唯一
   /// 的指针触发点。
   void _onTapUp(TapUpDetails details) {
+    final imageTap = _pendingImageTap;
+    _pendingImageTap = null;
+    if (imageTap != null) {
+      _tapUpConsumed = false;
+      final hit = _hitAtGlobal(details.globalPosition);
+      if (hit != null) _trySelectImageAtomAt(hit.$1, details.globalPosition);
+      if (_pendingImageKind == PointerDeviceKind.mouse) {
+        final selected = _computeImageAtomSelection();
+        if (selected != null) {
+          final now = DateTime.now();
+          final identity = (selected.blockId, selected.offset);
+          if (_lastImageClick == identity &&
+              _lastImageClickTime != null &&
+              now.difference(_lastImageClickTime!) < kDoubleTapTimeout) {
+            widget.onImageAtomOpenRequest?.call(selected);
+            _lastImageClickTime = null;
+          } else {
+            _lastImageClick = identity;
+            _lastImageClickTime = now;
+          }
+        }
+      }
+      return;
+    }
     final wasPending = _tapPending;
     _tapPending = false;
     if (_tapUpConsumed) {
@@ -1967,6 +2130,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// tap 输给竞技场(长按/滚动/拖选接管)→ 不展开:光标留在按下位,
   /// 延迟收口作废(形态零变化;后续手势自己驱动选区)。
   void _onTapCancel() {
+    _pendingImageTap = null;
+    _lastImageClickTime = null;
     _tapUpConsumed = false;
     if (_tapPending) {
       _tapPending = false;
@@ -1981,7 +2146,11 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// 命中判定 = tap 点**落在图的渲染盒内**(getBoxesForSelection):
   /// 只按"最近文本位置左右一格"判会把图片行右侧整片空白都当图 ——
   /// 点空白误选图/误开查看器。
-  bool _trySelectImageAtomAt(EditorPosition pos, Offset global) {
+  bool _trySelectImageAtomAt(
+    EditorPosition pos,
+    Offset global, {
+    bool select = true,
+  }) {
     final tapBlock = widget.state.textBlockById(pos.blockId);
     if (tapBlock == null) return false;
     for (final off in [pos.offset, pos.offset - 1]) {
@@ -1989,11 +2158,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       final atom = tapBlock.content.atoms[off];
       if (atom is! ImageRun) continue;
       if (!_tapInsideAtomBox(tapBlock.id, off, global)) continue;
+      if (!select) return true;
       final already = _imageAtomSelectionAt(tapBlock.id, off) != null;
-      if (already) {
-        final sel = _lastImageAtomSel;
-        if (sel != null) widget.onImageAtomOpenRequest?.call(sel);
-      } else {
+      if (!already) {
         widget.state.sealHistory();
         widget.state.updateSelection(
           EditorSelection(
@@ -2006,6 +2173,323 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       return true;
     }
     return false;
+  }
+
+  void _selectObject(EditorObjectTarget target) {
+    final object = resolveEditorObject(widget.state, target);
+    if (object == null) return;
+    if (target is EditorGridImageTarget) {
+      final image = _gridKeys[target.blockId]?.currentState?.selectionFor(
+        target.index,
+      );
+      if (image != null) {
+        _explicitObjectTarget = null;
+        _setGridImageSelection(image);
+        _afterFrame();
+      }
+      return;
+    }
+    _explicitObjectTarget =
+        target is EditorBlockTarget || target is EditorContainerTarget
+        ? target
+        : null;
+    _setGridImageSelection(null);
+    _focusNode.requestFocus();
+    widget.state.sealHistory();
+    widget.state.updateSelection(object.selection);
+    _touchSelection = false;
+    _contextBar?.hide();
+    _ime.syncFromState(show: false);
+    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) => _afterFrame());
+  }
+
+  void _continueAfterDocument() {
+    _explicitObjectTarget = null;
+    _setGridImageSelection(null);
+    widget.state.continueAfterDocument();
+    _focusNode.requestFocus();
+    _ime.syncFromState();
+  }
+
+  EditorObjectSelection? _computeObjectSelection() {
+    final grid = _gridImageSel;
+    if (grid != null) {
+      final image = _gridKeys[grid.$1]?.currentState?.selectionFor(grid.$2);
+      if (image != null) {
+        return EditorObjectSelection(
+          target: EditorGridImageTarget(grid.$1, grid.$2, image.image.src),
+          globalRect: image.globalRect,
+          revision: widget.state.docRevision,
+        );
+      }
+    }
+    final explicit = _explicitObjectTarget;
+    if (explicit != null) {
+      final object = resolveEditorObject(widget.state, explicit);
+      if (object == null) return null;
+      final key = explicit is EditorContainerTarget
+          ? _containerKeys[(explicit.groupId, object.blocks.first.id)]
+          : _blockKeys[explicit.blockId];
+      final rect = _objectRect(key);
+      return rect == null
+          ? null
+          : EditorObjectSelection(
+              target: explicit,
+              globalRect: rect,
+              revision: widget.state.docRevision,
+            );
+    }
+    final image = _computeImageAtomSelection();
+    if (image != null) {
+      return EditorObjectSelection(
+        target: EditorImageTarget(image.blockId, image.offset, image.image.src),
+        globalRect: image.globalRect,
+        revision: widget.state.docRevision,
+      );
+    }
+    final island = _computeIslandSelection();
+    return island == null
+        ? null
+        : EditorObjectSelection(
+            target: EditorBlockTarget(island.island.id),
+            globalRect:
+                _objectRect(_blockKeys[island.island.id]) ?? island.globalRect,
+            revision: widget.state.docRevision,
+          );
+  }
+
+  Rect? _objectRect(GlobalKey? key) {
+    final box = key?.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  List<Rect> _visiblePaintedRects() {
+    final viewport = _visibleViewportRect();
+    final result = <Rect>[];
+    void add(Rect? rect) {
+      if (rect == null || !rect.isFinite || rect.isEmpty) return;
+      final visible = viewport == null ? rect : rect.intersect(viewport);
+      if (!visible.isEmpty) result.add(visible);
+    }
+
+    // Header rows stretch across their container, but only their title/icons
+    // occupy that space. Inspect painted glyphs, not the row's layout width.
+    void addHeader(GlobalKey? key, Rect bounds) {
+      final root = key?.currentContext?.findRenderObject();
+      if (root == null) return;
+      final header = Rect.fromLTRB(
+        bounds.left,
+        bounds.top,
+        bounds.right,
+        (bounds.top + 48).clamp(bounds.top, bounds.bottom),
+      );
+      void visit(RenderObject object) {
+        if (object is RenderBox && object.attached && object.hasSize) {
+          final rect = object.localToGlobal(Offset.zero) & object.size;
+          if (!rect.isFinite || !rect.overlaps(header)) return;
+          if (object is RenderParagraph) {
+            for (final line in mergeSelectionBoxesByLine(
+              object.getBoxesForSelection(
+                TextSelection(
+                  baseOffset: 0,
+                  extentOffset: object.text.toPlainText().length,
+                ),
+              ),
+            )) {
+              add(
+                line.shift(object.localToGlobal(Offset.zero)).intersect(header),
+              );
+            }
+          }
+        }
+        object.visitChildren(visit);
+      }
+
+      visit(root);
+    }
+
+    for (final entry in _blockKeys.entries) {
+      final rect = _objectRect(entry.value);
+      if (rect == null || (viewport != null && !rect.overlaps(viewport))) {
+        continue;
+      }
+      final index = widget.state.indexOfBlock(entry.key);
+      if (index < 0) continue;
+      final block = widget.state.blocks[index];
+      if (block is TextBlock) {
+        final paragraph = _controller.registry
+            .byId(_renderIdOf(index))
+            ?.paragraph;
+        if (paragraph == null || !paragraph.attached || !paragraph.hasSize) {
+          add(rect);
+          continue;
+        }
+        final boxes = paragraph.getBoxesForSelection(
+          TextSelection(
+            baseOffset: 0,
+            extentOffset: paragraph.text.toPlainText().length,
+          ),
+        );
+        final origin = paragraph.localToGlobal(Offset.zero);
+        for (final line in mergeSelectionBoxesByLine(boxes)) {
+          add(line.shift(origin));
+        }
+      } else if (block is IslandBlock && block.node is ImageGridNode) {
+        final grid = _gridKeys[block.id]?.currentState;
+        if (grid == null) {
+          add(rect);
+          continue;
+        }
+        final node = block.node as ImageGridNode;
+        for (var i = 0; i < node.images.length; i++) {
+          add(grid.selectionFor(i)?.globalRect.intersect(rect));
+        }
+        addHeader(entry.value, rect);
+      } else {
+        add(rect);
+      }
+    }
+    for (final key in _containerKeys.values) {
+      final rect = _objectRect(key);
+      if (rect != null && (viewport == null || rect.overlaps(viewport))) {
+        addHeader(key, rect);
+      }
+    }
+    return result;
+  }
+
+  EditorObjectSelection? _blockAt(Offset position, {double leadingSlop = 0}) {
+    final viewport = _visibleViewportRect();
+    if (viewport != null && !viewport.contains(position)) return null;
+    EditorObjectSelection snapshot(EditorObjectTarget target, Rect rect) =>
+        EditorObjectSelection(
+          target: target,
+          globalRect: rect,
+          revision: widget.state.docRevision,
+        );
+    final blocks = <(String, Rect)>[];
+    for (final entry in _blockKeys.entries) {
+      final rect = _objectRect(entry.value);
+      if (rect == null || !rect.isFinite || rect.isEmpty) continue;
+      if (rect.contains(position)) {
+        return snapshot(EditorBlockTarget(entry.key), rect);
+      }
+      if (leadingSlop > 0 &&
+          Rect.fromLTRB(
+            rect.left - leadingSlop,
+            rect.top,
+            rect.right,
+            rect.bottom,
+          ).contains(position)) {
+        blocks.add((entry.key, rect));
+      }
+    }
+    EditorObjectSelection? containerAt(double slop) {
+      EditorObjectSelection? closest;
+      var area = double.infinity;
+      for (final entry in _containerKeys.entries) {
+        final rect = _objectRect(entry.value);
+        if (rect == null || !rect.isFinite || rect.isEmpty) continue;
+        if (!Rect.fromLTRB(
+          rect.left - slop,
+          rect.top,
+          rect.right,
+          rect.bottom,
+        ).contains(position)) {
+          continue;
+        }
+        if (rect.width * rect.height < area) {
+          closest = snapshot(
+            EditorContainerTarget(entry.key.$2, entry.key.$1),
+            rect,
+          );
+          area = rect.width * rect.height;
+        }
+      }
+      return closest;
+    }
+
+    // Text belongs to its paragraph; a header/border selects the surrounding
+    // container. The leading gutter also reaches the outer container as a unit.
+    final container =
+        containerAt(0) ?? (leadingSlop > 0 ? containerAt(leadingSlop) : null);
+    if (container != null) return container;
+    if (blocks.isEmpty) return null;
+    final block = blocks.first;
+    return snapshot(EditorBlockTarget(block.$1), block.$2);
+  }
+
+  void _requestObjectMenu() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _afterFrame();
+      final object = _lastObjectSelection;
+      if (object != null && widget.onObjectMenuRequested != null) {
+        widget.onObjectMenuRequested!(
+          EditorObjectMenuRequest(target: object.target),
+        );
+      } else {
+        widget.onObjectContextMenuRequest?.call();
+      }
+    });
+  }
+
+  void _secondaryObjectMenu(EditorObjectTarget target, Offset global) {
+    final object = resolveEditorObject(widget.state, target);
+    if (object == null) return;
+    if (target is! EditorGridImageTarget) _selectObject(target);
+    if (widget.onObjectMenuRequested != null) {
+      widget.onObjectMenuRequested!(
+        EditorObjectMenuRequest(
+          target: target,
+          globalPosition: global,
+          transient: true,
+        ),
+      );
+    } else {
+      _requestObjectMenu();
+    }
+  }
+
+  void _onSecondaryTapUp(TapUpDetails details) {
+    final global = details.globalPosition;
+    final hit = _hitAtGlobal(global);
+    if (hit != null && _trySelectImageAtomAt(hit.$1, global, select: false)) {
+      _trySelectImageAtomAt(hit.$1, global);
+      final image = _computeImageAtomSelection();
+      if (image != null) {
+        _secondaryObjectMenu(
+          EditorImageTarget(image.blockId, image.offset, image.image.src),
+          global,
+        );
+      }
+      return;
+    }
+    if (widget.onObjectMenuRequested == null) return;
+    for (final entry in _blockKeys.entries) {
+      if (_objectRect(entry.value)?.contains(global) != true) continue;
+      if (_explicitObjectTarget == null &&
+          widget.state.selection?.isCollapsed == false &&
+          widget.state.textBlockById(entry.key) != null) {
+        _showContextBarForSelection(anchor: global);
+      } else {
+        _secondaryObjectMenu(EditorBlockTarget(entry.key), global);
+      }
+      return;
+    }
+    // 标题/边框没有文本命中时，选择覆盖指针的最内层容器。
+    (EditorContainerTarget, double)? closest;
+    for (final entry in _containerKeys.entries) {
+      final rect = _objectRect(entry.value);
+      if (rect == null || !rect.contains(global)) continue;
+      final area = rect.width * rect.height;
+      if (closest == null || area < closest.$2) {
+        closest = (EditorContainerTarget(entry.key.$2, entry.key.$1), area);
+      }
+    }
+    if (closest != null) _secondaryObjectMenu(closest.$1, global);
   }
 
   /// 双击第二击:按**当前光标**(第一击落好的编辑坐标)选词,不再按
@@ -2089,6 +2573,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     final editorPos = _toEditorPosition(docPos);
     if (editorPos != null && _trySelectImageAtomAt(editorPos, global)) {
       _touchSelection = true;
+      _requestObjectMenu();
       return;
     }
 
@@ -2225,13 +2710,16 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   EditorSelection? _gridSelBaseline;
 
   void _setGridImageSelection(GridImageSelection? sel) {
+    final previous = _gridImageSel;
+    // 子选图时清掉旧文字选区，避免复制/退格仍作用于之前的内容。
+    if (sel != null) widget.state.updateSelection(null);
     _gridImageSel = sel == null ? null : (sel.islandId, sel.imageIndex);
     _gridSelBaseline = sel == null ? null : widget.state.selection;
     if (sel != _lastGridImageSel) {
       _lastGridImageSel = sel;
       widget.onGridImageSelectionChanged?.call(sel);
     }
-    if (sel != null) setState(() {}); // 瓦片描边
+    if (previous != _gridImageSel) setState(() {}); // 瓦片描边
   }
 
   /// grid 内瓦片 alt 原位编辑保存:images[index] copyWith(alt) 后
@@ -2467,7 +2955,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     /// child 类型不同导致岛整棵 deactivate 重建(真机 hover/滚动态下
     /// 深层 InheritedElement dependents 清理时序炸 _dependents 断言,
     /// 红屏)。全 keyed 后 diff 恒按身份匹配,块只随真实删除而摘除。
-    Widget buildBlock(int i) {
+    Widget buildBlockContent(int i) {
       final block = state.blocks[i];
       // 表格岛 + 宿主接了 onTableEdited:cell 级原位编辑网格
       // (不走 EditorIsland 的 AbsorbPointer 只读壳)
@@ -2478,23 +2966,17 @@ class _FluxdoEditorState extends State<FluxdoEditor>
           key: ValueKey('blk_${block.id}'),
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: EditorTableGrid(
-            key: ValueKey('table_${block.id}'),
+            key: _islandKeys.putIfAbsent(block.id, GlobalKey.new),
             node: block.node as TableNode,
+            onContextMenu: widget.objectToolbarManaged
+                ? _requestObjectMenu
+                : null,
             onChanged: (md) => widget.onTableEdited!(block, md),
-            selected: _isIslandSelected(block.id),
+            selected:
+                !widget.objectToolbarManaged && _isIslandSelected(block.id),
             // 左上角选择柄:整选表格块(选中后退格/Delete 删整表)。
             // cell 区自管让路后,这是表格作为"块"的唯一选择入口。
-            onSelectRequest: () {
-              _focusNode.requestFocus();
-              widget.state.sealHistory();
-              widget.state.updateSelection(
-                EditorSelection(
-                  base: EditorPosition(blockId: block.id, offset: 0),
-                  extent: EditorPosition(blockId: block.id, offset: 1),
-                ),
-              );
-              _ime.syncFromState(show: false);
-            },
+            onSelectRequest: () => _selectObject(EditorBlockTarget(block.id)),
           ),
         );
       }
@@ -2509,24 +2991,18 @@ class _FluxdoEditorState extends State<FluxdoEditor>
           key: ValueKey('blk_${block.id}'),
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: EditorCodeBlock(
-            key: ValueKey('code_${block.id}'),
+            key: _islandKeys.putIfAbsent(block.id, GlobalKey.new),
             node: block.node as CodeBlockNode,
+            onContextMenu: widget.objectToolbarManaged
+                ? _requestObjectMenu
+                : null,
             onChanged: (code, lang) =>
                 widget.onCodeBlockEdited!(block, code, lang),
-            selected: _isIslandSelected(block.id),
+            selected:
+                !widget.objectToolbarManaged && _isIslandSelected(block.id),
             autoEdit: widget.state.consumeIslandEditRequest(block.id),
             highlightBuilder: _islandFactory.codeBlockHighlighter,
-            onSelectRequest: () {
-              _focusNode.requestFocus();
-              widget.state.sealHistory();
-              widget.state.updateSelection(
-                EditorSelection(
-                  base: EditorPosition(blockId: block.id, offset: 0),
-                  extent: EditorPosition(blockId: block.id, offset: 1),
-                ),
-              );
-              _ime.syncFromState(show: false);
-            },
+            onSelectRequest: () => _selectObject(EditorBlockTarget(block.id)),
           ),
         );
       }
@@ -2569,18 +3045,16 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             key: _islandKeys.putIfAbsent(ib.id, GlobalKey.new),
             node: ib.node,
             nodeFactory: _islandFactory,
-            selected: _isIslandSelected(ib.id),
-            onTapSelect: () {
-              _focusNode.requestFocus();
-              widget.state.sealHistory();
-              widget.state.updateSelection(
-                EditorSelection(
-                  base: EditorPosition(blockId: ib.id, offset: 0),
-                  extent: EditorPosition(blockId: ib.id, offset: 1),
-                ),
-              );
-              _ime.syncFromState(show: false);
-            },
+            selected: !widget.objectToolbarManaged && _isIslandSelected(ib.id),
+            showInsertHandles: !widget.objectToolbarManaged,
+            onContextMenu:
+                (widget.onObjectContextMenuRequest == null &&
+                    widget.onObjectMenuRequested == null)
+                ? null
+                : _requestObjectMenu,
+            onSecondaryMenu: (position) =>
+                _secondaryObjectMenu(EditorBlockTarget(ib.id), position),
+            onTapSelect: () => _selectObject(EditorBlockTarget(ib.id)),
             onEditRequest: widget.onIslandEditRequest == null
                 ? null
                 : () => widget.onIslandEditRequest!(ib),
@@ -2589,7 +3063,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             onInsertParagraph: ({required bool before}) {
               final idx = widget.state.indexOfBlock(ib.id);
               if (idx < 0) return;
-              widget.state.insertParagraphNearIsland(ib.id, after: !before);
+              widget.state.placeCaretBesideObject(ib.id, after: !before);
               _ime.syncFromState();
             },
             // grid 岛内容换官方 composer 内聚交互视图:模式切换/移除
@@ -2597,8 +3071,28 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             // 查看器);瓦片单击子选中
             contentOverride: ib.node is ImageGridNode
                 ? EditorImageGrid(
+                    key: _gridKeys.putIfAbsent(
+                      ib.id,
+                      () => GlobalKey<EditorImageGridState>(),
+                    ),
+                    onSecondaryMenu: (image, position) => _secondaryObjectMenu(
+                      EditorGridImageTarget(
+                        ib.id,
+                        image.imageIndex,
+                        image.image.src,
+                      ),
+                      position,
+                    ),
                     node: ib.node as ImageGridNode,
                     islandId: ib.id,
+                    showSelectionControls: !widget.objectToolbarManaged,
+                    onContextMenu: _requestObjectMenu,
+                    onSelectGrid: widget.objectToolbarManaged
+                        ? () {
+                            _selectObject(EditorBlockTarget(ib.id));
+                            _requestObjectMenu();
+                          }
+                        : null,
                     nodeFactory: _islandFactory,
                     selectedIndex: (_gridImageSel?.$1 == ib.id)
                         ? _gridImageSel!.$2
@@ -2620,6 +3114,75 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                 : null,
           ),
         },
+      );
+    }
+
+    Widget buildBlock(int i) {
+      final block = state.blocks[i];
+      final selected =
+          widget.objectToolbarManaged &&
+          (_explicitObjectTarget == EditorBlockTarget(block.id) ||
+              _explicitObjectTarget == null &&
+                  block is IslandBlock &&
+                  _isIslandSelected(block.id));
+      return EditorObjectFrame(
+        onLayout: _scheduleObjectGeometry,
+        key: _blockKeys.putIfAbsent(block.id, GlobalKey.new),
+        selected: selected,
+        child: Stack(
+          fit: StackFit.passthrough,
+          children: [
+            buildBlockContent(i),
+            if (widget.emptyParagraphHint != null &&
+                block is TextBlock &&
+                block.content.length == 0 &&
+                _focusNode.hasFocus &&
+                state.selection?.isCollapsed == true &&
+                state.selection?.extent.blockId == block.id)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      top:
+                          4 +
+                          (block.isHeading
+                              ? (baseStyle.fontSize ?? 16) *
+                                    kHeadingMargin[block.headingLevel - 1] /
+                                    2
+                              : 0),
+                      left: block.isListItem
+                          ? (baseStyle.fontSize ?? 16) * 1.5 * (block.depth + 1)
+                          : 0,
+                    ),
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: KeyedSubtree(
+                        key: widget.emptyParagraphHintKey,
+                        child: Text(
+                          widget.emptyParagraphHint!,
+                          key: const ValueKey('editor-empty-paragraph-hint'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              (block.isHeading
+                                      ? headingStyleFor(
+                                          baseStyle,
+                                          block.headingLevel,
+                                        )
+                                      : baseStyle)
+                                  .copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.outline,
+                                  ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       );
     }
 
@@ -2651,14 +3214,38 @@ class _FluxdoEditorState extends State<FluxdoEditor>
               // 见 buildBlock 注释)。
               key: ValueKey('shell_${frame.groupId}_$level'),
               padding: const EdgeInsets.symmetric(vertical: 4),
-              child: EditorContainerShell(
-                frame: frame,
-                onTitleTap:
-                    widget.onContainerTitleEdit != null &&
-                        (frame is DetailsFrame || frame is CalloutFrame)
-                    ? () => widget.onContainerTitleEdit!(frame)
-                    : null,
-                children: buildLevel(runStart, i, level + 1),
+              child: EditorObjectFrame(
+                onLayout: _scheduleObjectGeometry,
+                key: _containerKeys.putIfAbsent((
+                  frame.groupId,
+                  state.blocks[runStart].id,
+                ), GlobalKey.new),
+                selected:
+                    _explicitObjectTarget is EditorContainerTarget &&
+                    (_explicitObjectTarget as EditorContainerTarget).groupId ==
+                        frame.groupId &&
+                    resolveEditorObject(state, _explicitObjectTarget!)?.start ==
+                        runStart,
+                child: EditorContainerShell(
+                  frame: frame,
+                  onContextMenu: widget.onObjectSelectionChanged == null
+                      ? null
+                      : () {
+                          _selectObject(
+                            EditorContainerTarget(
+                              state.blocks[runStart].id,
+                              frame.groupId,
+                            ),
+                          );
+                          _requestObjectMenu();
+                        },
+                  onTitleTap:
+                      widget.onContainerTitleEdit != null &&
+                          (frame is DetailsFrame || frame is CalloutFrame)
+                      ? () => widget.onContainerTitleEdit!(frame)
+                      : null,
+                  children: buildLevel(runStart, i, level + 1),
+                ),
               ),
             ),
           );
@@ -2671,6 +3258,36 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
 
     final children = buildLevel(0, state.blocks.length, 0);
+    if (widget.showTrailingParagraph) {
+      children.add(
+        MouseRegion(
+          key: const ValueKey('editor-trailing-paragraph'),
+          cursor: SystemMouseCursors.text,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _continueAfterDocument,
+            child: Semantics(
+              button: true,
+              label: '继续输入',
+              child: SizedBox(
+                height: 72,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '点击此处继续输入',
+                    style: baseStyle.copyWith(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.outline.withValues(alpha: .65),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Focus(
       focusNode: _focusNode,
@@ -2695,6 +3312,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                   (r) => r
                     ..onTapDown = _onTapDown
                     ..onTapUp = _onTapUp
+                    ..onSecondaryTapUp = _onSecondaryTapUp
                     ..onTapCancel = _onTapCancel,
                 ),
             PanGestureRecognizer:

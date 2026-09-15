@@ -1353,6 +1353,66 @@ class EditorState extends ChangeNotifier {
     _insertParagraphNear(i, after: after);
   }
 
+  /// The trailing writing space represents the next line, even if the current
+  /// last paragraph is empty. It becomes document content only when clicked.
+  void continueAfterDocument() {
+    _insertParagraphNear(_blocks.length - 1, after: true);
+  }
+
+  /// 从对象回到输入：优先使用同行文字或邻段，文档边界才创建空段。
+  void placeCaretBesideObject(
+    String blockId, {
+    int? atomOffset,
+    required bool after,
+  }) {
+    final index = indexOfBlock(blockId);
+    if (index < 0) return;
+    final block = _blocks[index];
+    final offset = (atomOffset ?? 0) + (after ? 1 : 0);
+    if (block is TextBlock &&
+        atomOffset != null &&
+        (after ? offset < block.content.length : offset > 0)) {
+      updateSelection(
+        EditorSelection.collapsed(
+          EditorPosition(blockId: blockId, offset: offset),
+        ),
+      );
+      return;
+    }
+    final neighborIndex = index + (after ? 1 : -1);
+    if (neighborIndex >= 0 &&
+        neighborIndex < _blocks.length &&
+        _blocks[neighborIndex] is TextBlock) {
+      final neighbor = _blocks[neighborIndex] as TextBlock;
+      updateSelection(
+        EditorSelection.collapsed(
+          EditorPosition(
+            blockId: neighbor.id,
+            offset: after ? 0 : neighbor.content.length,
+          ),
+        ),
+      );
+      return;
+    }
+    if (block is IslandBlock) {
+      _insertParagraphNear(index, after: after);
+    } else if (block is TextBlock && atomOffset != null) {
+      updateSelection(
+        EditorSelection.collapsed(
+          EditorPosition(blockId: blockId, offset: offset),
+        ),
+      );
+      splitBlock();
+      if (!after) {
+        updateSelection(
+          EditorSelection.collapsed(
+            EditorPosition(blockId: blockId, offset: 0),
+          ),
+        );
+      }
+    }
+  }
+
   void _insertParagraphNear(int index, {required bool after}) {
     if (index < 0) return;
     sealHistory();

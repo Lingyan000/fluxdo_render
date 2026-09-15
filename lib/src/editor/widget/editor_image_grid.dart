@@ -78,11 +78,20 @@ class EditorImageGrid extends StatefulWidget {
     this.onMoveImageOut,
     this.onAltChanged,
     this.onReorder,
+    this.showSelectionControls = true,
+    this.onContextMenu,
+    this.onSelectGrid,
+    this.onSecondaryMenu,
   });
 
   final ImageGridNode node;
   final String islandId;
   final NodeFactory nodeFactory;
+  final bool showSelectionControls;
+  final VoidCallback? onContextMenu;
+  final VoidCallback? onSelectGrid;
+  final void Function(GridImageSelection selection, Offset position)?
+  onSecondaryMenu;
 
   /// 当前子选中的图下标(FluxdoEditor 持有;null = 无子选中)。
   final int? selectedIndex;
@@ -113,10 +122,10 @@ class EditorImageGrid extends StatefulWidget {
   final void Function(int from, int to)? onReorder;
 
   @override
-  State<EditorImageGrid> createState() => _EditorImageGridState();
+  State<EditorImageGrid> createState() => EditorImageGridState();
 }
 
-class _EditorImageGridState extends State<EditorImageGrid> {
+class EditorImageGridState extends State<EditorImageGrid> {
   final Map<int, GlobalKey> _tileKeys = {};
 
   /// 正在原位编辑 alt 的瓦片下标(null = 无)。
@@ -157,14 +166,16 @@ class _EditorImageGridState extends State<EditorImageGrid> {
     );
   }
 
+  /// 帧后由编辑器统一采集选中对象的几何，包含滚动、窗口变化和重排。
+  GridImageSelection? selectionFor(int index) =>
+      index >= 0 && index < widget.node.images.length
+      ? _selectionOf(index)
+      : null;
+
   void _onTileTap(int index) {
     final sel = _selectionOf(index);
     if (sel == null) return;
-    if (widget.selectedIndex == index) {
-      widget.onImageOpen?.call(sel);
-    } else {
-      widget.onImageTap?.call(sel);
-    }
+    widget.onImageTap?.call(sel);
   }
 
   void _startAltEdit(int index) {
@@ -186,8 +197,7 @@ class _EditorImageGridState extends State<EditorImageGrid> {
     if (i == null) return;
     setState(() => _editingAlt = null);
     final text = _altController.text.trim();
-    if (i < widget.node.images.length &&
-        text != widget.node.images[i].alt) {
+    if (i < widget.node.images.length && text != widget.node.images[i].alt) {
       widget.onAltChanged?.call(i, text);
     }
   }
@@ -219,7 +229,19 @@ class _EditorImageGridState extends State<EditorImageGrid> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // 顶行:右上角 [网格|轮播] 常驻(官方 mode-buttons)
-                  if (widget.onModeChange != null)
+                  if (widget.onSelectGrid != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: widget.onSelectGrid,
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(48, 48),
+                        ),
+                        icon: const Icon(Icons.more_horiz_rounded, size: 20),
+                        label: const Text('图片网格'),
+                      ),
+                    )
+                  else if (widget.onModeChange != null)
                     Align(
                       alignment: Alignment.centerRight,
                       child: _ModeSegment(
@@ -233,13 +255,21 @@ class _EditorImageGridState extends State<EditorImageGrid> {
                     runSpacing: 8,
                     children: [
                       for (var i = 0; i < images.length; i++)
-                        _tile(context, scheme, builder, i, images[i],
-                            tileSize, images.length),
+                        _tile(
+                          context,
+                          scheme,
+                          builder,
+                          i,
+                          images[i],
+                          tileSize,
+                          images.length,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   // 底行:右下角 [移除网格] 常驻(官方 remove-btn)
-                  if (widget.onRemoveGrid != null)
+                  if (widget.showSelectionControls &&
+                      widget.onRemoveGrid != null)
                     Align(
                       alignment: Alignment.centerRight,
                       child: _FlatButton(
@@ -283,13 +313,49 @@ class _EditorImageGridState extends State<EditorImageGrid> {
           ),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: LongPressDraggable<int>(
-          data: index,
-          maxSimultaneousDrags: 1,
-          feedback: _dragFeedback(context, builder, img, size, total),
-          childWhenDragging: Opacity(opacity: 0.35, child: body),
-          child: body,
-        ),
+        child: !widget.showSelectionControls
+            ? Stack(
+                children: [
+                  body,
+                  if (widget.selectedIndex == index)
+                    Positioned(
+                      right: 4,
+                      bottom: 4,
+                      child: LongPressDraggable<int>(
+                        data: index,
+                        maxSimultaneousDrags: 1,
+                        feedback: _dragFeedback(
+                          context,
+                          builder,
+                          img,
+                          size,
+                          total,
+                        ),
+                        child: Tooltip(
+                          message: '长按拖动排序',
+                          child: Material(
+                            color: scheme.surfaceContainerHigh,
+                            shape: const CircleBorder(),
+                            child: const SizedBox.square(
+                              dimension: 48,
+                              child: Icon(
+                                Icons.drag_indicator_rounded,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              )
+            : LongPressDraggable<int>(
+                data: index,
+                maxSimultaneousDrags: 1,
+                feedback: _dragFeedback(context, builder, img, size, total),
+                childWhenDragging: Opacity(opacity: 0.35, child: body),
+                child: body,
+              ),
       ),
     );
   }
@@ -315,9 +381,7 @@ class _EditorImageGridState extends State<EditorImageGrid> {
           child: FittedBox(
             fit: BoxFit.cover,
             clipBehavior: Clip.hardEdge,
-            child: AbsorbPointer(
-              child: builder(context, img, total),
-            ),
+            child: AbsorbPointer(child: builder(context, img, total)),
           ),
         ),
       ),
@@ -337,10 +401,25 @@ class _EditorImageGridState extends State<EditorImageGrid> {
     final editingAlt = _editingAlt == index;
     return MouseRegion(
       // 官方 CSS:未选中 hover = pointer,选中 = zoom-in(再点开灯箱)
-      cursor: selected ? SystemMouseCursors.zoomIn : SystemMouseCursors.click,
+      cursor: SystemMouseCursors.click,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => _onTileTap(index),
+        onSecondaryTapUp: (details) {
+          _onTileTap(index);
+          final selected = _selectionOf(index);
+          if (selected != null && widget.onSecondaryMenu != null) {
+            widget.onSecondaryMenu!(selected, details.globalPosition);
+          } else {
+            widget.onContextMenu?.call();
+          }
+        },
+        onLongPress: widget.showSelectionControls
+            ? null
+            : () {
+                _onTileTap(index);
+                widget.onContextMenu?.call();
+              },
         child: SizedBox(
           key: _keyFor(index),
           width: size,
@@ -350,27 +429,24 @@ class _EditorImageGridState extends State<EditorImageGrid> {
             children: [
               // 图
               DecoratedBox(
+                position: DecorationPosition.foreground,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color:
-                        selected ? scheme.primary : Colors.transparent,
-                    width: 2,
-                  ),
+                  color: selected
+                      ? scheme.primary.withValues(alpha: .16)
+                      : Colors.transparent,
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: FittedBox(
                     fit: BoxFit.cover,
                     clipBehavior: Clip.hardEdge,
-                    child: AbsorbPointer(
-                      child: builder(context, img, total),
-                    ),
+                    child: AbsorbPointer(child: builder(context, img, total)),
                   ),
                 ),
               ),
               // 子选中:左上叠 [删除|移出] 工具条(官方 menu top-start)
-              if (selected)
+              if (selected && widget.showSelectionControls)
                 Positioned(
                   left: 6,
                   top: 6,
@@ -379,22 +455,25 @@ class _EditorImageGridState extends State<EditorImageGrid> {
                       color: Colors.black.withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      _TileIconBtn(
-                        icon: Icons.delete_outline_rounded,
-                        tooltip: '删除图片',
-                        onTap: () => widget.onRemoveImage?.call(index),
-                      ),
-                      _TileIconBtn(
-                        icon: Icons.grid_off_rounded,
-                        tooltip: '移出网格',
-                        onTap: () => widget.onMoveImageOut?.call(index),
-                      ),
-                    ]),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _TileIconBtn(
+                          icon: Icons.delete_outline_rounded,
+                          tooltip: '删除图片',
+                          onTap: () => widget.onRemoveImage?.call(index),
+                        ),
+                        _TileIconBtn(
+                          icon: Icons.grid_off_rounded,
+                          tooltip: '移出网格',
+                          onTap: () => widget.onMoveImageOut?.call(index),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               // 子选中:底部 alt 标签 / 原位编辑
-              if (selected)
+              if (selected && widget.showSelectionControls)
                 Positioned(
                   left: 6,
                   right: 6,
@@ -403,8 +482,7 @@ class _EditorImageGridState extends State<EditorImageGrid> {
                       ? Focus(
                           onKeyEvent: (node, event) {
                             if (event is KeyDownEvent &&
-                                event.logicalKey ==
-                                    LogicalKeyboardKey.escape) {
+                                event.logicalKey == LogicalKeyboardKey.escape) {
                               setState(() => _editingAlt = null);
                               return KeyEventResult.handled;
                             }
@@ -419,14 +497,20 @@ class _EditorImageGridState extends State<EditorImageGrid> {
                               controller: _altController,
                               focusNode: _altFocus,
                               style: const TextStyle(
-                                  fontSize: 12, color: Colors.white),
+                                fontSize: 12,
+                                color: Colors.white,
+                              ),
                               decoration: const InputDecoration(
                                 isDense: true,
                                 hintText: '替代文本',
                                 hintStyle: TextStyle(
-                                    fontSize: 12, color: Colors.white54),
+                                  fontSize: 12,
+                                  color: Colors.white54,
+                                ),
                                 contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 6),
+                                  horizontal: 8,
+                                  vertical: 6,
+                                ),
                                 border: InputBorder.none,
                               ),
                               onSubmitted: (_) => _commitAlt(),
@@ -440,10 +524,11 @@ class _EditorImageGridState extends State<EditorImageGrid> {
                             onTap: () => _startAltEdit(index),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
-                                color:
-                                    Colors.black.withValues(alpha: 0.65),
+                                color: Colors.black.withValues(alpha: 0.65),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -486,8 +571,7 @@ class _ModeSegment extends StatelessWidget {
         child: GestureDetector(
           onTap: active ? null : () => onChange(m),
           child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
               color: active ? scheme.primary : scheme.surfaceContainerLow,
               border: Border.all(
@@ -496,23 +580,26 @@ class _ModeSegment extends StatelessWidget {
                     : scheme.outlineVariant.withValues(alpha: 0.5),
               ),
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(icon,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
                   size: 14,
-                  color:
-                      active ? scheme.onPrimary : scheme.onSurfaceVariant),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.2,
-                  fontWeight: FontWeight.w500,
-                  color:
-                      active ? scheme.onPrimary : scheme.onSurfaceVariant,
+                  color: active ? scheme.onPrimary : scheme.onSurfaceVariant,
                 ),
-              ),
-            ]),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.2,
+                    fontWeight: FontWeight.w500,
+                    color: active ? scheme.onPrimary : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -520,10 +607,13 @@ class _ModeSegment extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        btn('网格', Icons.grid_view_rounded, ImageGridMode.grid),
-        btn('轮播', Icons.view_carousel_rounded, ImageGridMode.carousel),
-      ]),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          btn('网格', Icons.grid_view_rounded, ImageGridMode.grid),
+          btn('轮播', Icons.view_carousel_rounded, ImageGridMode.carousel),
+        ],
+      ),
     );
   }
 }
@@ -556,18 +646,21 @@ class _FlatButton extends StatelessWidget {
             ),
             borderRadius: BorderRadius.circular(6),
           ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 14, color: scheme.onSurfaceVariant),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.2,
-                color: scheme.onSurfaceVariant,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.2,
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
-            ),
-          ]),
+            ],
+          ),
         ),
       ),
     );
