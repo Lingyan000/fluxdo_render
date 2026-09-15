@@ -1918,11 +1918,34 @@ class EditorState extends ChangeNotifier {
     return out;
   }
 
+  /// 导出当前编辑文档或原坐标切出的片段，不改变正文、选区及撤销栈。
+  ///
+  /// IR 光标处的格式已物化成源码文本，不能直接当普通正文转义。
+  /// 仅在临时快照中收口；WYSIWYG 的字面 Markdown 保持原序列化语义。
+  String exportMarkdown({List<EditorBlock>? fragment}) {
+    final source = fragment ?? _blocks;
+    if (_mode != EditorMode.ir) return docToMarkdown(source);
+    final snapshot = <EditorBlock>[
+      for (final block in source)
+        if (block is TextBlock)
+          block.copyWith(content: spinInlineMarks(
+            block.content,
+            caret: 0,
+            guardAtCaret: false,
+            // 每次折叠至少缩短一个字符，长度上限避免长段落在32对处截断。
+            maxPasses: block.content.length + 1,
+          ).content)
+        else
+          block,
+    ];
+    return docToMarkdown(snapshot);
+  }
+
   /// 当前选区 → markdown(系统剪贴板文本;跨 app 粘贴通用格式)。
   String copySelectionAsMarkdown() {
     final blocks = copySelectionAsBlocks();
     if (blocks.isEmpty) return '';
-    return docToMarkdown(blocks);
+    return exportMarkdown(fragment: blocks);
   }
 
   /// 粘贴块片段(内部结构化路径;markdown → 块由视图层经 cook 链路转)。
