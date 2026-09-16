@@ -208,11 +208,13 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
   /// Android 仍在松手 [_onSelectionChanged] 时显示。
   void _showHandlesEarly() {
     if (widget.controller.selection == null) return;
+    _focusNode.requestFocus();
     _ensureHandles().show();
   }
 
   /// iOS 单击落在已有选区上 → toggle 工具栏显隐(对齐 SDK :938)。
   void _toggleToolbar() {
+    if (widget.controller.selection != null) _focusNode.requestFocus();
     if (_toolbar != null) {
       _toolbar!.hide();
       _toolbar = null;
@@ -280,11 +282,11 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     final sel = widget.controller.selection;
     if (sel == null) return;
     final data = _exporter.export(sel);
-    if (data == null || data.plainText.isEmpty) return;
+    if (data == null || data.clipboardText.isEmpty) return;
     final code = data.code;
     final text = code != null
         ? '```${code.language ?? ''}\n${data.plainText}\n```'
-        : data.plainText;
+        : data.clipboardText;
     Clipboard.setData(ClipboardData(text: text));
     widget.onCopyToast?.call();
   }
@@ -429,8 +431,7 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
               return null;
             },
           ),
-          _ExtendByCharacterIntent:
-              CallbackAction<_ExtendByCharacterIntent>(
+          _ExtendByCharacterIntent: CallbackAction<_ExtendByCharacterIntent>(
             onInvoke: (intent) {
               SelectionNavigator.moveExtentByCharacter(
                 widget.controller,
@@ -451,10 +452,7 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
             },
           ),
         },
-        child: Focus(
-          focusNode: _focusNode,
-          child: child,
-        ),
+        child: Focus(focusNode: _focusNode, child: child),
       ),
     );
   }

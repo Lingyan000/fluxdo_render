@@ -730,6 +730,11 @@ class EditorState extends ChangeNotifier {
     final sanitized = EditableTextContent.sanitizeText(inserted);
     if (sanitized.isEmpty) return;
     if (normalizedSelection() == null) return;
+    // Direct typing/paste and IME replacement share one transaction, including
+    // object endpoints. Deleting first would require two undos to restore them.
+    if (replaceCrossBlockSelection(sanitized, caretOffset: sanitized.length)) {
+      return;
+    }
     if (!(_selection?.isCollapsed ?? true)) {
       deleteSelection();
     }
@@ -988,6 +993,51 @@ class EditorState extends ChangeNotifier {
       groupWithPrevious: true,
       composing: composing,
     );
+  }
+
+  /// Replaces a cross-block selection as one typing transaction. IME offsets
+  /// here are relative to the inserted string, not its previous input window.
+  bool replaceCrossBlockSelection(String inserted, {
+    required int caretOffset,
+    TextRange composing = TextRange.empty,
+  }) {
+    final selection = _selection;
+    final normalized = normalizedSelection();
+    if (selection == null || selection.isSingleBlock || normalized == null) return false;
+    var (from, to) = normalized;
+    var first = indexOfBlock(from.blockId);
+    var last = indexOfBlock(to.blockId);
+    if (_blocks[first] is IslandBlock && from.offset >= 1) {
+      first++;
+      if (first > last) return false;
+      from = EditorPosition(blockId: _blocks[first].id, offset: 0);
+    }
+    if (_blocks[last] is IslandBlock && to.offset <= 0) {
+      last--;
+      if (last < first) return false;
+      to = EditorPosition(blockId: _blocks[last].id, offset: _blocks[last].selectionLength);
+    }
+    final head = _blocks[first];
+    final tail = _blocks[last];
+    final prefix = head is TextBlock ? head.content.slice(0, from.offset) : EditableTextContent.empty;
+    final suffix = tail is TextBlock ? tail.content.slice(to.offset, tail.content.length) : EditableTextContent.empty;
+    final text = EditableTextContent.sanitizeText(inserted);
+    final merged = prefix.concat(suffix).insert(prefix.length, text);
+    final block = head is TextBlock ? head : tail is TextBlock ? tail : TextBlock(id: _nextId(), content: EditableTextContent.empty);
+    sealHistory();
+    _clearPending();
+    _commit([
+      ..._blocks.sublist(0, first),
+      block.copyWith(content: merged),
+      ..._blocks.sublist(last + 1),
+    ], EditorSelection.collapsed(EditorPosition(blockId: block.id, offset: prefix.length + caretOffset.clamp(0, text.length))),
+      groupWithPrevious: true,
+      composing: composing.isValid ? TextRange(
+        start: prefix.length + composing.start.clamp(0, text.length),
+        end: prefix.length + composing.end.clamp(0, text.length),
+      ) : TextRange.empty,
+    );
+    return true;
   }
 
   /// 删除当前选区(跨块支持;孤岛按端点四象限归一)。

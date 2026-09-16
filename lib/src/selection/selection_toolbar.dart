@@ -130,8 +130,12 @@ class SelectionToolbar {
     // 可见选区外接框 → overlay 局部坐标;减 _yComp 抵消滚动一帧滞后(消抖)。
     final bounds = data.globalBounds;
     final tl = overlayBox.globalToLocal(bounds.topLeft);
-    final selRect =
-        Rect.fromLTWH(tl.dx, tl.dy - _yComp, bounds.width, bounds.height);
+    final selRect = Rect.fromLTWH(
+      tl.dx,
+      tl.dy - _yComp,
+      bounds.width,
+      bounds.height,
+    );
 
     // anchors 语义对齐 SDK TextSelectionToolbarAnchors.fromSelection:
     // primary = 外接框顶边中点、secondary = 底边中点,竖直方向夹进 overlay。
@@ -180,7 +184,9 @@ class SelectionToolbar {
               for (var i = 0; i < items.length; i++)
                 TextSelectionToolbarTextButton(
                   padding: TextSelectionToolbarTextButton.getPadding(
-                      i, items.length),
+                    i,
+                    items.length,
+                  ),
                   onPressed: items[i].onPressed,
                   // TextSelectionToolbarTextButton 用 styleFrom(textStyle:)
                   // 把按钮文字样式整体覆盖成不带 fontFamily 的固定样式,
@@ -189,15 +195,14 @@ class SelectionToolbar {
                   // 进来 —— 不能整个套 bodyMedium(inherit: false,会连
                   // color/height 一起顶掉 SDK 按钮的前景色/禁用态语义)。
                   child: Text(
-                    AdaptiveTextSelectionToolbar.getButtonLabel(
-                        ctx, items[i]),
+                    AdaptiveTextSelectionToolbar.getButtonLabel(ctx, items[i]),
                     style: TextStyle(
-                      fontFamily:
-                          Theme.of(ctx).textTheme.bodyMedium?.fontFamily,
-                      fontFamilyFallback: Theme.of(ctx)
-                          .textTheme
-                          .bodyMedium
-                          ?.fontFamilyFallback,
+                      fontFamily: Theme.of(
+                        ctx,
+                      ).textTheme.bodyMedium?.fontFamily,
+                      fontFamilyFallback: Theme.of(
+                        ctx,
+                      ).textTheme.bodyMedium?.fontFamilyFallback,
                     ),
                   ),
                 ),
@@ -205,10 +210,7 @@ class SelectionToolbar {
           );
 
     return Positioned.fill(
-      child: TapRegion(
-        groupId: tapRegionGroupId,
-        child: toolbar,
-      ),
+      child: TapRegion(groupId: tapRegionGroupId, child: toolbar),
     );
   }
 
@@ -237,7 +239,7 @@ class SelectionToolbar {
             hide();
           },
         ),
-      if (onCopyQuote != null)
+      if (onCopyQuote != null && data.plainText.trim().isNotEmpty)
         ContextMenuButtonItem(
           label: copyQuoteLabel,
           onPressed: () {
@@ -245,7 +247,7 @@ class SelectionToolbar {
             hide();
           },
         ),
-      if (onQuote != null)
+      if (onQuote != null && data.plainText.trim().isNotEmpty)
         ContextMenuButtonItem(
           label: quoteLabel,
           onPressed: () {
@@ -255,7 +257,9 @@ class SelectionToolbar {
         ),
       // Android 用户应用工具(翻译/搜索等)。执行后收 toolbar + 通知上层清选区
       // (对齐 SDK _textProcessingActionButtonItems :1752-1774)。
-      for (final action in SelectionProcessText.actions)
+      for (final action in data.plainText.trim().isEmpty
+          ? const <ProcessTextAction>[]
+          : SelectionProcessText.actions)
         ContextMenuButtonItem(
           label: action.label,
           onPressed: () async {
@@ -266,6 +270,7 @@ class SelectionToolbar {
         ),
     ];
   }
+
   /// 「解密」按钮显隐：回调注入且选中文本命中密文特征(ENC1/OpenSSL/
   /// 纯 Base64/Hex/摩斯)。特征逻辑由主项目注入,子包不重复实现。
   bool _showDecrypt(SelectionData data) {
@@ -287,7 +292,7 @@ class SelectionToolbar {
     final code = data.code;
     final text = code != null
         ? '```${code.language ?? ''}\n${data.plainText}\n```'
-        : data.plainText;
+        : data.clipboardText;
     Clipboard.setData(ClipboardData(text: text));
     onCopied?.call();
   }
