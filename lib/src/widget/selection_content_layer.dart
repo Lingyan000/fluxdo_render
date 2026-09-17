@@ -177,15 +177,16 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     }
     // 选区产生 → 抢键盘焦点,后续 Cmd/Ctrl+A、Shift+方向 才进得来。
     _focusNode.requestFocus();
-    _toolbar = _buildToolbar();
-    _toolbar!.show(data);
-
     // 移动端(触摸选区)显示拖拽手柄;鼠标/触控板选区不显示。
     if (fromTouch) {
       _ensureHandles().show();
     } else {
       _handles?.hide();
     }
+    // 对齐 Flutter #182663：先手柄后菜单，溢出菜单必须在手柄上层。
+    // 菜单浮层由 SDK ContextMenuController 管理，避免自行复制其生命周期。
+    _toolbar = _buildToolbar();
+    _toolbar!.show(data);
   }
 
   /// 手柄控制器(懒建,两处共用:定选显示 / iOS 长按按下即显)。
