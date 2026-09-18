@@ -20,6 +20,7 @@ Future<EditorState> pumpGrid(
   ValueChanged<EditorObjectMenuRequest>? onMenu,
   ValueChanged<GridImageSelection>? onOpen,
   ValueChanged<String>? onAdd,
+  List<Widget> Function(BuildContext, String)? pendingBuilder,
 }) async {
   tester.view.physicalSize = Size(desktop ? 1000 : 390, height);
   tester.view.devicePixelRatio = 1;
@@ -58,6 +59,7 @@ Future<EditorState> pumpGrid(
             onObjectMenuRequested: onMenu,
             onGridImageOpenRequest: onOpen,
             onAddGridImages: onAdd,
+            gridPendingUploadsBuilder: pendingBuilder,
             nodeFactory: NodeFactory(
               imageContentBuilder: (_, image, total) => SizedBox(
                 width: 100,
@@ -90,6 +92,18 @@ List<String> order(EditorState state, [String id = 'grid']) =>
         .toList();
 
 void main() {
+  testWidgets('待上传瓦片只显示在目标网格内部且不进入正文导出', (tester) async {
+    final state = await pumpGrid(tester, twoGroups: true, onAdd: (_) {},
+      pendingBuilder: (context, id) => id == 'grid'
+        ? [const ColoredBox(key: ValueKey('pending-upload'), color: Colors.blue)] : []);
+    expect(find.byKey(const ValueKey('pending-upload')), findsOneWidget);
+    expect(state.exportMarkdown(), isNot(contains('pending-upload')));
+    final rect = tester.getRect(find.byKey(const ValueKey('pending-upload')));
+    expect(rect.width, greaterThan(0));
+    expect(rect.width, rect.height);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('选中网格图片保留键盘但清空输入目标，点回正文后正常输入', (tester) async {
     final actions = FluxdoEditorContentActions();
     final state = await pumpGrid(tester, actions: actions);

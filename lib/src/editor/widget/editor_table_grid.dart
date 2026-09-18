@@ -52,6 +52,7 @@ class EditorTableGrid extends StatefulWidget {
     required this.node,
     required this.onChanged,
     this.selected = false,
+    this.autoEdit = false,
     this.onSelectRequest,
     this.onContextMenu,
   });
@@ -63,6 +64,7 @@ class EditorTableGrid extends StatefulWidget {
 
   /// 整选态(编辑器选区恰覆盖本表格块):primary 描边。
   final bool selected;
+  final bool autoEdit;
 
   /// 左上角选择柄点击 → 编辑器整选本表格块(选中后退格/Delete 删整表;
   /// cell 区自管让路后这是块级选择的唯一入口)。
@@ -79,6 +81,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
 
   /// 正在编辑的 cell(row, col);null = 无。
   (int, int)? _editing;
+  final Set<String> _pendingEchoes = {};
   final TextEditingController _cellController = TextEditingController();
   final FocusNode _cellFocus = FocusNode();
 
@@ -102,6 +105,7 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   void initState() {
     super.initState();
     _syncFromNode();
+    if (widget.autoEdit) _scheduleFirstCell();
     _cellFocus.addListener(() {
       if (!_cellFocus.hasFocus) _commitCell();
     });
@@ -110,10 +114,26 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   @override
   void didUpdateWidget(covariant EditorTableGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.autoEdit && !oldWidget.autoEdit) _scheduleFirstCell();
     if (oldWidget.node != widget.node) {
+      final echo = tableGridToMarkdown([
+        for (final row in widget.node.rows)
+          [for (final cell in row) tableCellToMarkdown(cell)],
+      ], hasHeader: widget.node.hasHeader);
+      // 本地提交的异步回声不清空当前编辑格，更不能覆盖下一格未提交文字。
+      if (_pendingEchoes.remove(echo)) return;
+      _pendingEchoes.clear();
       _editing = null;
       _syncFromNode();
     }
+  }
+
+  void _scheduleFirstCell() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _editing == null && _rows > 0 && _cols > 0) {
+        _startEdit(0, 0);
+      }
+    });
   }
 
   void _syncFromNode() {
@@ -143,8 +163,11 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   int get _rows => _cells.length;
   int get _cols => _cells.isEmpty ? 0 : _cells.first.length;
 
-  void _emit() =>
-      widget.onChanged(tableGridToMarkdown(_cells, hasHeader: _hasHeader));
+  void _emit() {
+    final markdown = tableGridToMarkdown(_cells, hasHeader: _hasHeader);
+    _pendingEchoes.add(markdown);
+    widget.onChanged(markdown);
+  }
 
   // -----------------------------------------------------------------
   // cell 编辑

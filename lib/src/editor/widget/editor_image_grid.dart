@@ -68,12 +68,14 @@ class EditorImageGrid extends StatefulWidget {
     this.onImageMenu,
     this.onAddImages,
     this.addingImages = false,
+    this.pendingUploads = const [],
     this.controlSurfaceBuilder,
   });
 
   final void Function(GridImageSelection image, Rect anchor)? onImageMenu;
   final VoidCallback? onAddImages;
   final bool addingImages;
+  final List<Widget> pendingUploads;
   final Widget Function(BuildContext, Widget)? controlSurfaceBuilder;
 
   final ImageGridNode node;
@@ -608,7 +610,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
           final available = math.max(0.0, constraints.maxWidth - 24);
           final small = constraints.maxWidth < 640;
           final preferred = small ? 150.0 : 200.0;
-          final slots = images.length + (widget.onAddImages == null ? 0 : 1);
+          final slots = images.length + widget.pendingUploads.length + (widget.onAddImages == null ? 0 : 1);
           final columns = math.min(
             slots,
             math.max(1, ((available + 8) / (small ? 120 : 184)).floor()),
@@ -689,6 +691,8 @@ class EditorImageGridState extends State<EditorImageGrid> {
                 );
           final tiles = [
             for (var i = 0; i < images.length; i++) _tile(i, tileSize, builder),
+            for (final pending in widget.pendingUploads)
+              SizedBox.square(dimension: tileSize, child: pending),
             if (widget.onAddImages != null)
               SizedBox.square(
                 dimension: tileSize,

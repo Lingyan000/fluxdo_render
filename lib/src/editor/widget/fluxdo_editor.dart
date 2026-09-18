@@ -346,6 +346,8 @@ class FluxdoEditor extends StatefulWidget {
     this.onGridImageOpenRequest,
     this.onAddGridImages,
     this.addingImageGrids = const {},
+    this.gridPendingUploadsBuilder,
+    this.transientBlockBuilder,
     this.gridControlSurfaceBuilder,
     this.onCaretRectChanged,
     this.onEditingActivity,
@@ -365,8 +367,10 @@ class FluxdoEditor extends StatefulWidget {
   });
 
   final EditorState state;
+  final Widget? Function(BuildContext, EditorBlock)? transientBlockBuilder;
   final ValueChanged<String>? onAddGridImages;
   final Set<String> addingImageGrids;
+  final List<Widget> Function(BuildContext, String)? gridPendingUploadsBuilder;
   final Widget Function(BuildContext, Widget)? gridControlSurfaceBuilder;
 
   /// Host overlays measured inward from the scroll viewport (including any
@@ -3456,6 +3460,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
           child: EditorTableGrid(
             key: _islandKeys.putIfAbsent(block.id, GlobalKey.new),
             node: block.node as TableNode,
+            autoEdit: widget.state.consumeIslandEditRequest(block.id),
             onContextMenu: widget.objectToolbarManaged
                 ? _requestObjectMenu
                 : null,
@@ -3581,6 +3586,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                         ? null
                         : () => widget.onAddGridImages!(ib.id),
                     addingImages: widget.addingImageGrids.contains(ib.id),
+                    pendingUploads: widget.gridPendingUploadsBuilder?.call(context, ib.id) ?? const [],
                     controlSurfaceBuilder: widget.gridControlSurfaceBuilder,
                     onImageMenu: widget.onObjectMenuRequested == null
                         ? null
@@ -3641,6 +3647,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
     Widget buildBlockContent(int i) {
       final block = state.blocks[i];
+      final transient = widget.transientBlockBuilder?.call(context, block);
+      if (transient != null) return transient;
       final content = buildBlockBody(i);
       if (block is! IslandBlock) return content;
       return SelectableObjectBlock(
@@ -3748,7 +3756,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
               // 容器壳自身与外界的间距(块本体的 vertical 4 在壳内)。
               // key 在 Padding 上(children 列表的直接成员必须 keyed,
               // 见 buildBlock 注释)。
-              key: ValueKey('shell_${frame.groupId}_$level'),
+              // 同一容器被孤岛分割后可能有多个不连续片段；身份需与
+              // 下方 _containerKeys 一致，不能只按 groupId 复用。
+              key: ValueKey('shell_${frame.groupId}_${state.blocks[runStart].id}_$level'),
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: EditorObjectFrame(
                 onLayout: _scheduleObjectGeometry,

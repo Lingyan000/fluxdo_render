@@ -877,6 +877,25 @@ class EditorState extends ChangeNotifier {
     sealHistory();
   }
 
+  /// 清理临时任务占位的历史引用，不改变当前正文和用户其他撤销记录。
+  /// 调用方应在正式内容替换临时块之后调用，防止 undo 恢复无主占位。
+  void forgetTransientBlockInHistory(String blockId) {
+    _HistoryEntry clean(_HistoryEntry entry) {
+      final blocks = entry.blocks.where((block) => block.id != blockId).toList();
+      if (blocks.length == entry.blocks.length) return entry;
+      final selection = entry.selection;
+      return _HistoryEntry(
+        blocks: List.unmodifiable(blocks.isEmpty
+            ? [TextBlock(id: _nextId(), content: EditableTextContent.empty)]
+            : blocks),
+        selection: selection?.base.blockId == blockId || selection?.extent.blockId == blockId
+            ? null : selection,
+      );
+    }
+    for (var i = 0; i < _undoStack.length; i++) { _undoStack[i] = clean(_undoStack[i]); }
+    for (var i = 0; i < _redoStack.length; i++) { _redoStack[i] = clean(_redoStack[i]); }
+  }
+
   /// 块 id 发号(结构命令新建块用,与内部序列一致不撞号)。
   String nextBlockId() => _nextId();
 
@@ -2077,7 +2096,26 @@ class EditorState extends ChangeNotifier {
   /// - 中间块整块插入(re-id 防碰撞);
   /// - 片段尾块与光标块尾段合并;单块片段=纯内联插入。
   /// - 首/尾块是岛 → 不合并,按整块插入。
+  /// 删除选区与插入片段在隔离状态中计算，一次提交正文和撤销快照。
   void pasteBlocks(List<EditorBlock> fragment) {
+    if (fragment.isEmpty || normalizedSelection() == null) return;
+    final draft = EditorState(blocks: _blocks);
+    draft._idCounter = _idCounter;
+    draft._selection = _selection;
+    draft._mode = _mode;
+    try {
+      draft._pasteBlocksImpl(fragment);
+      _idCounter = draft._idCounter;
+      sealHistory();
+      _clearPending();
+      _commit(draft._blocks, draft._selection, groupWithPrevious: false);
+      sealHistory();
+    } finally {
+      draft.dispose();
+    }
+  }
+
+  void _pasteBlocksImpl(List<EditorBlock> fragment) {
     if (fragment.isEmpty) return;
     if (normalizedSelection() == null) return;
     if (!(_selection?.isCollapsed ?? true)) {
