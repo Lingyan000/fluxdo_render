@@ -51,6 +51,7 @@ class EditorTableGrid extends StatefulWidget {
     super.key,
     required this.node,
     required this.onChanged,
+    this.onNodeChanged,
     this.selected = false,
     this.autoEdit = false,
     this.onSelectRequest,
@@ -61,6 +62,9 @@ class EditorTableGrid extends StatefulWidget {
 
   /// 变更后的 markdown 表格文本(cook → replaceIsland 由宿主做)。
   final ValueChanged<String> onChanged;
+
+  /// 结构操作直传来源，避免 Markdown 往返丢失行、单元格属性。
+  final ValueChanged<TableNode>? onNodeChanged;
 
   /// 整选态(编辑器选区恰覆盖本表格块):primary 描边。
   final bool selected;
@@ -78,10 +82,12 @@ class EditorTableGrid extends StatefulWidget {
 class _EditorTableGridState extends State<EditorTableGrid> {
   late List<List<String>> _cells;
   late bool _hasHeader;
+  late List<TextAlign?> _alignments;
 
   /// 正在编辑的 cell(row, col);null = 无。
   (int, int)? _editing;
   final Set<String> _pendingEchoes = {};
+  VoidCallback? _pendingStructure;
   final TextEditingController _cellController = TextEditingController();
   final FocusNode _cellFocus = FocusNode();
 
@@ -116,12 +122,32 @@ class _EditorTableGridState extends State<EditorTableGrid> {
     super.didUpdateWidget(oldWidget);
     if (widget.autoEdit && !oldWidget.autoEdit) _scheduleFirstCell();
     if (oldWidget.node != widget.node) {
-      final echo = tableGridToMarkdown([
-        for (final row in widget.node.rows)
-          [for (final cell in row) tableCellToMarkdown(cell)],
-      ], hasHeader: widget.node.hasHeader);
+      final echo = tableGridToMarkdown(
+        [
+          for (final row in widget.node.rows)
+            [for (final cell in row) tableCellToMarkdown(cell)],
+        ],
+        hasHeader: widget.node.hasHeader,
+        alignments: [
+          for (var c = 0; c < widget.node.columnCount; c++)
+            widget.node.rows.isNotEmpty && c < widget.node.rows.first.length
+                ? widget.node.rows.first[c].alignment
+                : null,
+        ],
+      );
       // 本地提交的异步回声不清空当前编辑格，更不能覆盖下一格未提交文字。
-      if (_pendingEchoes.remove(echo)) return;
+      if (_pendingEchoes.remove(echo)) {
+        final action = _pendingStructure;
+        if (action != null && _pendingEchoes.isEmpty) {
+          _pendingStructure = null;
+          _syncFromNode();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) action();
+          });
+        }
+        return;
+      }
+      _pendingStructure = null;
       _pendingEchoes.clear();
       _editing = null;
       _syncFromNode();
@@ -139,6 +165,12 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   void _syncFromNode() {
     final n = widget.node;
     _hasHeader = n.hasHeader;
+    _alignments = List.generate(
+      n.columnCount,
+      (c) => n.rows.isNotEmpty && c < n.rows.first.length
+          ? n.rows.first[c].alignment
+          : null,
+    );
     _cells = [
       for (final row in n.rows)
         [
@@ -164,7 +196,11 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   int get _cols => _cells.isEmpty ? 0 : _cells.first.length;
 
   void _emit() {
-    final markdown = tableGridToMarkdown(_cells, hasHeader: _hasHeader);
+    final markdown = tableGridToMarkdown(
+      _cells,
+      hasHeader: _hasHeader,
+      alignments: _alignments,
+    );
     _pendingEchoes.add(markdown);
     widget.onChanged(markdown);
   }
@@ -206,15 +242,75 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   // 行列结构操作
   // -----------------------------------------------------------------
 
+  void _changeStructure(
+    void Function(List<List<TableCellData>>, List<String?>) change,
+  ) {
+    final node = widget.node;
+    final rows = [for (final row in node.rows) List<TableCellData>.of(row)];
+    final ids = List<String?>.generate(
+      rows.length,
+      (r) => r < node.rowSourceIds.length ? node.rowSourceIds[r] : null,
+    );
+    change(rows, ids);
+    widget.onNodeChanged!(
+      TableNode(
+        id: node.id,
+        rows: rows,
+        rowSourceIds: ids,
+        columnCount: rows.fold<int>(0, (n, r) => r.length > n ? r.length : n),
+        hasHeader: rows.isNotEmpty && rows.first.every((c) => c.isHeader),
+        textAlign: node.textAlign,
+      ),
+    );
+  }
+
+  TableCellData _emptyCell({bool header = false}) => TableCellData(
+    isHeader: header,
+    children: [ParagraphNode(id: '${widget.node.id}-new', inlines: const [])],
+  );
+
   void _insertRow(int at) {
     _commitCell();
+    // 等待行内 Markdown 回写完成，不能让旧尺寸异步回声覆盖结构操作。
+    if (widget.onNodeChanged != null && _pendingEchoes.isNotEmpty) {
+      _pendingStructure = () => _insertRow(at);
+      return;
+    }
+    if (widget.onNodeChanged != null) {
+      _changeStructure((rows, ids) {
+        final i = at.clamp(0, rows.length);
+        rows.insert(
+          i,
+          List.generate(widget.node.columnCount, (_) => _emptyCell()),
+        );
+        ids.insert(i, null);
+      });
+      return;
+    }
     _cells.insert(at.clamp(0, _rows), List.filled(_cols, ''));
     _emit();
   }
 
   void _insertCol(int at) {
     _commitCell();
+    // 等待行内 Markdown 回写完成，不能让旧尺寸异步回声覆盖结构操作。
+    if (widget.onNodeChanged != null && _pendingEchoes.isNotEmpty) {
+      _pendingStructure = () => _insertCol(at);
+      return;
+    }
+    if (widget.onNodeChanged != null) {
+      _changeStructure((rows, ids) {
+        for (final row in rows) {
+          row.insert(
+            at.clamp(0, row.length),
+            _emptyCell(header: row.isNotEmpty && row.every((c) => c.isHeader)),
+          );
+        }
+      });
+      return;
+    }
     final i = at.clamp(0, _cols);
+    _alignments.insert(i, null);
     for (final row in _cells) {
       row.insert(i, '');
     }
@@ -224,6 +320,18 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   void _removeRow(int r) {
     if (_rows <= 1) return;
     _commitCell();
+    // 等待行内 Markdown 回写完成，不能让旧尺寸异步回声覆盖结构操作。
+    if (widget.onNodeChanged != null && _pendingEchoes.isNotEmpty) {
+      _pendingStructure = () => _removeRow(r);
+      return;
+    }
+    if (widget.onNodeChanged != null) {
+      _changeStructure((rows, ids) {
+        rows.removeAt(r);
+        ids.removeAt(r);
+      });
+      return;
+    }
     _cells.removeAt(r);
     _emit();
   }
@@ -231,6 +339,20 @@ class _EditorTableGridState extends State<EditorTableGrid> {
   void _removeCol(int c) {
     if (_cols <= 1) return;
     _commitCell();
+    // 等待行内 Markdown 回写完成，不能让旧尺寸异步回声覆盖结构操作。
+    if (widget.onNodeChanged != null && _pendingEchoes.isNotEmpty) {
+      _pendingStructure = () => _removeCol(c);
+      return;
+    }
+    if (widget.onNodeChanged != null) {
+      _changeStructure((rows, ids) {
+        for (final row in rows) {
+          if (c < row.length) row.removeAt(c);
+        }
+      });
+      return;
+    }
+    _alignments.removeAt(c);
     for (final row in _cells) {
       row.removeAt(c);
     }
@@ -581,6 +703,9 @@ class _EditorTableGridState extends State<EditorTableGrid> {
         ),
         child: TextField(
           controller: _cellController,
+          textAlign: c < _alignments.length
+              ? _alignments[c] ?? TextAlign.start
+              : TextAlign.start,
           focusNode: _cellFocus,
           style: style,
           cursorHeight: 15,
@@ -605,6 +730,9 @@ class _EditorTableGridState extends State<EditorTableGrid> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
           child: Text(
             text.isEmpty ? ' ' : text,
+            textAlign: c < _alignments.length
+                ? _alignments[c] ?? TextAlign.start
+                : TextAlign.start,
             style: text.isEmpty
                 ? style.copyWith(
                     color: scheme.onSurfaceVariant.withValues(alpha: 0.4),

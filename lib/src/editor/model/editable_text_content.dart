@@ -166,6 +166,7 @@ class EditableTextContent {
     required this.text,
     List<MarkSpan> marks = const [],
     Map<int, InlineNode> atoms = const {},
+    Set<int> softBreaks = const {},
   })  : marks = List.unmodifiable(
           marks.where((m) => !m.isEmpty).toList()
             ..sort((a, b) {
@@ -174,6 +175,10 @@ class EditableTextContent {
             }),
         ),
         atoms = Map.unmodifiable(atoms),
+        softBreaks = Set.unmodifiable(softBreaks),
+        assert(softBreaks.every(
+          (o) => o >= 0 && o < text.length && text[o] == '\n',
+        ), 'softBreaks 必须指向文本中的换行'),
         assert(
           atoms.keys.every(
             (o) => o >= 0 && o < text.length && text[o] == kAtomChar,
@@ -192,6 +197,9 @@ class EditableTextContent {
   /// 原子表:offset(指向 text 中的 [kAtomChar])→ 原 InlineNode
   /// (EmojiRun/MentionRun;M2 白名单,其他类型由 doc_converter 拦在岛外)。
   final Map<int, InlineNode> atoms;
+
+  /// 来自 Markdown softbreak 的换行偏移；手动插入的换行默认仍为硬换行。
+  final Set<int> softBreaks;
 
   int get length => text.length;
 
@@ -255,11 +263,13 @@ class EditableTextContent {
     final buf = StringBuffer();
     final marks = <MarkSpan>[];
     final atoms = <int, InlineNode>{};
-    _flattenInto(inlines, buf, marks, atoms, const []);
+    final softBreaks = <int>{};
+    _flattenInto(inlines, buf, marks, atoms, softBreaks, const []);
     return EditableTextContent(
       text: buf.toString(),
       marks: marks,
       atoms: atoms,
+      softBreaks: softBreaks,
     );
   }
 
@@ -269,6 +279,7 @@ class EditableTextContent {
     StringBuffer buf,
     List<MarkSpan> marks,
     Map<int, InlineNode> atoms,
+    Set<int> softBreaks,
     List<(MarkKind, String?)> activeKinds,
   ) {
     for (final node in nodes) {
@@ -280,14 +291,15 @@ class EditableTextContent {
           break;
         case TextRun(:final text):
           _appendText(buf, marks, activeKinds, sanitizeText(text));
-        case LineBreakRun():
+        case LineBreakRun(:final soft):
+          if (soft) softBreaks.add(buf.length);
           _appendText(buf, marks, activeKinds, '\n');
         case EmRun(:final children):
-          _flattenInto(children, buf, marks, atoms,
-              [...activeKinds, (MarkKind.em, null)]);
+          _flattenInto(children, buf, marks, atoms, softBreaks,
+              [...activeKinds, (MarkKind.em, node.editorSyntax)]);
         case StrongRun(:final children):
-          _flattenInto(children, buf, marks, atoms,
-              [...activeKinds, (MarkKind.strong, null)]);
+          _flattenInto(children, buf, marks, atoms, softBreaks,
+              [...activeKinds, (MarkKind.strong, node.editorSyntax)]);
         case InlineCodeRun(:final text):
           _appendText(
             buf,
@@ -302,15 +314,22 @@ class EditableTextContent {
             buf,
             marks,
             atoms,
-            mapped == null ? activeKinds : [...activeKinds, (mapped, null)],
+            softBreaks,
+            mapped == null ? activeKinds : [...activeKinds, (mapped, node.editorSyntax)],
           );
         // ---- M5 白名单:行内剧透 / 链接(mark 化,内容可编辑) ----
         case SpoilerRun(:final children):
-          _flattenInto(children, buf, marks, atoms,
+          _flattenInto(children, buf, marks, atoms, softBreaks,
               [...activeKinds, (MarkKind.spoilerInline, null)]);
         // hashtag 链接:行内原子(mention 同机制)。整体一个哨兵字符,
         // 序列化写回 `#ref`。必须排在普通 LinkRun 分支之前 —— 否则会
         // 被当成普通链接 mark 化,把 `#ref` 写法毁掉。
+        case LinkRun(:final isAttachment, :final editorLinkTitle,
+            :final editorAngleLink)
+            when isAttachment || editorLinkTitle != null || editorAngleLink:
+          // 特殊链接使用原子保留完整来源属性，不能降为仅含 href 的 mark。
+          atoms[buf.length] = node;
+          _appendText(buf, marks, activeKinds, kAtomChar);
         case LinkRun(:final hashtagRef) when hashtagRef != null:
           atoms[buf.length] = node;
           _appendText(buf, marks, activeKinds, kAtomChar);
@@ -318,7 +337,7 @@ class EditableTextContent {
             :final editorLinkSource):
           if (editorLinkSource != null) {
             final start = buf.length;
-            _flattenInto(children, buf, marks, atoms, activeKinds);
+            _flattenInto(children, buf, marks, atoms, softBreaks, activeKinds);
             final source = editorLinkSource.isAutoLink;
             final previous = marks.lastIndexWhere((m) => m.kind == MarkKind.link &&
                 m.attr == href && m.isAutoLink == source && m.end == start);
@@ -345,7 +364,7 @@ class EditableTextContent {
                 kind: MarkKind.link, attr: href, isAutoLink: true));
           } else {
             final start = buf.length;
-            _flattenInto(children, buf, marks, atoms, activeKinds);
+            _flattenInto(children, buf, marks, atoms, softBreaks, activeKinds);
             // 无自动链接标记的 <a> 不能裸化。尤其同名显式链接独占一行
             // 时，裸写会新增 onebox 语义。普通行内裸链无法仅靠 HTML
             // 区分，保守写回显式语法仍保留其 cooked 结构。
@@ -372,7 +391,7 @@ class EditableTextContent {
           // 字号 → 带 attr 的 mark(见 MarkKind.size 注释:岛化不可编辑,
           // mark 化后一行内可以混多个不同 size 区间)。attr 优先存 cooked
           // 里的原文(pctRaw),程序化构造(pctRaw=null)才按 scale 计算。
-          _flattenInto(children, buf, marks, atoms,
+          _flattenInto(children, buf, marks, atoms, softBreaks,
               [...activeKinds, (MarkKind.size, pctRaw ?? _pct(scale))]);
         case ColoredRun(
             :final color,
@@ -386,7 +405,7 @@ class EditableTextContent {
           // backgroundRaw,`red`/`#F00` 等逐字保留),程序化构造才写 hex。
           // 只有原文没有 Color(取色失败)也照样成 mark —— 渲染降级无色,
           // 但序列化必须把原文写回。
-          _flattenInto(children, buf, marks, atoms, [
+          _flattenInto(children, buf, marks, atoms, softBreaks, [
             ...activeKinds,
             if (background != null || backgroundRaw != null)
               (MarkKind.bgColor, backgroundRaw ?? _hex(background!)),
@@ -508,6 +527,7 @@ class EditableTextContent {
             text: text,
             marks: [...marks, ...synthetic],
             atoms: atoms,
+            softBreaks: softBreaks,
           ).toInlines(
             forEditing: true,
             editingLinkColor: editingLinkColor,
@@ -593,7 +613,7 @@ class EditableTextContent {
       appendDelimiters(s, opening: true);
       final piece = text.substring(s, e);
       if (piece == '\n') {
-        out.add(const LineBreakRun());
+        out.add(LineBreakRun(soft: softBreaks.contains(s)));
         continue;
       }
       final kinds = <MarkKind>{
@@ -609,11 +629,20 @@ class EditableTextContent {
       String? fgHex;
       String? bgHex;
       String? sizePct;
+      String? strongSyntax, emSyntax, underlineSyntax, strikeSyntax;
       var fgW = -1, bgW = -1, szW = -1;
       for (final m in marks) {
         if (m.start > s || m.end < e) continue;
         final w = m.end - m.start;
         switch (m.kind) {
+          case MarkKind.lineThrough:
+            strikeSyntax = m.attr;
+          case MarkKind.strong:
+            strongSyntax = m.attr;
+          case MarkKind.em:
+            emSyntax = m.attr;
+          case MarkKind.underline:
+            underlineSyntax = m.attr;
           case MarkKind.link:
             if (href == null) {
               href = m.attr;
@@ -654,7 +683,8 @@ class EditableTextContent {
           isAutoLink: isAutoLink,
           fgHex: fgHex,
           bgHex: bgHex,
-          sizePct: sizePct));
+          sizePct: sizePct,
+          strongSyntax: strongSyntax, emSyntax: emSyntax, underlineSyntax: underlineSyntax, strikeSyntax: strikeSyntax));
     }
     appendDelimiters(text.length, opening: false);
     return _applyOnlyEmoji(out);
@@ -791,6 +821,10 @@ class EditableTextContent {
     String? fgHex,
     String? bgHex,
     String? sizePct,
+    String? strongSyntax,
+    String? emSyntax,
+    String? underlineSyntax,
+    String? strikeSyntax,
   }) {
     InlineNode node;
     if (kinds.contains(MarkKind.inlineCode)) {
@@ -798,12 +832,12 @@ class EditableTextContent {
     } else {
       node = TextRun(piece);
       if (kinds.contains(MarkKind.lineThrough)) {
-        node = StyledRun(kind: InlineStyleKind.lineThrough, children: [node]);
+        node = StyledRun(kind: InlineStyleKind.lineThrough, children: [node], editorSyntax: strikeSyntax);
       }
       if (kinds.contains(MarkKind.underline) ||
           (forEditing && kinds.contains(MarkKind.link))) {
         // 编辑态 link 借下划线样式(真 LinkRun 的 recognizer 会抢手势)
-        node = StyledRun(kind: InlineStyleKind.underline, children: [node]);
+        node = StyledRun(kind: InlineStyleKind.underline, children: [node], editorSyntax: underlineSyntax);
       }
       for (final k in const [
         MarkKind.smallStyle,
@@ -818,10 +852,10 @@ class EditableTextContent {
         }
       }
       if (kinds.contains(MarkKind.em)) {
-        node = EmRun(children: [node]);
+        node = EmRun(children: [node], editorSyntax: emSyntax);
       }
       if (kinds.contains(MarkKind.strong)) {
-        node = StrongRun(children: [node]);
+        node = StrongRun(children: [node], editorSyntax: strongSyntax);
       }
     }
     if (forEditing) {
@@ -983,6 +1017,9 @@ class EditableTextContent {
         for (final e in atoms.entries)
           (e.key >= offset ? e.key + len : e.key): e.value,
       },
+      softBreaks: {
+        for (final o in softBreaks) o >= offset ? o + len : o,
+      },
     );
   }
 
@@ -1029,6 +1066,7 @@ class EditableTextContent {
     final withChar = insert(offset, kAtomChar);
     return EditableTextContent(
       text: withChar.text,
+      softBreaks: withChar.softBreaks,
       marks: withChar.marks,
       atoms: {...withChar.atoms, offset: atom},
     );
@@ -1059,6 +1097,10 @@ class EditableTextContent {
             e.key: e.value
           else if (e.key >= end)
             e.key - len: e.value,
+      },
+      softBreaks: {
+        for (final o in softBreaks)
+          if (o < start) o else if (o >= end) o - len,
       },
     );
   }
@@ -1134,6 +1176,10 @@ class EditableTextContent {
     final base = text.length;
     return EditableTextContent(
       text: text + other.text,
+      softBreaks: {
+        ...softBreaks,
+        for (final offset in other.softBreaks) offset + base,
+      },
       marks: [
         ...marks,
         for (final m in other.marks)
@@ -1212,6 +1258,7 @@ class EditableTextContent {
             isAutoLink: isAutoLink),
       ],
       atoms: atoms,
+      softBreaks: softBreaks,
     );
   }
 
@@ -1233,7 +1280,8 @@ class EditableTextContent {
         newMarks.add(m.copyWith(start: end));
       }
     }
-    return EditableTextContent(text: text, marks: newMarks, atoms: atoms);
+    return EditableTextContent(text: text, marks: newMarks, atoms: atoms,
+        softBreaks: softBreaks);
   }
 
   /// toggle:全覆盖 → 移除;否则 → 补齐(主流编辑器语义)。
@@ -1310,13 +1358,15 @@ class EditableTextContent {
           runtimeType == other.runtimeType &&
           text == other.text &&
           listEquals(marks, other.marks) &&
-          mapEquals(atoms, other.atoms);
+          mapEquals(atoms, other.atoms) &&
+          setEquals(softBreaks, other.softBreaks);
 
   @override
   int get hashCode => Object.hash(
         text,
         Object.hashAll(marks),
         Object.hashAll(atoms.entries.map((e) => Object.hash(e.key, e.value))),
+        Object.hashAllUnordered(softBreaks),
       );
 
   @override

@@ -68,7 +68,10 @@ class EditingDelimiterRun extends TextRun {
 /// `<em>` / `<i>` 斜体,可包含嵌套行内子节点。
 @immutable
 class EmRun extends InlineNode {
-  const EmRun({required this.children});
+  const EmRun({required this.children, this.editorSyntax});
+
+  /// 导入时的定界符来源，经 mark.attr 保留。
+  final String? editorSyntax;
 
   final List<InlineNode> children;
 
@@ -76,6 +79,7 @@ class EmRun extends InlineNode {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is EmRun &&
+          editorSyntax == other.editorSyntax &&
           runtimeType == other.runtimeType &&
           listEquals(children, other.children);
 
@@ -89,7 +93,10 @@ class EmRun extends InlineNode {
 /// `<strong>` / `<b>` 粗体,可包含嵌套行内子节点。
 @immutable
 class StrongRun extends InlineNode {
-  const StrongRun({required this.children});
+  const StrongRun({required this.children, this.editorSyntax});
+
+  /// 导入时的定界符来源，经 mark.attr 保留。
+  final String? editorSyntax;
 
   final List<InlineNode> children;
 
@@ -97,6 +104,7 @@ class StrongRun extends InlineNode {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is StrongRun &&
+          editorSyntax == other.editorSyntax &&
           runtimeType == other.runtimeType &&
           listEquals(children, other.children);
 
@@ -135,7 +143,10 @@ enum InlineStyleKind {
 /// - 需占位类(superscript/subscript 垂直偏移)→ WidgetSpan(占 1 ￼,投影原子)。
 @immutable
 class StyledRun extends InlineNode {
-  const StyledRun({required this.kind, required this.children});
+  const StyledRun({required this.kind, required this.children, this.editorSyntax});
+
+  /// HTML 与 BBCode 虽视觉相同，cook 结构不同，保留来源。
+  final String? editorSyntax;
 
   final InlineStyleKind kind;
   final List<InlineNode> children;
@@ -146,6 +157,7 @@ class StyledRun extends InlineNode {
       other is StyledRun &&
           runtimeType == other.runtimeType &&
           kind == other.kind &&
+          editorSyntax == other.editorSyntax &&
           listEquals(children, other.children);
 
   @override
@@ -246,20 +258,22 @@ class SizedRun extends InlineNode {
   String toString() => 'SizedRun(${scale}x, ${children.length} children)';
 }
 
-/// `<br>` 强制换行。
+/// 行内换行；默认是 `<br>` 硬换行，soft 保留 Markdown 单换行来源。
 @immutable
 class LineBreakRun extends InlineNode {
-  const LineBreakRun();
+  const LineBreakRun({this.soft = false});
+
+  final bool soft;
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) || other is LineBreakRun;
+      identical(this, other) || other is LineBreakRun && soft == other.soft;
 
   @override
-  int get hashCode => 0;
+  int get hashCode => soft.hashCode;
 
   @override
-  String toString() => 'LineBreakRun()';
+  String toString() => 'LineBreakRun(soft: $soft)';
 }
 
 /// `<a href="...">` 链接,可嵌套行内子节点。
@@ -289,6 +303,8 @@ class LinkRun extends InlineNode {
     this.hashtagIcon,
     this.isOneboxLink = false,
     this.editorLinkSource,
+    this.editorLinkTitle,
+    this.editorAngleLink = false,
   });
 
   /// 已解析的链接 URL(parser 阶段不做 CDN 重写,显示给 LinkHandler)。
@@ -333,6 +349,10 @@ class LinkRun extends InlineNode {
   /// 时按 children 导入并透传其中三态，不能把样式分片再次扩成完整 href。
   final ({bool? isAutoLink})? editorLinkSource;
 
+  /// token 来源的标题与尖括号自动链接，保留其非裸链语义。
+  final String? editorLinkTitle;
+  final bool editorAngleLink;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -346,12 +366,14 @@ class LinkRun extends InlineNode {
           hashtagIcon == other.hashtagIcon &&
           isOneboxLink == other.isOneboxLink &&
           editorLinkSource == other.editorLinkSource &&
+          editorLinkTitle == other.editorLinkTitle &&
+          editorAngleLink == other.editorAngleLink &&
           listEquals(children, other.children);
 
   @override
   int get hashCode => Object.hash(href, isAttachment, filename, origHref,
       hashtagRef, hashtagIcon, isOneboxLink, editorLinkSource,
-      Object.hashAll(children));
+      editorLinkTitle, editorAngleLink, Object.hashAll(children));
 
   @override
   String toString() => 'LinkRun($href'
@@ -830,6 +852,7 @@ class FootnoteRefRun extends InlineNode {
   const FootnoteRefRun({
     required this.number,
     required this.fnId,
+    this.markdownLabel,
     this.contentHtml,
   });
 
@@ -838,6 +861,9 @@ class FootnoteRefRun extends InlineNode {
 
   /// 脚注锚点 id(`href="#fn:abc"` 的 `fn:abc`)。给主项目跳转用。
   final String fnId;
+
+  /// 原始 Markdown 标签，与显示编号分离。
+  final String? markdownLabel;
 
   /// 脚注正文 HTML(parser 从 section.footnotes 内 `<li id="fnId">` 提取,
   /// 已 strip 末尾 `<a class="footnote-backref">↩︎</a>`)。
@@ -851,10 +877,11 @@ class FootnoteRefRun extends InlineNode {
           runtimeType == other.runtimeType &&
           number == other.number &&
           fnId == other.fnId &&
+          markdownLabel == other.markdownLabel &&
           contentHtml == other.contentHtml;
 
   @override
-  int get hashCode => Object.hash(number, fnId, contentHtml);
+  int get hashCode => Object.hash(number, fnId, markdownLabel, contentHtml);
 
   @override
   String toString() =>
@@ -898,6 +925,10 @@ class LocalDateRun extends InlineNode {
     this.format,
     this.displayedTimezone,
     this.countdown = false,
+    this.countdownRaw,
+    this.recurring,
+    this.endDate,
+    this.endTime,
     this.range,
   });
 
@@ -923,6 +954,16 @@ class LocalDateRun extends InlineNode {
   /// `data-countdown` 属性存在 = 倒计时模式。
   final bool countdown;
 
+  /// 保留显式 false 与插件支持的原始倒计时值。
+  final String? countdownRaw;
+
+  /// 重复周期，例如 `1.months`。
+  final String? recurring;
+
+  /// 编辑器将完整范围作为一个原子，避免拆成两个日期而丢失关联。
+  final String? endDate;
+  final String? endTime;
+
   /// `data-range="from"` / `"to"` / null,标记范围起止(可选)。
   final String? range;
 
@@ -941,6 +982,10 @@ class LocalDateRun extends InlineNode {
           format == other.format &&
           displayedTimezone == other.displayedTimezone &&
           countdown == other.countdown &&
+          countdownRaw == other.countdownRaw &&
+          recurring == other.recurring &&
+          endDate == other.endDate &&
+          endTime == other.endTime &&
           range == other.range &&
           fallbackText == other.fallbackText &&
           listEquals(timezones, other.timezones);
@@ -953,6 +998,10 @@ class LocalDateRun extends InlineNode {
         format,
         displayedTimezone,
         countdown,
+        countdownRaw,
+        recurring,
+        endDate,
+        endTime,
         range,
         fallbackText,
         Object.hashAll(timezones),

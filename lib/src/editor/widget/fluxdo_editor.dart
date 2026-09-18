@@ -42,6 +42,7 @@ import '../../node/node.dart'
         ImageRun,
         InlineNode,
         LocalDateRun,
+        LinkRun,
         TableNode;
 import '../../render/block_text_styles.dart';
 import '../../render/node_factory.dart';
@@ -61,6 +62,7 @@ import '../input/editor_key_handler.dart';
 import '../input/three_finger_gestures.dart';
 import '../model/editor_image_commands.dart';
 import '../model/editor_state.dart';
+import '../model/editable_text_content.dart';
 import '../model/editor_object.dart';
 import 'editor_object_frame.dart';
 import 'editable_paragraph.dart';
@@ -135,7 +137,7 @@ class IslandSelection {
   int get hashCode => Object.hash(island, globalRect);
 }
 
-/// collapsed 光标落在链接内的上下文(宿主链接工具条锚定/编辑用)。
+/// collapsed 光标落在 mark 链接内或整选链接原子的上下文(宿主链接工具条锚定/编辑用)。
 ///
 /// [rangeGlobal] = 链接文本区间的全局包围矩形(帧后计算,跟随滚动
 /// 刷新);[start]/[end] = 块内编辑偏移(原位替换用)。
@@ -334,6 +336,8 @@ class FluxdoEditor extends StatefulWidget {
     this.nodeFactory,
     this.markdownImporter,
     this.richPasteImporter,
+    this.semanticMarkdownInserter,
+    this.semanticRichPasteInserter,
     this.onCalloutTypeTrigger,
     this.onIslandEditRequest,
     this.onContainerTitleEdit,
@@ -414,6 +418,20 @@ class FluxdoEditor extends StatefulWidget {
   /// 空 = 剪贴板无富内容或转换失败,回落 [markdownImporter] 纯文本路径;
   /// 抛异常同回落。null = 不启用富粘贴。
   final Future<List<EditorBlock>?> Function()? richPasteImporter;
+
+  /// 语义宿主直接导入并插入片段；true 表示已消费，不再调用旧块导入器。
+  /// selection 在异步操作前捕获；宿主须在自己的 await 前建立书签，
+  /// 并在目标失效时取消插入。false 或异常仅在文档版本与选区均未变化时
+  /// 回落旧导入器/原始纯文本；读取纯文本期间目标变化则不调用此入口。
+  final Future<bool> Function(String markdown, EditorSelection? selection)?
+  semanticMarkdownInserter;
+
+  /// 富粘贴原数据入口：宿主自行读取系统 HTML 等原格式并插入语义片段。
+  /// 在读取剪贴板前调用，便于宿主立即建立书签；true 阻断所有后续粘贴，
+  /// false 或异常仅在文档版本与选区均未变化时继续旧富格式及
+  /// Markdown/纯文本路径。语义宿主可将旧导入器设为 null。
+  final Future<bool> Function(EditorSelection? selection)?
+  semanticRichPasteInserter;
 
   /// input rule `[!type] ` 命中(callout 手打)时的完整内容征集回调:
   /// 宿主弹标题/折叠态对话框(同"+"菜单插入共用一个对话框),返回完整
@@ -1764,7 +1782,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
 
   LinkCaretInfo? _lastLinkCaret;
 
-  /// collapsed 光标 ↔ 链接 mark 的进出检测(帧后;变化才通知)。
+  /// collapsed 光标/原子整选 ↔ 链接的进出检测(帧后;变化才通知)。
   /// 手势进行中(长按/拖手柄/浮动)不更新 —— end 后帧收敛时补。
   void _notifyLinkCaret() {
     final cb = widget.onLinkCaret;
@@ -1772,13 +1790,23 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     LinkCaretInfo? info;
     final sel = widget.state.selection;
     if (sel != null &&
-        sel.isCollapsed &&
         _focusNode.hasPrimaryFocus &&
         !_longPressing &&
         !_handleDragging &&
         !_floatingCursor) {
       final block = widget.state.textBlockById(sel.extent.blockId);
-      final range = block?.content.linkRangeAt(sel.extent.offset);
+      final norm = widget.state.normalizedSelection();
+      final startOffset = norm?.$1.offset;
+      final atom = block?.content.atoms[startOffset];
+      final selectedLink =
+          atom is LinkRun &&
+          norm!.$1.blockId == norm.$2.blockId &&
+          norm.$2.offset == startOffset! + 1;
+      final range = selectedLink
+          ? (startOffset, startOffset + 1, atom.origHref ?? atom.href)
+          : sel.isCollapsed
+          ? block?.content.linkRangeAt(sel.extent.offset)
+          : null;
       if (block != null && range != null) {
         final (start, end, href) = range;
         final rect = _linkRangeGlobalRect(sel.extent.blockId, start, end);
@@ -1788,7 +1816,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             start: start,
             end: end,
             href: href,
-            text: block.content.text.substring(start, end),
+            text: selectedLink
+                ? EditableTextContent.fromInlines(atom.children).text
+                : block.content.text.substring(start, end),
             rangeGlobal: rect,
           );
         }
@@ -1891,6 +1921,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   /// HorizontalRuleNode;importer 缺席时无操作(标记文本已被规则清空,
   /// 用户可用插入菜单)。
   Future<void> _insertHorizontalRule(String blockId) async {
+    if (widget.semanticMarkdownInserter != null) {
+      await _insertSemanticRule('---', widget.state.selection);
+      return;
+    }
     final importer = widget.markdownImporter;
     if (importer == null) return;
     List<EditorBlock>? frag;
@@ -1913,14 +1947,28 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     widget.state.pendingCalloutType = null;
     final trigger = widget.onCalloutTypeTrigger;
     final importer = widget.markdownImporter;
-    if (trigger == null || importer == null || type == null || type.isEmpty) {
+    final semantic = widget.semanticMarkdownInserter;
+    final selection = widget.state.selection;
+    final revision = widget.state.docRevision;
+    if (trigger == null ||
+        (importer == null && semantic == null) ||
+        type == null ||
+        type.isEmpty) {
       return;
     }
     final markdown = await trigger(type);
     if (!mounted || markdown == null || markdown.isEmpty) return;
+    if (semantic != null) {
+      if (revision != widget.state.docRevision ||
+          selection != widget.state.selection) {
+        return;
+      }
+      await _insertSemanticRule(markdown, selection);
+      return;
+    }
     List<EditorBlock>? frag;
     try {
-      frag = await importer(markdown);
+      frag = await importer!(markdown);
     } catch (_) {
       return;
     }
@@ -1929,8 +1977,75 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     _ime.syncFromState(show: false);
   }
 
+  /// 规则生成的源码也走同一语义入口，失败保留完整源码，不吞掉已清空标记。
+  Future<void> _insertSemanticRule(
+    String markdown,
+    EditorSelection? selection,
+  ) async {
+    final revision = widget.state.docRevision;
+    if (await _trySemanticMarkdown(markdown, selection)) return;
+    if (!mounted ||
+        revision != widget.state.docRevision ||
+        selection != widget.state.selection) {
+      return;
+    }
+    List<EditorBlock>? fragment;
+    try {
+      fragment = await widget.markdownImporter?.call(markdown);
+    } catch (_) {}
+    if (!mounted ||
+        revision != widget.state.docRevision ||
+        selection != widget.state.selection) {
+      return;
+    }
+    if (fragment != null && fragment.isNotEmpty) {
+      widget.state.pasteBlocks(fragment);
+    } else {
+      widget.state.pastePlainText(markdown);
+    }
+    _ime.syncFromState(show: false);
+  }
+
+  Future<bool> _trySemanticMarkdown(
+    String markdown,
+    EditorSelection? selection,
+  ) async {
+    try {
+      final consumed =
+          await widget.semanticMarkdownInserter?.call(markdown, selection) ??
+          false;
+      if (consumed && mounted) _ime.syncFromState(show: false);
+      return consumed;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _clipboardPaste() async {
     final ticket = ++_pasteTicket;
+    final selection = widget.state.selection;
+    final revision = widget.state.docRevision;
+    final semantic =
+        widget.semanticMarkdownInserter != null ||
+        widget.semanticRichPasteInserter != null;
+    // 未启用语义入口时保留旧行为；启用后迟到的回落绝不覆盖新输入。
+    bool valid() =>
+        mounted &&
+        ticket == _pasteTicket &&
+        (!semantic ||
+            (revision == widget.state.docRevision &&
+                selection == widget.state.selection));
+    final semanticRich = widget.semanticRichPasteInserter;
+    // 必须在本方法的首个 await 前调用，让宿主同步捕获语义书签。
+    if (semanticRich != null) {
+      try {
+        if (await semanticRich(selection)) {
+          if (mounted) _ime.syncFromState(show: false);
+          return;
+        }
+      } catch (_) {}
+      if (!valid()) return;
+    }
 
     // 富格式优先(text/html 等):宿主读剪贴板+转换,拿到块直接插;
     // 任何一步落空回落纯文本路径(不叠加插入)。
@@ -1942,7 +2057,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       } catch (_) {
         frag = null;
       }
-      if (!mounted || ticket != _pasteTicket) return;
+      if (!valid()) return;
       if (frag != null && frag.isNotEmpty) {
         widget.state.pasteBlocks(frag);
         _ime.syncFromState(show: false);
@@ -1953,8 +2068,12 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text == null || text.isEmpty) return;
-    if (!mounted || ticket != _pasteTicket) return;
+    if (!valid()) return;
 
+    if (widget.semanticMarkdownInserter != null) {
+      if (await _trySemanticMarkdown(text, selection)) return;
+      if (!valid()) return;
+    }
     final importer = widget.markdownImporter;
     List<EditorBlock>? fragment;
     if (importer != null) {
@@ -1963,7 +2082,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
       } catch (_) {
         fragment = null; // 导入失败降级纯文本
       }
-      if (!mounted || ticket != _pasteTicket) return;
+      if (!valid()) return;
     }
 
     if (fragment != null && fragment.isNotEmpty) {
@@ -2301,7 +2420,6 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     // 点击/工具栏弹 modal 改属性)。命中位置左右各探一格:tap 落点在
     // 原子字符两侧边界都算点中它。
     final onAtomTap = widget.onAtomTap;
-    if (onAtomTap == null) return;
     final sel = widget.state.selection;
     if (sel == null || !sel.isCollapsed) return;
     final block = widget.state.textBlockById(sel.extent.blockId);
@@ -2309,8 +2427,17 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     for (final off in [sel.extent.offset, sel.extent.offset - 1]) {
       if (off < 0) continue;
       final atom = block.content.atoms[off];
+      if (atom is LinkRun) {
+        widget.state.updateSelection(
+          EditorSelection(
+            base: EditorPosition(blockId: block.id, offset: off),
+            extent: EditorPosition(blockId: block.id, offset: off + 1),
+          ),
+        );
+        return;
+      }
       if (atom is LocalDateRun) {
-        onAtomTap(sel.extent.blockId, off, atom);
+        onAtomTap?.call(sel.extent.blockId, off, atom);
         return;
       }
     }
@@ -3465,6 +3592,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                 ? _requestObjectMenu
                 : null,
             onChanged: (md) => widget.onTableEdited!(block, md),
+            onNodeChanged: (node) => widget.state.updateIslandNode(block.id, node),
             selected:
                 !widget.objectToolbarManaged &&
                 _isSingleIslandSelection(block.id),
@@ -3586,7 +3714,12 @@ class _FluxdoEditorState extends State<FluxdoEditor>
                         ? null
                         : () => widget.onAddGridImages!(ib.id),
                     addingImages: widget.addingImageGrids.contains(ib.id),
-                    pendingUploads: widget.gridPendingUploadsBuilder?.call(context, ib.id) ?? const [],
+                    pendingUploads:
+                        widget.gridPendingUploadsBuilder?.call(
+                          context,
+                          ib.id,
+                        ) ??
+                        const [],
                     controlSurfaceBuilder: widget.gridControlSurfaceBuilder,
                     onImageMenu: widget.onObjectMenuRequested == null
                         ? null
@@ -3758,7 +3891,9 @@ class _FluxdoEditorState extends State<FluxdoEditor>
               // 见 buildBlock 注释)。
               // 同一容器被孤岛分割后可能有多个不连续片段；身份需与
               // 下方 _containerKeys 一致，不能只按 groupId 复用。
-              key: ValueKey('shell_${frame.groupId}_${state.blocks[runStart].id}_$level'),
+              key: ValueKey(
+                'shell_${frame.groupId}_${state.blocks[runStart].id}_$level',
+              ),
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: EditorObjectFrame(
                 onLayout: _scheduleObjectGeometry,

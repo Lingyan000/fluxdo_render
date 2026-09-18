@@ -100,6 +100,7 @@ bool addImageAtomToGrid(EditorState state, String blockId, int offset) {
         ordered: block.ordered,
         depth: block.depth,
         listStart: block.listStart,
+        listLoose: block.listLoose,
         containers: block.containers,
       ),
   ], selection: selectIsland(islandId));

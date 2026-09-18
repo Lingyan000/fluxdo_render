@@ -164,7 +164,7 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
       padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
       child: Row(
         children: [
-          if (_editing)
+          if (_editing && !widget.node.rawHtml && !widget.node.rawMarkdown)
             SizedBox(
               width: 120,
               child: TextField(
@@ -197,7 +197,11 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
             )
           else
             Text(
-              (widget.node.language ?? 'TEXT').toUpperCase(),
+              widget.node.rawHtml
+                  ? 'HTML 源码'
+                  : widget.node.rawMarkdown
+                  ? 'Markdown 源码'
+                  : (widget.node.language ?? 'TEXT').toUpperCase(),
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w500,

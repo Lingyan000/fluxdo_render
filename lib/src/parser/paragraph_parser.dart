@@ -809,6 +809,7 @@ class ParagraphParser {
               children: List.unmodifiable(
                   cell.children.map((b) => _inheritAlign(b, align))),
               isHeader: cell.isHeader,
+              alignment: cell.alignment,
             ))),
     ];
     return TableNode(
@@ -2270,6 +2271,7 @@ class ParagraphParser {
       cells.add(TableCellData(
         children: List.unmodifiable(children),
         isHeader: isHeader,
+        alignment: cellAlign,
       ));
     }
     return cells;
