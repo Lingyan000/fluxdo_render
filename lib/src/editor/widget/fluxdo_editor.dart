@@ -1454,6 +1454,16 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     final pixels = _scrollPosition?.pixels ?? 0;
     final delta = pixels - _lastScrollPixels;
     _lastScrollPixels = pixels;
+    final tableRect = _tableEditingRect;
+    if (tableRect != null && delta != 0) {
+      _tableEditingRect = tableRect.translate(0, -delta);
+    }
+    if (_tableEditingRect != null) {
+      _revealTableEditingRect(
+        userScrolling:
+            _scrollPosition?.userScrollDirection != ScrollDirection.idle,
+      );
+    }
     if (_handles?.isShowing ?? false) {
       _handles!.update(yCompensation: delta);
       _contextBar?.reposition(yCompensation: delta);
@@ -1463,6 +1473,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
     if (_lastImageAtomSel == null &&
         _caretInfo.value.$1 == null &&
+        _tableEditingRect == null &&
         _dragGlobal == null &&
         !_longPressing) {
       return;
@@ -1496,35 +1507,61 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   // -----------------------------------------------------------------
 
   final _caretReveal = EditorCaretRevealTracker();
-  double? _tableRevealTarget;
+  final _tableReveal = EditorRectRevealTracker<(String, (int, int))>();
+  (String, (int, int))? _tableEditingKey;
+  Rect? _tableEditingRect;
 
-  void _onTableEditingRectChanged(Rect? rect) {
-    if (rect == null) {
-      _tableRevealTarget = null;
+  void _onTableEditingRectChanged(
+    String tableId,
+    ({(int, int) cell, Rect rect})? geometry,
+  ) {
+    if (geometry == null) {
+      if (_tableEditingKey?.$1 == tableId) {
+        _tableEditingKey = null;
+        _tableEditingRect = null;
+        _tableReveal.reset();
+      }
       return;
     }
-    _tableRevealTarget = _scrollRectIntoVisibleViewport(
-      rect,
-      lastTarget: _tableRevealTarget,
-    );
+    _tableEditingKey = (tableId, geometry.cell);
+    _tableEditingRect = geometry.rect;
+    _revealTableEditingRect();
+  }
+
+  void _revealTableEditingRect({bool userScrolling = false}) {
+    final key = _tableEditingKey;
+    final rect = _tableEditingRect;
+    final pos = _scrollPosition;
+    if (key == null || rect == null || pos == null) return;
+    final visible = _visibleViewportRect(forCaret: true);
+    if (visible == null) return;
+    final scrolling =
+        userScrolling || pos.userScrollDirection != ScrollDirection.idle;
+    if (!_tableReveal.shouldReveal(
+      key: key,
+      caret: rect,
+      viewport: visible,
+      userScrolling: scrolling,
+      autoScrolling: pos.isScrollingNotifier.value && !scrolling,
+    )) {
+      return;
+    }
+    _scrollRectIntoVisibleViewport(rect);
   }
 
   /// 将任意编辑目标矩形滚入正文同一有效视口。正文 caret 与表格 cell
   /// 共用这一个滚动核心，视口遮挡、键盘上缘、用户滚动和动画参数
   /// 只有一个真源。
-  double? _scrollRectIntoVisibleViewport(
-    Rect targetRect, {
-    double? lastTarget,
-  }) {
+  void _scrollRectIntoVisibleViewport(Rect targetRect) {
     final pos = _scrollPosition;
-    if (pos == null || !pos.hasContentDimensions) return lastTarget;
-    if (pos.userScrollDirection != ScrollDirection.idle) return lastTarget;
+    if (pos == null || !pos.hasContentDimensions) return;
+    if (pos.userScrollDirection != ScrollDirection.idle) return;
     final visible = _visibleViewportRect(forCaret: true);
-    if (visible == null) return lastTarget;
+    if (visible == null) return;
     const pad = 24.0;
     final visBottom = visible.bottom - pad;
     final visTop = visible.top + pad;
-    if (visBottom <= visTop) return lastTarget;
+    if (visBottom <= visTop) return;
 
     double? delta;
     if (targetRect.bottom > visBottom) {
@@ -1532,23 +1569,17 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     } else if (targetRect.top < visTop) {
       delta = targetRect.top - visTop;
     }
-    if (delta == null) return null;
+    if (delta == null) return;
     final scrollTarget = (pos.pixels + delta).clamp(
       pos.minScrollExtent,
       pos.maxScrollExtent,
     );
-    if ((scrollTarget - pos.pixels).abs() < 1) return scrollTarget;
-    if (lastTarget != null &&
-        (lastTarget - scrollTarget).abs() < 1 &&
-        pos.isScrollingNotifier.value) {
-      return lastTarget;
-    }
+    if ((scrollTarget - pos.pixels).abs() < 1) return;
     pos.animateTo(
       scrollTarget,
       duration: const Duration(milliseconds: 120),
       curve: Curves.easeOut,
     );
-    return scrollTarget;
   }
 
   /// 光标越出可见区(视口 ∩ 键盘上方)时滚动到可见。仅折叠光标态
@@ -3691,7 +3722,8 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             key: _islandKeys.putIfAbsent(block.id, GlobalKey.new),
             node: block.node as TableNode,
             autoEdit: widget.state.consumeIslandEditRequest(block.id),
-            onEditingRectChanged: _onTableEditingRectChanged,
+            onEditingRectChanged: (geometry) =>
+                _onTableEditingRectChanged(block.id, geometry),
             onContextMenu: widget.objectToolbarManaged
                 ? _requestObjectMenu
                 : null,

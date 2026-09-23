@@ -79,7 +79,7 @@ class EditorTableGrid extends StatefulWidget {
 
   /// 当前聚焦编辑框的全局矩形。表格只上报几何，不自行判断视口或滚动；
   /// 宿主 FluxdoEditor 复用正文光标同一套 reveal 策略处理。
-  final ValueChanged<Rect?>? onEditingRectChanged;
+  final ValueChanged<({(int, int) cell, Rect rect})?>? onEditingRectChanged;
 
   @override
   State<EditorTableGrid> createState() => _EditorTableGridState();
@@ -240,9 +240,10 @@ class _EditorTableGridState extends State<EditorTableGrid>
           !renderObject.hasSize) {
         return;
       }
-      widget.onEditingRectChanged?.call(
-        renderObject.localToGlobal(Offset.zero) & renderObject.size,
-      );
+      widget.onEditingRectChanged?.call((
+        cell: _editing!,
+        rect: renderObject.localToGlobal(Offset.zero) & renderObject.size,
+      ));
     });
   }
 
