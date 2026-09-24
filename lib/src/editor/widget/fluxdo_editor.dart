@@ -75,6 +75,7 @@ import 'editor_context_bar.dart';
 import 'editor_image_grid.dart';
 import 'editor_island.dart';
 import 'editor_table_grid.dart';
+import 'editor_table_actions.dart';
 
 /// 图片原子选中态(官方 ProseMirror NodeSelection 对应物)。
 ///
@@ -342,6 +343,8 @@ class FluxdoEditor extends StatefulWidget {
     this.onIslandEditRequest,
     this.onContainerTitleEdit,
     this.onTableEdited,
+    this.onTableContextChanged,
+    this.onTableCommit,
     this.onCodeBlockEdited,
     this.onAtomTap,
     this.onImageAtomSelectionChanged,
@@ -458,6 +461,9 @@ class FluxdoEditor extends StatefulWidget {
   /// 表格 cell 编辑确认 → 新 markdown 表格文本(宿主 cook 后
   /// state.replaceIsland)。null = 表格走通用只读岛。
   final void Function(IslandBlock island, String markdown)? onTableEdited;
+  final ValueChanged<EditorTableContext?>? onTableContextChanged;
+  final Future<bool> Function(IslandBlock island, String markdown)?
+  onTableCommit;
 
   /// 代码块岛内编辑提交 → 新 code/language(宿主直接
   /// state.updateIslandNode(CodeBlockNode(...)),结构化形变不经 cook)。
@@ -1506,6 +1512,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
   // 软键盘 ensureVisible(S5)
   // -----------------------------------------------------------------
 
+  String? _contextTableId;
   final _caretReveal = EditorCaretRevealTracker();
   final _tableReveal = EditorRectRevealTracker<(String, (int, int))>();
   (String, (int, int))? _tableEditingKey;
@@ -3721,6 +3728,21 @@ class _FluxdoEditorState extends State<FluxdoEditor>
           child: EditorTableGrid(
             key: _islandKeys.putIfAbsent(block.id, GlobalKey.new),
             node: block.node as TableNode,
+            tableId: block.id,
+            onEditingContextChanged: widget.onTableContextChanged == null
+                ? null
+                : (value) {
+                    if (value != null) {
+                      _contextTableId = block.id;
+                      widget.onTableContextChanged!(value);
+                    } else if (_contextTableId == block.id) {
+                      _contextTableId = null;
+                      widget.onTableContextChanged!(null);
+                    }
+                  },
+            commitEditing: widget.onTableCommit == null
+                ? null
+                : (markdown) => widget.onTableCommit!(block, markdown),
             autoEdit: widget.state.consumeIslandEditRequest(block.id),
             onEditingRectChanged: (geometry) =>
                 _onTableEditingRectChanged(block.id, geometry),

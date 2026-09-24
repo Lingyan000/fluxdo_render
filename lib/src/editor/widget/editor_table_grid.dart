@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RendererBinding;
 
 import '../../node/node.dart';
+import 'editor_table_actions.dart';
 import '../model/markdown_serializer.dart';
 
 /// 编辑器自管交互区的命中标记(MetaData.metaData):FluxdoEditor 的
@@ -58,6 +59,9 @@ class EditorTableGrid extends StatefulWidget {
     this.onSelectRequest,
     this.onContextMenu,
     this.onEditingRectChanged,
+    this.onEditingContextChanged,
+    this.commitEditing,
+    this.tableId,
   });
 
   final TableNode node;
@@ -80,6 +84,10 @@ class EditorTableGrid extends StatefulWidget {
   /// 当前聚焦编辑框的全局矩形。表格只上报几何，不自行判断视口或滚动；
   /// 宿主 FluxdoEditor 复用正文光标同一套 reveal 策略处理。
   final ValueChanged<({(int, int) cell, Rect rect})?>? onEditingRectChanged;
+
+  final String? tableId;
+  final ValueChanged<EditorTableContext?>? onEditingContextChanged;
+  final Future<bool> Function(String markdown)? commitEditing;
 
   @override
   State<EditorTableGrid> createState() => _EditorTableGridState();
@@ -138,6 +146,10 @@ class _EditorTableGridState extends State<EditorTableGrid>
       RendererBinding.instance.mouseTracker.mouseIsConnected;
 
   /// 柄/加条的"活跃"判定:桌面 = hover;触屏 = 编辑/选中态常显。
+  bool get _mobileManaged =>
+      !_hoverCapable && widget.onEditingContextChanged != null;
+  double get _handleInset => _mobileManaged ? 0 : _kHandleThickness + 2;
+
   bool get _handlesActive =>
       _hoverGrid || (!_hoverCapable && (_editing != null || widget.selected));
 
@@ -148,6 +160,7 @@ class _EditorTableGridState extends State<EditorTableGrid>
     _syncFromNode();
     if (widget.autoEdit) _scheduleFirstCell();
     _cellFocus.addListener(_onCellFocusChanged);
+    _cellController.addListener(_editingChanged);
   }
 
   void _onCellFocusChanged() {
@@ -167,6 +180,13 @@ class _EditorTableGridState extends State<EditorTableGrid>
     }
     if (widget.autoEdit && !oldWidget.autoEdit) _scheduleFirstCell();
     if (oldWidget.node != widget.node) {
+      // 显式提交由宿主验证旧节点身份；格式规范化可能改变 Markdown，
+      // 不能仅靠字符串相等识别这次已确认的回写。
+      if (_awaitingCommitEcho) {
+        _pendingEchoes.clear();
+        _syncFromNode();
+        return;
+      }
       final echo = tableGridToMarkdown(
         [
           for (final row in widget.node.rows)
@@ -196,6 +216,8 @@ class _EditorTableGridState extends State<EditorTableGrid>
       _pendingEchoes.clear();
       _editing = null;
       widget.onEditingRectChanged?.call(null);
+      if (!_structureBusy) _publishContext(clear: true);
+      _revision++;
       _syncFromNode();
     }
   }
@@ -240,6 +262,7 @@ class _EditorTableGridState extends State<EditorTableGrid>
           !renderObject.hasSize) {
         return;
       }
+      _publishContext();
       widget.onEditingRectChanged?.call((
         cell: _editing!,
         rect: renderObject.localToGlobal(Offset.zero) & renderObject.size,
@@ -256,9 +279,12 @@ class _EditorTableGridState extends State<EditorTableGrid>
 
   @override
   void dispose() {
+    widget.onEditingContextChanged?.call(null);
     widget.onEditingRectChanged?.call(null);
+    if (!_structureBusy) _publishContext(clear: true);
     WidgetsBinding.instance.removeObserver(this);
     _cellFocus.removeListener(_onCellFocusChanged);
+    _cellController.removeListener(_editingChanged);
     _cellController.dispose();
     _cellFocus.dispose();
     super.dispose();
@@ -312,11 +338,149 @@ class _EditorTableGridState extends State<EditorTableGrid>
     final next = _cellController.text;
     _editing = null;
     widget.onEditingRectChanged?.call(null);
+    if (!_structureBusy) _publishContext(clear: true);
     if (r < _rows && c < _cols && _cells[r][c] != next) {
       _cells[r][c] = next;
       _emit();
     } else if (mounted) {
       setState(() {});
+    }
+  }
+
+  int _revision = 0;
+  bool _structureBusy = false;
+  bool _awaitingCommitEcho = false;
+  (int, int)? _operationCell;
+
+  void _editingChanged() {
+    _revision++;
+    _publishContext();
+  }
+
+  void _publishContext({bool clear = false}) {
+    final cell = _editing ?? _operationCell;
+    final revision = _revision;
+    if (clear || cell == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_structureBusy && _editing == null) {
+          widget.onEditingContextChanged?.call(null);
+        }
+      });
+      return;
+    }
+    final (r, c) = cell;
+    if (r >= _rows || c >= _cols) return;
+    String value(int row, int col) =>
+        _editing == (row, col) ? _cellController.text : _cells[row][col];
+    final context = EditorTableContext(
+      tableId: widget.tableId ?? widget.node.id,
+      cell: cell,
+      revision: revision,
+      rows: _rows,
+      columns: _cols,
+      rowHasContent: List.generate(
+        _cols,
+        (i) => value(r, i),
+      ).any((v) => v.trim().isNotEmpty),
+      columnHasContent: List.generate(
+        _rows,
+        (i) => value(i, c),
+      ).any((v) => v.trim().isNotEmpty),
+      busy: _structureBusy,
+      execute: (action) => _executeAction(action, cell, revision),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          revision == _revision &&
+          (_editing ?? _operationCell) == cell) {
+        widget.onEditingContextChanged?.call(context);
+      }
+    });
+  }
+
+  Future<EditorTableActionResult> _executeAction(
+    EditorTableAction action,
+    (int, int) cell,
+    int revision,
+  ) async {
+    if (!mounted || revision != _revision || _editing != cell) {
+      return EditorTableActionResult.stale;
+    }
+    if (_structureBusy ||
+        widget.onNodeChanged == null ||
+        widget.commitEditing == null) {
+      return EditorTableActionResult.unavailable;
+    }
+    final (r, c) = cell;
+    if ((action == EditorTableAction.deleteRow && _rows <= 1) ||
+        (action == EditorTableAction.deleteColumn && _cols <= 1)) {
+      return EditorTableActionResult.unavailable;
+    }
+    setState(() => _structureBusy = true);
+    _operationCell = cell;
+    _publishContext();
+    final text = _cellController.text;
+    try {
+      if (_cells[r][c] != text) {
+        final cells = [for (final row in _cells) List<String>.of(row)];
+        cells[r][c] = text;
+        final markdown = tableGridToMarkdown(
+          cells,
+          hasHeader: _hasHeader,
+          alignments: _alignments,
+        );
+        _pendingEchoes.add(markdown);
+        final accepted = await widget.commitEditing!(markdown);
+        if (!mounted) return EditorTableActionResult.stale;
+        if (!accepted) {
+          _pendingEchoes.remove(markdown);
+          return EditorTableActionResult.failed;
+        }
+        _awaitingCommitEcho = true;
+        await WidgetsBinding.instance.endOfFrame;
+        _awaitingCommitEcho = false;
+        if (!mounted || _editing != cell || _cellController.text != text) {
+          return EditorTableActionResult.stale;
+        }
+        _syncFromNode();
+      }
+      _editing = null;
+      final target = switch (action) {
+        EditorTableAction.rowBefore => (r, c),
+        EditorTableAction.rowAfter => (r + 1, c),
+        EditorTableAction.columnBefore => (r, c),
+        EditorTableAction.columnAfter => (r, c + 1),
+        EditorTableAction.deleteRow => (r.clamp(0, _rows - 2), c),
+        EditorTableAction.deleteColumn => (r, c.clamp(0, _cols - 2)),
+      };
+      switch (action) {
+        case EditorTableAction.rowBefore:
+          _insertRow(r);
+        case EditorTableAction.rowAfter:
+          _insertRow(r + 1);
+        case EditorTableAction.columnBefore:
+          _insertCol(c);
+        case EditorTableAction.columnAfter:
+          _insertCol(c + 1);
+        case EditorTableAction.deleteRow:
+          _removeRow(r);
+        case EditorTableAction.deleteColumn:
+          _removeCol(c);
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return EditorTableActionResult.stale;
+      _startEdit(target.$1, target.$2);
+      return EditorTableActionResult.success;
+    } catch (_) {
+      return EditorTableActionResult.failed;
+    } finally {
+      _awaitingCommitEcho = false;
+      _structureBusy = false;
+      _operationCell = null;
+      if (mounted) {
+        setState(() {});
+        _publishContext();
+      }
     }
   }
 
@@ -538,7 +702,7 @@ class _EditorTableGridState extends State<EditorTableGrid>
         ),
         // 圆角外框覆盖层(只描边不拦事件;选中态 primary 加粗)
         Positioned(
-          left: _kHandleThickness + 2,
+          left: _handleInset,
           top: 0,
           bottom: 0,
           width: tableWidth,
@@ -569,23 +733,25 @@ class _EditorTableGridState extends State<EditorTableGrid>
           mainAxisSize: MainAxisSize.min,
           children: [
             // 顶部列柄条(hover 表格淡显全部,hover 该列高亮)
-            Padding(
-              padding: const EdgeInsets.only(left: _kHandleThickness + 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var c = 0; c < _cols; c++)
-                    _ColHandle(
-                      opacity: !_handlesActive
-                          ? 0
-                          : (_hoverCol == c ? 1.0 : 0.35),
-                      width: _kCellWidth + (c > 0 ? 1 : 0),
-                      onTapDown: (pos) => _showColMenu(c, pos),
-                      onHover: (h) => setState(() => _hoverCol = h ? c : null),
-                    ),
-                ],
+            if (!_mobileManaged)
+              Padding(
+                padding: EdgeInsets.only(left: _handleInset),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var c = 0; c < _cols; c++)
+                      _ColHandle(
+                        opacity: !_handlesActive
+                            ? 0
+                            : (_hoverCol == c ? 1.0 : 0.35),
+                        width: _kCellWidth + (c > 0 ? 1 : 0),
+                        onTapDown: (pos) => _showColMenu(c, pos),
+                        onHover: (h) =>
+                            setState(() => _hoverCol = h ? c : null),
+                      ),
+                  ],
+                ),
               ),
-            ),
             // IntrinsicHeight:stretch 的右缘加列条随表格高(Column 的
             // 无界高约束下 stretch 会要求无限高 → 布局崩)
             IntrinsicHeight(
@@ -595,26 +761,28 @@ class _EditorTableGridState extends State<EditorTableGrid>
                 children: [
                   rowsArea,
                   // 右缘加列条
-                  _EdgeAddBar(
-                    axis: Axis.vertical,
-                    visible: _handlesActive,
-                    tooltip: '添加列',
-                    onTap: () => _insertCol(_cols),
-                  ),
+                  if (!_mobileManaged)
+                    _EdgeAddBar(
+                      axis: Axis.vertical,
+                      visible: _handlesActive,
+                      tooltip: '添加列',
+                      onTap: () => _insertCol(_cols),
+                    ),
                 ],
               ),
             ),
             // 下缘加行条
-            Padding(
-              padding: const EdgeInsets.only(left: _kHandleThickness + 2),
-              child: _EdgeAddBar(
-                axis: Axis.horizontal,
-                visible: _handlesActive,
-                tooltip: '添加行',
-                length: tableWidth,
-                onTap: () => _insertRow(_rows),
+            if (!_mobileManaged)
+              Padding(
+                padding: EdgeInsets.only(left: _handleInset),
+                child: _EdgeAddBar(
+                  axis: Axis.horizontal,
+                  visible: _handlesActive,
+                  tooltip: '添加行',
+                  length: tableWidth,
+                  onTap: () => _insertRow(_rows),
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -720,12 +888,13 @@ class _EditorTableGridState extends State<EditorTableGrid>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _RowHandle(
-              opacity: !_handlesActive ? 0 : (_hoverRow == r ? 1.0 : 0.35),
-              onTapDown: (pos) => _showRowMenu(r, pos),
-              onHover: (h) => setState(() => _hoverRow = h ? r : null),
-            ),
-            const SizedBox(width: 2),
+            if (!_mobileManaged)
+              _RowHandle(
+                opacity: !_handlesActive ? 0 : (_hoverRow == r ? 1.0 : 0.35),
+                onTapDown: (pos) => _showRowMenu(r, pos),
+                onHover: (h) => setState(() => _hoverRow = h ? r : null),
+              ),
+            if (!_mobileManaged) const SizedBox(width: 2),
             ClipRRect(
               borderRadius: radius,
               child: Container(
