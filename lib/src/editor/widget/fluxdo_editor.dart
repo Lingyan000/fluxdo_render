@@ -345,6 +345,8 @@ class FluxdoEditor extends StatefulWidget {
     this.onTableEdited,
     this.onTableContextChanged,
     this.onTableCommit,
+    this.tableStructureControlsBuilder,
+    this.onTableStructureMenuRequested,
     this.onCodeBlockEdited,
     this.onAtomTap,
     this.onImageAtomSelectionChanged,
@@ -461,6 +463,10 @@ class FluxdoEditor extends StatefulWidget {
   /// 表格 cell 编辑确认 → 新 markdown 表格文本(宿主 cook 后
   /// state.replaceIsland)。null = 表格走通用只读岛。
   final void Function(IslandBlock island, String markdown)? onTableEdited;
+  final Widget Function(BuildContext, (int, int)?, void Function(bool, Rect))?
+  tableStructureControlsBuilder;
+  final Future<void> Function(String tableId, bool row, Rect anchor)?
+  onTableStructureMenuRequested;
   final ValueChanged<EditorTableContext?>? onTableContextChanged;
   final Future<bool> Function(IslandBlock island, String markdown)?
   onTableCommit;
@@ -3729,6 +3735,15 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             key: _islandKeys.putIfAbsent(block.id, GlobalKey.new),
             node: block.node as TableNode,
             tableId: block.id,
+            structureControlsBuilder: widget.tableStructureControlsBuilder,
+            onStructureMenuRequested:
+                widget.onTableStructureMenuRequested == null
+                ? null
+                : (row, anchor) => widget.onTableStructureMenuRequested!(
+                    block.id,
+                    row,
+                    anchor,
+                  ),
             onEditingContextChanged: widget.onTableContextChanged == null
                 ? null
                 : (value) {

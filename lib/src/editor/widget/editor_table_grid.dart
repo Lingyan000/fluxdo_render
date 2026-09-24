@@ -62,6 +62,8 @@ class EditorTableGrid extends StatefulWidget {
     this.onEditingContextChanged,
     this.commitEditing,
     this.tableId,
+    this.structureControlsBuilder,
+    this.onStructureMenuRequested,
   });
 
   final TableNode node;
@@ -86,6 +88,10 @@ class EditorTableGrid extends StatefulWidget {
   final ValueChanged<({(int, int) cell, Rect rect})?>? onEditingRectChanged;
 
   final String? tableId;
+  final Widget Function(BuildContext, (int, int)?, void Function(bool, Rect))?
+  structureControlsBuilder;
+  final Future<void> Function(bool row, Rect anchor)? onStructureMenuRequested;
+
   final ValueChanged<EditorTableContext?>? onEditingContextChanged;
   final Future<bool> Function(String markdown)? commitEditing;
 
@@ -349,6 +355,27 @@ class _EditorTableGridState extends State<EditorTableGrid>
 
   int _revision = 0;
   bool _structureBusy = false;
+  bool? _highlightRow;
+  (int, int)? _highlightCell;
+
+  Future<void> _openStructureMenu(bool row, Rect anchor) async {
+    if (_editing == null || _structureBusy || _highlightRow != null) return;
+    setState(() {
+      _highlightRow = row;
+      _highlightCell = _editing;
+    });
+    try {
+      await widget.onStructureMenuRequested?.call(row, anchor);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _highlightRow = null;
+          _highlightCell = null;
+        });
+      }
+    }
+  }
+
   bool _awaitingCommitEcho = false;
   (int, int)? _operationCell;
 
@@ -800,23 +827,35 @@ class _EditorTableGridState extends State<EditorTableGrid>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                MetaData(
-                  metaData: kEditorSelfManagedRegion,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(48, 48),
+                if (_mobileManaged && widget.structureControlsBuilder != null)
+                  MetaData(
+                    metaData: kEditorSelfManagedRegion,
+                    child: TextFieldTapRegion(
+                      child: widget.structureControlsBuilder!(
+                        context,
+                        _editing,
+                        _openStructureMenu,
                       ),
-                      onPressed: () {
-                        widget.onSelectRequest?.call();
-                        widget.onContextMenu!();
-                      },
-                      icon: const Icon(Icons.more_horiz_rounded, size: 20),
-                      label: const Text('表格操作'),
+                    ),
+                  )
+                else
+                  MetaData(
+                    metaData: kEditorSelfManagedRegion,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(48, 48),
+                        ),
+                        onPressed: () {
+                          widget.onSelectRequest?.call();
+                          widget.onContextMenu!();
+                        },
+                        icon: const Icon(Icons.more_horiz_rounded, size: 20),
+                        label: const Text('表格操作'),
+                      ),
                     ),
                   ),
-                ),
                 body,
               ],
             )
@@ -920,7 +959,16 @@ class _EditorTableGridState extends State<EditorTableGrid>
                                 ),
                               )
                             : null,
-                        child: _buildCell(r, c, isHeader, textStyle, scheme),
+                        child: ColoredBox(
+                          color:
+                              _highlightCell != null &&
+                                  (_highlightRow == true
+                                      ? r == _highlightCell!.$1
+                                      : c == _highlightCell!.$2)
+                              ? scheme.primary.withValues(alpha: .16)
+                              : Colors.transparent,
+                          child: _buildCell(r, c, isHeader, textStyle, scheme),
+                        ),
                       ),
                   ],
                 ),
