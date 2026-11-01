@@ -125,3 +125,23 @@ class GridTileScope extends InheritedWidget {
   @override
   bool updateShouldNotify(GridTileScope oldWidget) => false;
 }
+/// 链接内图片作用域 —— `<a href><img></a>`(非 lightbox)形态,flattener
+/// 用它包住 imageContentBuilder 的产物,把外层链接的点击回调递给图片。
+///
+/// 图片是 WidgetSpan,不吃 TextSpan 的链接 recognizer;主项目的图片
+/// widget 据此把单击改为打开链接(对齐网页端:链接包图点击跳链接,
+/// 而不是放大图片)。编辑态 / 纯 unit test 不挂本标记。
+class ImageLinkScope extends InheritedWidget {
+  const ImageLinkScope({super.key, required this.onTap, required super.child});
+
+  /// 外层链接的点击回调
+  final VoidCallback onTap;
+
+  /// 当前 context 所在链接的点击回调;不在链接内 → null
+  static VoidCallback? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<ImageLinkScope>()?.onTap;
+
+  @override
+  bool updateShouldNotify(ImageLinkScope oldWidget) =>
+      onTap != oldWidget.onTap;
+}
