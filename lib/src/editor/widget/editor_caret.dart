@@ -175,10 +175,7 @@ class _EditorCaretState extends State<EditorCaret>
               child: Container(
                 width: 2,
                 height: rect.height,
-                decoration: BoxDecoration(
-                  color: widget.color,
-                  borderRadius: BorderRadius.circular(1),
-                ),
+                decoration: ShapeDecoration(color: widget.color,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(1), ),),
               ),
             ),
           ),

@@ -302,18 +302,14 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
       metaData: kEditorSelfManagedRegion,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
+        decoration: ShapeDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(
             color: widget.selected
                 ? scheme.primary
                 : _editing
                 ? scheme.primary.withValues(alpha: 0.6)
                 : scheme.outlineVariant.withValues(alpha: 0.5),
             width: widget.selected || _editing ? 1.5 : 1,
-          ),
-        ),
+          ),),),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
@@ -353,20 +349,16 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
                   message: '选中代码块(选中后退格删除)',
                   child: InkWell(
                     onTap: widget.onSelectRequest,
-                    borderRadius: BorderRadius.circular(4),
+                    customBorder: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(4)),
                     child: Container(
                       padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: widget.selected
+                      decoration: ShapeDecoration(color: widget.selected
                             ? scheme.primary
-                            : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
+                            : scheme.surfaceContainerHighest,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(
                           color: widget.selected
                               ? scheme.primary
                               : scheme.outlineVariant,
-                        ),
-                      ),
+                        ),),),
                       child: Icon(
                         Icons.drag_indicator,
                         size: 12,

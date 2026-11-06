@@ -163,16 +163,12 @@ class _EditorIslandState extends State<EditorIsland> {
     );
 
     content = DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
+      decoration: ShapeDecoration(color: widget.selected
+            ? scheme.primary.withValues(alpha: 0.08)
+            : Colors.transparent,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6), side: BorderSide(
           color: widget.selected ? scheme.primary : Colors.transparent,
           width: 2,
-        ),
-        color: widget.selected
-            ? scheme.primary.withValues(alpha: 0.08)
-            : Colors.transparent,
-      ),
+        ),),),
       child: Padding(padding: const EdgeInsets.all(2), child: content),
     );
 
@@ -258,18 +254,13 @@ class EditorImageScaleBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-        boxShadow: [
+      decoration: ShapeDecoration(color: scheme.surfaceContainerLow,shadows: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.10),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
-        ],
-      ),
+        ],shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),),),
       child: Padding(
         padding: const EdgeInsets.all(2),
         child: Row(
@@ -304,13 +295,10 @@ class _ScalePill extends StatelessWidget {
       onPointerDown: onTap == null ? null : (_) => onTap!(),
       child: InkWell(
         onTap: onTap == null ? null : () {},
-        borderRadius: BorderRadius.circular(6),
+        customBorder: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6)),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: active ? scheme.primary : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-          ),
+          decoration: ShapeDecoration(color: active ? scheme.primary : Colors.transparent,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6), ),),
           child: Text(
             label,
             style: TextStyle(
@@ -344,17 +332,13 @@ class _InsertParagraphHandle extends StatelessWidget {
           width: 28,
           height: 20,
           alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: scheme.primary,
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: const [
+          decoration: ShapeDecoration(color: scheme.primary,shadows: const [
               BoxShadow(
                 color: Colors.black26,
                 blurRadius: 4,
                 offset: Offset(0, 1),
               ),
-            ],
-          ),
+            ],shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), ),),
           child: Icon(Icons.add_rounded, size: 15, color: scheme.onPrimary),
         ),
       ),

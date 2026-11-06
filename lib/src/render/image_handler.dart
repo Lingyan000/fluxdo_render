@@ -75,11 +75,7 @@ Widget _placeholder(BuildContext context, ImageRun image) {
   return Container(
     width: image.width ?? 120,
     height: image.height ?? 80,
-    decoration: BoxDecoration(
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(4),
-      border: Border.all(color: scheme.outlineVariant),
-    ),
+    decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: scheme.outlineVariant),),),
     alignment: Alignment.center,
     padding: const EdgeInsets.all(4),
     child: Icon(

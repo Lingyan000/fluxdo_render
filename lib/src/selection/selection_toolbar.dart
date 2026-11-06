@@ -170,7 +170,7 @@ class SelectionToolbar {
             anchorBelow: anchorBelow,
             toolbarBuilder: (context, child) => Material(
               // 44(SDK _kToolbarHeight)/ 2:与默认容器同形的胶囊圆角。
-              borderRadius: const BorderRadius.all(Radius.circular(22)),
+              shape: RoundedSuperellipseBorder(borderRadius: const BorderRadius.all(Radius.circular(22))),
               clipBehavior: Clip.antiAlias,
               color: Theme.of(context).colorScheme.surfaceContainerHigh,
               elevation: 3,

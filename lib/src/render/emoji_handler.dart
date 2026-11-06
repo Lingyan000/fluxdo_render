@@ -59,10 +59,7 @@ Widget defaultEmojiImageBuilder(
     final vPad = size * 0.15;
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 4, vertical: vPad),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(3),
-      ),
+      decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(3), ),),
       child: Text(
         text,
         style: TextStyle(

@@ -15,14 +15,11 @@ class EditorObjectFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DecoratedBox(
     position: DecorationPosition.foreground,
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(6),
-      color: selected
+    decoration: ShapeDecoration(color: selected
           ? Theme.of(context).colorScheme.primary.withValues(
               alpha: MediaQuery.highContrastOf(context) ? .24 : .12,
             )
-          : Colors.transparent,
-    ),
+          : Colors.transparent,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6), ),),
     child: _ObjectLayoutObserver(onLayout: onLayout, child: child),
   );
 }

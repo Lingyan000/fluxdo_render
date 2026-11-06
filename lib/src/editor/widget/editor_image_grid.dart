@@ -271,7 +271,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
       widget.controlSurfaceBuilder?.call(context, child) ??
       Material(
         color: Theme.of(context).colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(8),
+        shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
         child: child,
       );
 
@@ -335,7 +335,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
         ModalRoute.of(context)?.isCurrent != false;
     final scheme = Theme.of(context).colorScheme;
     final buttonSize = _desktop ? 32.0 : 48.0;
-    Widget photo() => ClipRRect(
+    Widget photo() => ClipRSuperellipse(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox.square(
         dimension: size,
@@ -416,10 +416,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
             if (selected)
               IgnorePointer(
                 child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: .14),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                  decoration: ShapeDecoration(color: scheme.primary.withValues(alpha: .14),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), ),),
                 ),
               ),
             Positioned(
@@ -427,10 +424,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
               bottom: 6,
               child: IgnorePointer(
                 child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: .5),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
+                  decoration: ShapeDecoration(color: Colors.black.withValues(alpha: .5),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(5), ),),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 6,
@@ -477,7 +471,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
           child: Material(
             color: Colors.transparent,
             elevation: 8,
-            borderRadius: BorderRadius.circular(8),
+            shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
             clipBehavior: Clip.antiAlias,
             child: SizedBox.square(
               dimension: previewSize,
@@ -581,10 +575,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
                 child: IgnorePointer(
                   child: DecoratedBox(
                     key: ValueKey('grid-drop-${widget.islandId}-$index'),
-                    decoration: BoxDecoration(
-                      color: scheme.primary,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+                    decoration: ShapeDecoration(color: scheme.primary,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(2), ),),
                   ),
                 ),
               ),
@@ -700,7 +691,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
                   key: ValueKey('grid-add-tile-${widget.islandId}'),
                   onPressed: widget.addingImages ? null : widget.onAddImages,
                   style: OutlinedButton.styleFrom(
-                    shape: RoundedRectangleBorder(
+                    shape: RoundedSuperellipseBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
                     side: BorderSide(color: scheme.outlineVariant),
@@ -717,12 +708,9 @@ class EditorImageGridState extends State<EditorImageGrid> {
               ),
           ];
           return DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
+            decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(
                 color: scheme.outlineVariant.withValues(alpha: .5),
-              ),
-            ),
+              ),),),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(

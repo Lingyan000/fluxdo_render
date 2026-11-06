@@ -710,18 +710,10 @@ class NodeFactory {
         pos == BlockquoteChunkPos.whole || pos == BlockquoteChunkPos.first;
     final isLast =
         pos == BlockquoteChunkPos.whole || pos == BlockquoteChunkPos.last;
-    return Container(
-      margin: EdgeInsets.only(top: isFirst ? 8 : 0, bottom: isLast ? 8 : 0),
-      padding: EdgeInsets.fromLTRB(12, isFirst ? 8 : 0, 12, isLast ? 8 : 0),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
-        border: Border(left: BorderSide(color: scheme.outline, width: 4)),
-        borderRadius: BorderRadius.only(
+    return Padding(padding: EdgeInsets.only(top: isFirst ? 8 : 0, bottom: isLast ? 8 : 0), child: ClipRSuperellipse(borderRadius: BorderRadius.only(
           topRight: isFirst ? const Radius.circular(4) : Radius.zero,
           bottomRight: isLast ? const Radius.circular(4) : Radius.zero,
-        ),
-      ),
-      child: DefaultTextStyle.merge(
+        ),child: Container(padding: EdgeInsets.fromLTRB(12, isFirst ? 8 : 0, 12, isLast ? 8 : 0),decoration: BoxDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),border: Border(left: BorderSide(color: scheme.outline, width: 4))),child: DefaultTextStyle.merge(
         style: TextStyle(color: scheme.onSurfaceVariant, height: 1.5),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -731,8 +723,7 @@ class NodeFactory {
               _compactCopy().build(context, child),
           ],
         ),
-      ),
-    );
+      ))));
   }
 
   /// 分割线 — `<hr>`。
@@ -876,11 +867,7 @@ class NodeFactory {
     final langLabel = (node.language ?? 'TEXT').toUpperCase();
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-      ),
+      decoration: ShapeDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),),),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -945,17 +932,10 @@ class NodeFactory {
       height: 1.2,
       color: scheme.primary,
     );
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
-        border: Border(left: BorderSide(color: scheme.outline, width: 4)),
-        borderRadius: const BorderRadius.only(
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: ClipRSuperellipse(borderRadius: const BorderRadius.only(
           topRight: Radius.circular(4),
           bottomRight: Radius.circular(4),
-        ),
-      ),
-      child: Column(
+        ),child: Container(decoration: BoxDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),border: Border(left: BorderSide(color: scheme.outline, width: 4))),child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 顶部:头像 + username + 可选标题
@@ -1034,8 +1014,7 @@ class NodeFactory {
               ),
             ),
         ],
-      ),
-    );
+      ))));
   }
 
   /// 块级 spoiler 渲染 — `<div class="spoiler">`。
@@ -1180,17 +1159,10 @@ class NodeFactory {
     }
 
     // 不可折叠 / 无内容形态(支持装饰下放位置感知)
-    return Container(
-      margin: EdgeInsets.only(top: isFirst ? 8 : 0, bottom: isLast ? 8 : 0),
-      decoration: BoxDecoration(
-        color: config.color.withValues(alpha: 0.1),
-        border: Border(left: BorderSide(color: config.color, width: 4)),
-        borderRadius: BorderRadius.only(
+    return Padding(padding: EdgeInsets.only(top: isFirst ? 8 : 0, bottom: isLast ? 8 : 0), child: ClipRSuperellipse(borderRadius: BorderRadius.only(
           topRight: isFirst ? const Radius.circular(4) : Radius.zero,
           bottomRight: isLast ? const Radius.circular(4) : Radius.zero,
-        ),
-      ),
-      child: Column(
+        ),child: Container(decoration: BoxDecoration(color: config.color.withValues(alpha: 0.1),border: Border(left: BorderSide(color: config.color, width: 4))),child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 标题头只在首片(whole / first)出现。
@@ -1205,8 +1177,7 @@ class NodeFactory {
             ),
           if (hasBody) bodyWidget,
         ],
-      ),
-    );
+      ))));
   }
 
   /// 图片网格渲染 — `<div class="d-image-grid">`(对齐 legacy
@@ -1217,7 +1188,7 @@ class NodeFactory {
   ///   主体:LayoutBuilder + Wrap(spacing 6, runSpacing 6)
   ///     列宽 = (avail - (cols-1)*6) / cols
   ///     瓦片高 = 宽 * (h/w) clamp 80..300;无尺寸时 = 宽 * 0.75
-  ///   瓦片:ClipRRect 圆角 4 + 走 imageContentBuilder(主项目同款渲染)
+  ///   瓦片:ClipRSuperellipse 圆角 4 + 走 imageContentBuilder(主项目同款渲染)
   ///
   /// **carousel 模式 fallback**:子包不实现真 carousel(legacy 含分页 /
   /// 计数器 / 预加载 / 手势 — 量大且依赖 visibility_detector)。降级为
@@ -1242,7 +1213,7 @@ class NodeFactory {
             for (final img in node.images)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
-                child: ClipRRect(
+                child: ClipRSuperellipse(
                   borderRadius: BorderRadius.circular(4),
                   child: builder(context, img, totalImagesInPost),
                 ),
@@ -1312,7 +1283,7 @@ class NodeFactory {
   /// `lazy_video_builder.dart::_buildThumbnail`)。
   ///
   /// 视觉:
-  ///   Padding vertical 8 + ClipRRect 圆角 8 + 黑底容器
+  ///   Padding vertical 8 + ClipRSuperellipse 圆角 8 + 黑底容器
   ///   主体:AspectRatio 16:9 缩略图 + 中央播放按钮(品牌色 60×42 圆角 8)
   ///   底部:标题栏(灰底 surfaceContainerHighest @ 0.5,可点跳 url)
   ///
@@ -1503,11 +1474,7 @@ class NodeFactory {
       child: Container(
         height: 96,
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: scheme.outlineVariant),
-        ),
+        decoration: ShapeDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant),),),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1552,7 +1519,7 @@ class _LazyVideoThumbnailCard extends StatelessWidget {
     final brand = _brandColorFor(node.provider);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: ClipRRect(
+      child: ClipRSuperellipse(
         borderRadius: BorderRadius.circular(8),
         child: Container(
           color: Colors.black,
@@ -1579,10 +1546,7 @@ class _LazyVideoThumbnailCard extends StatelessWidget {
                     Container(
                       width: 60,
                       height: 42,
-                      decoration: BoxDecoration(
-                        color: brand.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                      decoration: ShapeDecoration(color: brand.withValues(alpha: 0.9),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), ),),
                       child: const Icon(
                         Icons.play_arrow_rounded,
                         color: Colors.white,
@@ -1634,7 +1598,7 @@ class _VideoPlaceholder extends StatelessWidget {
   }
 }
 
-/// 网格中的单张图片瓦片 — 按 columnWidth 算高 + ClipRRect 圆角 + 内部
+/// 网格中的单张图片瓦片 — 按 columnWidth 算高 + ClipRSuperellipse 圆角 + 内部
 /// 走 imageContentBuilder。
 class _GridTile extends StatelessWidget {
   const _GridTile({
@@ -1657,7 +1621,7 @@ class _GridTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: tileHeight,
-      child: ClipRRect(
+      child: ClipRSuperellipse(
         borderRadius: BorderRadius.circular(4),
         // 给 builder 产物 tight 瓦片约束(列 stretch 提供宽、SizedBox
         // 提供高),由主项目按 GridTileScope 标记以 BoxFit.cover 填满。
@@ -1690,16 +1654,12 @@ class _DefaultOneboxCard extends StatelessWidget {
     final scheme = theme.colorScheme;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant, width: 1),
-      ),
+      decoration: ShapeDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant, width: 1),),),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          customBorder: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -1813,7 +1773,7 @@ class _Body extends StatelessWidget {
       children: [
         Expanded(child: textCol),
         const SizedBox(width: 12),
-        ClipRRect(
+        ClipRSuperellipse(
           borderRadius: BorderRadius.circular(6),
           child: SizedBox(
             width: 80,
@@ -2083,10 +2043,7 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
     final Widget mask = spoilerReduceMotion
         // reduce-motion:静态灰块遮罩(可见、隐内容,无动画)。
         ? DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(4),
-            ),
+            decoration: ShapeDecoration(color: scheme.surfaceContainerHighest,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(4), ),),
           )
         : RepaintBoundary(
             child: CustomPaint(
@@ -2105,7 +2062,7 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
       onTap: _onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
-        child: ClipRRect(
+        child: ClipRSuperellipse(
           borderRadius: BorderRadius.circular(4),
           child: Stack(
             fit: StackFit.passthrough,
@@ -2389,11 +2346,8 @@ class _DetailsWidgetState extends State<_DetailsWidget>
         : scheme.surfaceContainerLow;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        border: Border.all(color: borderColor, width: 1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ClipRRect(
+      decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: borderColor, width: 1),),),
+      child: ClipRSuperellipse(
         borderRadius: BorderRadius.circular(7),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2401,9 +2355,9 @@ class _DetailsWidgetState extends State<_DetailsWidget>
             // 头:可点击 + 旋转箭头 + summary
             Material(
               color: headerBgColor,
-              borderRadius: const BorderRadius.vertical(
+              shape: RoundedSuperellipseBorder(borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(7),
-              ),
+              )),
               child: InkWell(
                 onTap: _toggle,
                 child: Padding(
@@ -2686,17 +2640,10 @@ class _FoldableCalloutWidgetState extends State<_FoldableCalloutWidget>
   @override
   Widget build(BuildContext context) {
     final config = widget.config;
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: config.color.withValues(alpha: 0.1),
-        border: Border(left: BorderSide(color: config.color, width: 4)),
-        borderRadius: const BorderRadius.only(
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: ClipRSuperellipse(borderRadius: const BorderRadius.only(
           topRight: Radius.circular(4),
           bottomRight: Radius.circular(4),
-        ),
-      ),
-      child: Column(
+        ),child: Container(decoration: BoxDecoration(color: config.color.withValues(alpha: 0.1),border: Border(left: BorderSide(color: config.color, width: 4))),child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
@@ -2732,8 +2679,7 @@ class _FoldableCalloutWidgetState extends State<_FoldableCalloutWidget>
             ),
           ),
         ],
-      ),
-    );
+      ))));
   }
 }
 
@@ -2758,16 +2704,13 @@ class _IframePlaceholderCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Material(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
+        shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          customBorder: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
           child: Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: scheme.outlineVariant, width: 1),
-            ),
+            decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant, width: 1),),),
             child: Row(
               children: [
                 Icon(
@@ -2831,7 +2774,7 @@ class _IframePlaceholderCard extends StatelessWidget {
 /// 原生上传视频占位卡（未注入 videoBuilder 时）。
 ///
 /// 有封面 poster：画封面 + 中央播放按钮（对齐 lazy_video 卡片观感，AspectRatio
-/// 16:9 黑底 + ClipRRect 圆角 8）；无封面：灰底卡 + 视频图标 + 文件名。
+/// 16:9 黑底 + ClipRSuperellipse 圆角 8）；无封面：灰底卡 + 视频图标 + 文件名。
 /// 整卡点击 → onTap（降级 linkHandler 跳浏览器）。
 class _VideoPlaceholderCard extends StatelessWidget {
   const _VideoPlaceholderCard({required this.node, required this.onTap});
@@ -2853,7 +2796,7 @@ class _VideoPlaceholderCard extends StatelessWidget {
     if (hasPoster) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        child: ClipRRect(
+        child: ClipRSuperellipse(
           borderRadius: BorderRadius.circular(8),
           child: GestureDetector(
             onTap: onTap,
@@ -2882,10 +2825,7 @@ class _VideoPlaceholderCard extends StatelessWidget {
                     Container(
                       width: 60,
                       height: 42,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.55),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                      decoration: ShapeDecoration(color: Colors.black.withValues(alpha: 0.55),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), ),),
                       child: const Icon(
                         Icons.play_arrow_rounded,
                         color: Colors.white,
@@ -2905,16 +2845,13 @@ class _VideoPlaceholderCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Material(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
+        shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          customBorder: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
           child: Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: scheme.outlineVariant, width: 1),
-            ),
+            decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant, width: 1),),),
             child: Row(
               children: [
                 Icon(
@@ -2965,16 +2902,13 @@ class _AudioPlaceholderCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Material(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
+        shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          customBorder: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
           child: Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: scheme.outlineVariant, width: 1),
-            ),
+            decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant, width: 1),),),
             child: Row(
               children: [
                 Icon(
@@ -3092,11 +3026,8 @@ class _TableWidget extends StatelessWidget {
     final tableAlign = node.textAlign;
     final tableBox = Container(
       width: totalWidth,
-      decoration: BoxDecoration(
-        border: Border.all(color: borderColor, width: 1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ClipRRect(
+      decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: borderColor, width: 1),),),
+      child: ClipRSuperellipse(
         borderRadius: BorderRadius.circular(8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -3488,10 +3419,7 @@ class _PolicyFallbackCard extends StatelessWidget {
         : '接受';
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        border: Border.all(color: scheme.outlineVariant, width: 1),
-        borderRadius: BorderRadius.circular(8),
-      ),
+      decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant, width: 1),),),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -3523,10 +3451,7 @@ class _PolicyFallbackCard extends StatelessWidget {
                     horizontal: 12,
                     vertical: 6,
                   ),
-                  decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
+                  decoration: ShapeDecoration(color: scheme.primary.withValues(alpha: 0.1),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6), ),),
                   child: Text(
                     accept,
                     style: TextStyle(
@@ -3571,10 +3496,7 @@ class _PollFallbackCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border.all(color: scheme.outlineVariant, width: 1),
-        borderRadius: BorderRadius.circular(8),
-      ),
+      decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant, width: 1),),),
       child: Row(
         children: [
           Icon(Icons.bar_chart_rounded, size: 20, color: scheme.primary),
@@ -3624,18 +3546,12 @@ class _ChatTranscriptFallbackCard extends StatelessWidget {
       margin: node.isChained
           ? EdgeInsets.zero
           : const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
-        border: node.isChained
-            ? null
-            : Border(left: BorderSide(color: scheme.outline, width: 4)),
-        borderRadius: node.isChained
+      decoration: ShapeDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),shape: RoundedSuperellipseBorder(borderRadius: node.isChained
             ? null
             : const BorderRadius.only(
                 topRight: Radius.circular(4),
                 bottomRight: Radius.circular(4),
-              ),
-      ),
+              ), side: node.isChained ? BorderSide.none : (Border(left: BorderSide(color: scheme.outline, width: 4))).top,),),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,

@@ -1333,17 +1333,13 @@ class _FluxdoEditorState extends State<FluxdoEditor>
               key: kFloatingCursorGhostKey,
               width: 2.5,
               height: _caretLineHeight,
-              decoration: BoxDecoration(
-                color: Theme.of(ctx).colorScheme.primary,
-                borderRadius: BorderRadius.circular(1.25),
-                boxShadow: const [
+              decoration: ShapeDecoration(color: Theme.of(ctx).colorScheme.primary,shadows: const [
                   BoxShadow(
                     color: Colors.black26,
                     blurRadius: 3,
                     offset: Offset(0, 1),
                   ),
-                ],
-              ),
+                ],shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(1.25), ),),
             ),
           ),
         );

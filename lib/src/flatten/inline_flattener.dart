@@ -491,10 +491,7 @@ class InlineFlattener {
             child: Container(
               height: lineHeight,
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(6),
-              ),
+              decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6), ),),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -943,10 +940,7 @@ class InlineFlattener {
             child: Container(
               height: lineHeight,
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(10),
-              ),
+              decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), ),),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -1162,10 +1156,7 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     final bg = theme.scaffoldBackgroundColor;
     final Widget mask = spoilerReduceMotion
         ? DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(3),
-            ),
+            decoration: ShapeDecoration(color: scheme.surfaceContainerHighest,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(3), ),),
           )
         : RepaintBoundary(
             child: CustomPaint(
@@ -1304,10 +1295,7 @@ class _ClickCountWidget extends StatelessWidget {
         isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: ShapeDecoration(color: bgColor,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), ),),
       child: Text(
         count,
         style: TextStyle(color: textColor, fontSize: 10),

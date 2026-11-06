@@ -115,8 +115,8 @@ class _HighlightPainter extends CustomPainter {
     // 整行等高(防 emoji 处参差);tight 间隙保证不跨行。
     for (final rowRect in rects) {
       if (outline) {
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(rowRect, const Radius.circular(4)),
+        canvas.drawRSuperellipse(
+          RSuperellipse.fromRectAndRadius(rowRect, const Radius.circular(4)),
           paint,
         );
       } else {
