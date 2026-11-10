@@ -47,6 +47,7 @@ import 'selectable_text_box.dart';
 import 'selectable_object_block.dart';
 import 'spoiler_effect.dart';
 import 'svg_handler.dart';
+import '../config/render_palette.dart';
 
 class NodeFactory {
   NodeFactory({
@@ -1091,7 +1092,11 @@ class NodeFactory {
   Widget buildCallout(BuildContext context, CalloutNode node) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final config = _calloutConfigFor(node.kind, node.typeRaw, scheme);
+    final config = _calloutConfigFor(
+      node.kind,
+      node.typeRaw,
+      FluxdoRenderPalette.of(theme),
+    );
     // 内容是否为空(空时不渲染 body,且头部不留 8px 底 padding)
     final hasBody = node.children.isNotEmpty;
     final foldable = node.foldable;
@@ -2438,84 +2443,84 @@ class _CalloutConfig {
 _CalloutConfig _calloutConfigFor(
   CalloutKind kind,
   String typeRaw,
-  ColorScheme scheme,
+  FluxdoRenderPalette palette,
 ) {
   switch (kind) {
     case CalloutKind.note:
-      return const _CalloutConfig(
-        color: Colors.blue,
+      return _CalloutConfig(
+        color: palette.blue,
         icon: Icons.edit_note_rounded,
         defaultTitle: 'Note',
       );
     case CalloutKind.summary:
-      return const _CalloutConfig(
-        color: Colors.cyan,
+      return _CalloutConfig(
+        color: palette.cyan,
         icon: Icons.subject_rounded,
         defaultTitle: 'Summary',
       );
     case CalloutKind.info:
-      return const _CalloutConfig(
-        color: Colors.blue,
+      return _CalloutConfig(
+        color: palette.blue,
         icon: Icons.info_rounded,
         defaultTitle: 'Info',
       );
     case CalloutKind.todo:
-      return const _CalloutConfig(
-        color: Colors.blue,
+      return _CalloutConfig(
+        color: palette.blue,
         icon: Icons.check_circle_rounded,
         defaultTitle: 'Todo',
       );
     case CalloutKind.tip:
-      return const _CalloutConfig(
-        color: Colors.teal,
+      return _CalloutConfig(
+        color: palette.teal,
         icon: Icons.tips_and_updates_rounded,
         defaultTitle: 'Tip',
       );
     case CalloutKind.success:
-      return const _CalloutConfig(
-        color: Colors.green,
+      return _CalloutConfig(
+        color: palette.green,
         icon: Icons.check_circle_rounded,
         defaultTitle: 'Success',
       );
     case CalloutKind.question:
-      return const _CalloutConfig(
-        color: Colors.orange,
+      return _CalloutConfig(
+        color: palette.orange,
         icon: Icons.help_rounded,
         defaultTitle: 'Question',
       );
     case CalloutKind.warning:
-      return const _CalloutConfig(
-        color: Colors.orange,
+      return _CalloutConfig(
+        color: palette.orange,
         icon: Icons.warning_amber_rounded,
         defaultTitle: 'Warning',
       );
     case CalloutKind.failure:
-      return const _CalloutConfig(
-        color: Colors.red,
+      return _CalloutConfig(
+        color: palette.red,
         icon: Icons.close_rounded,
         defaultTitle: 'Failure',
       );
     case CalloutKind.danger:
-      return const _CalloutConfig(
-        color: Colors.red,
+      return _CalloutConfig(
+        color: palette.red,
         icon: Icons.dangerous_rounded,
         defaultTitle: 'Danger',
       );
     case CalloutKind.bug:
-      return const _CalloutConfig(
-        color: Colors.red,
+      return _CalloutConfig(
+        color: palette.red,
         icon: Icons.bug_report_rounded,
         defaultTitle: 'Bug',
       );
     case CalloutKind.example:
-      return const _CalloutConfig(
-        color: Colors.purple,
+      return _CalloutConfig(
+        color: palette.purple,
         icon: Icons.list_rounded,
         defaultTitle: 'Example',
       );
     case CalloutKind.quote:
-      return const _CalloutConfig(
-        color: Colors.grey,
+      return _CalloutConfig(
+        color: palette.grey,
         icon: Icons.format_quote_rounded,
         defaultTitle: 'Quote',
       );
@@ -2525,7 +2530,7 @@ _CalloutConfig _calloutConfigFor(
           ? 'Note'
           : '${typeRaw[0].toUpperCase()}${typeRaw.substring(1)}';
       return _CalloutConfig(
-        color: Colors.grey,
+        color: palette.grey,
         icon: Icons.format_quote_rounded,
         defaultTitle: defaultTitle,
       );

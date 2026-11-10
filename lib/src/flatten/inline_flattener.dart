@@ -42,6 +42,7 @@ import '../render/mention_handler.dart';
 import '../render/spoiler_effect.dart';
 import '../selection/projection.dart';
 import '../selection/projection_builder.dart';
+import '../config/render_palette.dart';
 
 /// 挂载上下文宿主:flatten 产物与当前挂载点(State)之间的活 context 桥。
 ///
@@ -1288,11 +1289,13 @@ class _ClickCountWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor =
-        isDark ? const Color(0xFF3A3D47) : const Color(0xFFE8EBEF);
-    final textColor =
-        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final palette = FluxdoRenderPalette.of(theme);
+    final bgColor = palette.clickCountBackground ??
+        (isDark ? const Color(0xFF3A3D47) : const Color(0xFFE8EBEF));
+    final textColor = palette.clickCountForeground ??
+        (isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: ShapeDecoration(color: bgColor,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), ),),
