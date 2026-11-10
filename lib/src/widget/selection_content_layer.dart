@@ -231,6 +231,7 @@ class _SelectionContentLayerState extends State<SelectionContentLayer>
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
       case TargetPlatform.iOS:
+      case TargetPlatform.ohos:
       case TargetPlatform.fuchsia:
         _reshowToolbarForCurrentSelection();
       case TargetPlatform.linux:
