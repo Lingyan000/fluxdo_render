@@ -28,6 +28,7 @@ import '../model/editable_text_content.dart'
     show EditableTextContent, MarkKind, MarkSpan;
 import '../model/editor_state.dart';
 import '../model/inline_spin.dart' show scanInlineSyntax;
+import '../../config/render_shapes.dart';
 
 class EditableParagraph extends StatefulWidget {
   const EditableParagraph({
@@ -469,7 +470,7 @@ class _SpoilerDecorPainter extends CustomPainter {
           box.top,
           box.right + 1,
           box.bottom,
-          const Radius.circular(3),
+          FluxdoRenderShapes.current.radius(3),
         );
         canvas.drawRSuperellipse(rect, fill);
         if (dashed) {

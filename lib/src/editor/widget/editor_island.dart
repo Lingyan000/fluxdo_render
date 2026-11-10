@@ -24,6 +24,7 @@ import '../../render/node_factory.dart';
 import '../../selection/selection_registry.dart';
 import '../../selection/selection_scope.dart';
 import 'editor_table_grid.dart' show kEditorIslandRegion;
+import '../../config/render_shapes.dart';
 
 /// 官方 SCALES 同款档位。
 const kEditorImageScales = [100, 75, 50];
@@ -165,7 +166,7 @@ class _EditorIslandState extends State<EditorIsland> {
     content = DecoratedBox(
       decoration: ShapeDecoration(color: widget.selected
             ? scheme.primary.withValues(alpha: 0.08)
-            : Colors.transparent,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6), side: BorderSide(
+            : Colors.transparent,shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(6), side: BorderSide(
           color: widget.selected ? scheme.primary : Colors.transparent,
           width: 2,
         ),),),
@@ -260,7 +261,7 @@ class EditorImageScaleBar extends StatelessWidget {
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
-        ],shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),),),
+        ],shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(8), side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),),),
       child: Padding(
         padding: const EdgeInsets.all(2),
         child: Row(
@@ -295,10 +296,10 @@ class _ScalePill extends StatelessWidget {
       onPointerDown: onTap == null ? null : (_) => onTap!(),
       child: InkWell(
         onTap: onTap == null ? null : () {},
-        customBorder: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6)),
+        customBorder: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(6)),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: ShapeDecoration(color: active ? scheme.primary : Colors.transparent,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6), ),),
+          decoration: ShapeDecoration(color: active ? scheme.primary : Colors.transparent,shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(6), ),),
           child: Text(
             label,
             style: TextStyle(
@@ -338,7 +339,7 @@ class _InsertParagraphHandle extends StatelessWidget {
                 blurRadius: 4,
                 offset: Offset(0, 1),
               ),
-            ],shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), ),),
+            ],shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(10), ),),
           child: Icon(Icons.add_rounded, size: 15, color: scheme.onPrimary),
         ),
       ),

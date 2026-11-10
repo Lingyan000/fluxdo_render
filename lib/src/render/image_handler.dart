@@ -37,6 +37,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../node/node.dart';
+import '../config/render_shapes.dart';
 
 /// 内容图片 builder。
 ///
@@ -75,7 +76,7 @@ Widget _placeholder(BuildContext context, ImageRun image) {
   return Container(
     width: image.width ?? 120,
     height: image.height ?? 80,
-    decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: scheme.outlineVariant),),),
+    decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(4), side: BorderSide(color: scheme.outlineVariant),),),
     alignment: Alignment.center,
     padding: const EdgeInsets.all(4),
     child: Icon(

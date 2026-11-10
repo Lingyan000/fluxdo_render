@@ -11,6 +11,7 @@ import '../../node/node.dart';
 import '../../render/image_handler.dart';
 import '../../render/node_factory.dart';
 import 'editor_table_grid.dart' show kEditorSelfManagedRegion;
+import '../../config/render_shapes.dart';
 
 /// 图片组内的单图目标，同时用于就地菜单、查看器和选中几何。
 @immutable
@@ -271,7 +272,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
       widget.controlSurfaceBuilder?.call(context, child) ??
       Material(
         color: Theme.of(context).colorScheme.surfaceContainerHigh,
-        shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(8)),
         child: child,
       );
 
@@ -336,7 +337,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
     final scheme = Theme.of(context).colorScheme;
     final buttonSize = _desktop ? 32.0 : 48.0;
     Widget photo() => ClipRSuperellipse(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: context.renderShapes.borderRadius(8),
       child: SizedBox.square(
         dimension: size,
         child: FittedBox(
@@ -416,7 +417,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
             if (selected)
               IgnorePointer(
                 child: DecoratedBox(
-                  decoration: ShapeDecoration(color: scheme.primary.withValues(alpha: .14),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), ),),
+                  decoration: ShapeDecoration(color: scheme.primary.withValues(alpha: .14),shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(8), ),),
                 ),
               ),
             Positioned(
@@ -424,7 +425,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
               bottom: 6,
               child: IgnorePointer(
                 child: DecoratedBox(
-                  decoration: ShapeDecoration(color: Colors.black.withValues(alpha: .5),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(5), ),),
+                  decoration: ShapeDecoration(color: Colors.black.withValues(alpha: .5),shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(5), ),),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 6,
@@ -471,7 +472,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
           child: Material(
             color: Colors.transparent,
             elevation: 8,
-            shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(8)),
             clipBehavior: Clip.antiAlias,
             child: SizedBox.square(
               dimension: previewSize,
@@ -575,7 +576,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
                 child: IgnorePointer(
                   child: DecoratedBox(
                     key: ValueKey('grid-drop-${widget.islandId}-$index'),
-                    decoration: ShapeDecoration(color: scheme.primary,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(2), ),),
+                    decoration: ShapeDecoration(color: scheme.primary,shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(2), ),),
                   ),
                 ),
               ),
@@ -692,7 +693,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
                   onPressed: widget.addingImages ? null : widget.onAddImages,
                   style: OutlinedButton.styleFrom(
                     shape: RoundedSuperellipseBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: context.renderShapes.borderRadius(8),
                     ),
                     side: BorderSide(color: scheme.outlineVariant),
                   ),
@@ -708,7 +709,7 @@ class EditorImageGridState extends State<EditorImageGrid> {
               ),
           ];
           return DecoratedBox(
-            decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(
+            decoration: ShapeDecoration(shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(10), side: BorderSide(
                 color: scheme.outlineVariant.withValues(alpha: .5),
               ),),),
             child: Padding(

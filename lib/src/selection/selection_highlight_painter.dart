@@ -16,6 +16,7 @@ import 'projection.dart';
 import 'selection_geometry.dart';
 import 'selection_range.dart';
 import 'selection_registry.dart';
+import '../config/render_shapes.dart';
 
 class SelectionHighlight extends StatelessWidget {
   const SelectionHighlight({
@@ -116,7 +117,7 @@ class _HighlightPainter extends CustomPainter {
     for (final rowRect in rects) {
       if (outline) {
         canvas.drawRSuperellipse(
-          RSuperellipse.fromRectAndRadius(rowRect, const Radius.circular(4)),
+          RSuperellipse.fromRectAndRadius(rowRect, FluxdoRenderShapes.current.radius(4)),
           paint,
         );
       } else {

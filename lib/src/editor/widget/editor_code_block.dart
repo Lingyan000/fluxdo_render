@@ -22,6 +22,7 @@ import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 
 import '../../node/node.dart';
 import 'editor_table_grid.dart' show kEditorSelfManagedRegion;
+import '../../config/render_shapes.dart';
 
 class EditorCodeBlock extends StatefulWidget {
   const EditorCodeBlock({
@@ -188,7 +189,7 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
                     vertical: 4,
                   ),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: context.renderShapes.borderRadius(4),
                     borderSide: BorderSide(color: scheme.outlineVariant),
                   ),
                 ),
@@ -302,7 +303,7 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
       metaData: kEditorSelfManagedRegion,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        decoration: ShapeDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(
+        decoration: ShapeDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(8), side: BorderSide(
             color: widget.selected
                 ? scheme.primary
                 : _editing
@@ -349,12 +350,12 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
                   message: '选中代码块(选中后退格删除)',
                   child: InkWell(
                     onTap: widget.onSelectRequest,
-                    customBorder: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(4)),
+                    customBorder: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(4)),
                     child: Container(
                       padding: const EdgeInsets.all(3),
                       decoration: ShapeDecoration(color: widget.selected
                             ? scheme.primary
-                            : scheme.surfaceContainerHighest,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(
+                            : scheme.surfaceContainerHighest,shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(4), side: BorderSide(
                           color: widget.selected
                               ? scheme.primary
                               : scheme.outlineVariant,

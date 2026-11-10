@@ -43,6 +43,7 @@ import '../render/spoiler_effect.dart';
 import '../selection/projection.dart';
 import '../selection/projection_builder.dart';
 import '../config/render_palette.dart';
+import '../config/render_shapes.dart';
 
 /// 挂载上下文宿主:flatten 产物与当前挂载点(State)之间的活 context 桥。
 ///
@@ -492,7 +493,7 @@ class InlineFlattener {
             child: Container(
               height: lineHeight,
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(6), ),),
+              decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: FluxdoRenderShapes.current.borderRadius(6), ),),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -941,7 +942,7 @@ class InlineFlattener {
             child: Container(
               height: lineHeight,
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), ),),
+              decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: FluxdoRenderShapes.current.borderRadius(10), ),),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -1157,7 +1158,7 @@ class _SpoilerInlineWidgetState extends State<_SpoilerInlineWidget>
     final bg = theme.scaffoldBackgroundColor;
     final Widget mask = spoilerReduceMotion
         ? DecoratedBox(
-            decoration: ShapeDecoration(color: scheme.surfaceContainerHighest,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(3), ),),
+            decoration: ShapeDecoration(color: scheme.surfaceContainerHighest,shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(3), ),),
           )
         : RepaintBoundary(
             child: CustomPaint(
@@ -1298,7 +1299,7 @@ class _ClickCountWidget extends StatelessWidget {
         (isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: ShapeDecoration(color: bgColor,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(10), ),),
+      decoration: ShapeDecoration(color: bgColor,shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(10), ),),
       child: Text(
         count,
         style: TextStyle(color: textColor, fontSize: 10),

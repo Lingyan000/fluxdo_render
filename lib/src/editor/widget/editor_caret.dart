@@ -10,6 +10,7 @@
 library;
 
 import 'package:flutter/widgets.dart';
+import '../../config/render_shapes.dart';
 
 class EditorCaret extends StatefulWidget {
   const EditorCaret({
@@ -175,7 +176,7 @@ class _EditorCaretState extends State<EditorCaret>
               child: Container(
                 width: 2,
                 height: rect.height,
-                decoration: ShapeDecoration(color: widget.color,shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(1), ),),
+                decoration: ShapeDecoration(color: widget.color,shape: RoundedSuperellipseBorder(borderRadius: context.renderShapes.borderRadius(1), ),),
               ),
             ),
           ),

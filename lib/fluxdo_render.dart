@@ -13,6 +13,7 @@ export 'src/chunk/html_chunk.dart';
 export 'src/chunk/html_chunker.dart';
 export 'src/config/render_config.dart';
 export 'src/config/render_palette.dart';
+export 'src/config/render_shapes.dart';
 export 'src/dev/fixtures_index.dart';
 export 'src/dev/fixtures_index.g.dart';
 export 'src/flatten/flatten_cache.dart';
