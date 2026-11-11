@@ -2050,7 +2050,8 @@ class _SpoilerBlockWidgetState extends State<_SpoilerBlockWidget>
     // 灰块)。点击触发涟漪揭开动画(Telegram 同款:圆形裁剪自点击处扩散,
     // 内容随圆扩大显形,遮罩同步淡出),动画结束才进入揭示态。
     final isDark = theme.brightness == Brightness.dark;
-    final bg = theme.scaffoldBackgroundColor;
+    // 遮罩必须不透明：页面有自定义背景时页面底色是透明的，取它会露出剧透内容
+    final bg = theme.colorScheme.surface;
     final Widget mask = spoilerReduceMotion
         // reduce-motion:静态灰块遮罩(可见、隐内容,无动画)。
         ? DecoratedBox(
