@@ -49,6 +49,7 @@ import 'spoiler_effect.dart';
 import 'svg_handler.dart';
 import '../config/render_palette.dart';
 import '../config/render_shapes.dart';
+import '../config/render_style.dart';
 
 class NodeFactory {
   NodeFactory({
@@ -419,7 +420,9 @@ class NodeFactory {
     final baseStyle =
         baseTextStyle ?? theme.textTheme.bodyMedium ?? const TextStyle();
     final em = baseStyle.fontSize ?? 14;
-    final headingStyle = headingStyleFor(baseStyle, node.level);
+    final headingStyle = FluxdoRenderStyle.of(
+      theme,
+    ).applyHeading(headingStyleFor(baseStyle, node.level));
     final margin = em * kHeadingMargin[node.level - 1];
     // 锚点注册包装:无 HeadingAnchorScope 时(编辑器/分享卡等)零开销,
     // 话题阅读侧借它实现 TOC 跳转与 scroll-spy。
@@ -707,6 +710,7 @@ class NodeFactory {
   Widget buildBlockquote(BuildContext context, BlockquoteNode node) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final renderStyle = FluxdoRenderStyle.of(theme);
     final pos = node.chunkPos;
     final isFirst =
         pos == BlockquoteChunkPos.whole || pos == BlockquoteChunkPos.first;
@@ -715,7 +719,7 @@ class NodeFactory {
     return Padding(padding: EdgeInsets.only(top: isFirst ? 8 : 0, bottom: isLast ? 8 : 0), child: ClipRSuperellipse(borderRadius: BorderRadius.only(
           topRight: isFirst ? FluxdoRenderShapes.current.radius(4) : Radius.zero,
           bottomRight: isLast ? FluxdoRenderShapes.current.radius(4) : Radius.zero,
-        ),child: Container(padding: EdgeInsets.fromLTRB(12, isFirst ? 8 : 0, 12, isLast ? 8 : 0),decoration: BoxDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),border: Border(left: BorderSide(color: scheme.outline, width: 4))),child: DefaultTextStyle.merge(
+        ),child: Container(padding: EdgeInsets.fromLTRB(12, isFirst ? 8 : 0, 12, isLast ? 8 : 0),decoration: BoxDecoration(color: renderStyle.quoteBackground ? scheme.surfaceContainerHighest.withValues(alpha: 0.3) : null,border: Border(left: BorderSide(color: scheme.outline, width: renderStyle.quoteBarWidth))),child: DefaultTextStyle.merge(
         style: TextStyle(color: scheme.onSurfaceVariant, height: 1.5),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -925,6 +929,7 @@ class NodeFactory {
   Widget buildQuoteCard(BuildContext context, QuoteCardNode node) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final renderStyle = FluxdoRenderStyle.of(theme);
     final avatarBuilder = quoteAvatarBuilder ?? defaultQuoteAvatarBuilder;
     final usernameStyle = theme.textTheme.labelLarge?.copyWith(
       color: scheme.onSurfaceVariant,
@@ -937,7 +942,7 @@ class NodeFactory {
     return Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: ClipRSuperellipse(borderRadius: BorderRadius.only(
           topRight: context.renderShapes.radius(4),
           bottomRight: context.renderShapes.radius(4),
-        ),child: Container(decoration: BoxDecoration(color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),border: Border(left: BorderSide(color: scheme.outline, width: 4))),child: Column(
+        ),child: Container(decoration: BoxDecoration(color: renderStyle.quoteBackground ? scheme.surfaceContainerHighest.withValues(alpha: 0.3) : null,border: Border(left: BorderSide(color: scheme.outline, width: renderStyle.quoteBarWidth))),child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 顶部:头像 + username + 可选标题
