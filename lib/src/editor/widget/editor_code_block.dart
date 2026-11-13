@@ -263,10 +263,16 @@ class _EditorCodeBlockState extends State<EditorCodeBlock> {
             style: codeStyle,
             maxLines: null,
             minLines: 3,
+            // 主题的 enabledBorder / focusedBorder 优先于 border，需逐个清掉
             decoration: const InputDecoration(
               isDense: true,
               isCollapsed: true,
               border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              errorBorder: InputBorder.none,
+              focusedErrorBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
             ),
           ),
         ),
