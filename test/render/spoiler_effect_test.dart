@@ -4,7 +4,7 @@
 /// - 动画态:未揭示时挂 SpoilerEffectPainter(shader 粒子尘埃遮盖)。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo_render/src/render/spoiler_effect.dart';
 import 'package:fluxdo_render/src/widget/fluxdo_render.dart';

@@ -17,7 +17,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 
 /// spoiler 动画 Ticker 的统一门控(块级 [_SpoilerBlockWidget] / 行内

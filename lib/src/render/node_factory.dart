@@ -14,7 +14,7 @@ library;
 import 'dart:math' show Random;
 import 'dart:ui' as ui show FragmentShader;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'package:flutter/services.dart';
 
