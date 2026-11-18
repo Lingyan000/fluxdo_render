@@ -17,7 +17,9 @@ class TextSelectionRules {
   int tapCount(int raw, PointerDeviceKind? kind) {
     final readOnly = surface == TextSelectionSurface.readOnly;
     return switch (platform) {
-      TargetPlatform.android || TargetPlatform.fuchsia =>
+      TargetPlatform.android ||
+      TargetPlatform.ohos ||
+      TargetPlatform.fuchsia =>
         (raw - 1) % (readOnly && kind != PointerDeviceKind.mouse ? 2 : 3) + 1,
       TargetPlatform.linux => (raw - 1) % 3 + 1,
       TargetPlatform.windows =>
