@@ -23,6 +23,7 @@ import '../node/node.dart';
 import '../selection/projection.dart';
 import '../widget/heading_anchor.dart';
 import 'block_text_styles.dart';
+import 'ai_content_badge.dart';
 import 'code_block_handler.dart';
 import 'content_tap_target.dart';
 import 'emoji_handler.dart';
@@ -731,6 +732,7 @@ class NodeFactory {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (isFirst && node.aiGenerated) const AiContentBadge(),
             // 容器内子节点走 compact factory(消除嵌套 paragraph 多余 margin)
             for (final child in node.children)
               _compactCopy().build(context, child),
@@ -873,7 +875,10 @@ class NodeFactory {
         chunkIndex: chunkIndex,
         text: node.code,
         codeLanguage: node.language ?? '',
-        child: custom,
+        child: node.aiGenerated
+            ? Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [const AiContentBadge(), custom])
+            : custom,
       );
     }
     final theme = Theme.of(context);
@@ -902,6 +907,7 @@ class NodeFactory {
                   ),
                 ),
                 const Spacer(),
+                if (node.aiGenerated) const AiContentBadge(),
                 _CopyButton(code: node.code),
               ],
             ),
@@ -959,6 +965,8 @@ class NodeFactory {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
             child: Row(
               children: [
+                if (node.aiGenerated) const Padding(
+                  padding: EdgeInsetsDirectional.only(end: 6), child: AiContentBadge()),
                 avatarBuilder(context, node.username, node.avatarUrl, 24),
                 const SizedBox(width: 8),
                 // 话题引用(cooked 无 data-username)不显示 "用户名:";
@@ -1074,6 +1082,7 @@ class NodeFactory {
     // 子节点递归走 compact factory(消除嵌套 paragraph 多余 margin)
     final childFactory = _compactCopy();
     return _DetailsWidget(
+      aiGenerated: node.aiGenerated,
       summary: node.summary,
       initiallyOpen: node.initiallyOpen,
       body: Column(
@@ -2253,11 +2262,13 @@ abstract final class FoldShiftHook {
 /// 清掉 child),节省树深 + memory。
 class _DetailsWidget extends StatefulWidget {
   const _DetailsWidget({
+    required this.aiGenerated,
     required this.summary,
     required this.body,
     required this.initiallyOpen,
   });
 
+  final bool aiGenerated;
   final String summary;
   final Widget body;
   final bool initiallyOpen;
@@ -2376,6 +2387,7 @@ class _DetailsWidgetState extends State<_DetailsWidget>
                           ),
                         ),
                       ),
+                      if (widget.aiGenerated) const AiContentBadge(),
                     ],
                   ),
                 ),

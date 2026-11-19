@@ -22,6 +22,7 @@ export 'src/flatten/inline_flattener.dart';
 export 'src/node/node.dart';
 export 'src/node/toc_extractor.dart';
 export 'src/parser/paragraph_parser.dart';
+export 'src/render/ai_content_badge.dart';
 export 'src/render/code_block_handler.dart';
 export 'src/render/content_tap_target.dart';
 export 'src/render/emoji_handler.dart';

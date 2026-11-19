@@ -2676,7 +2676,7 @@ class EditorState extends ChangeNotifier {
     ContainerFrame remap(ContainerFrame f) {
       final newId = mapping.putIfAbsent(f.groupId, nextFrameGroupId);
       return switch (f) {
-        QuoteFrame() => QuoteFrame(groupId: newId),
+        QuoteFrame() => QuoteFrame(groupId: newId, aiGenerated: f.aiGenerated),
         QuoteCardFrame(
           :final username,
           :final displayName,
@@ -2685,6 +2685,7 @@ class EditorState extends ChangeNotifier {
           :final full,
         ) =>
           QuoteCardFrame(
+            aiGenerated: f.aiGenerated,
             groupId: newId,
             username: username,
             displayName: displayName,
@@ -2694,7 +2695,7 @@ class EditorState extends ChangeNotifier {
           ),
         SpoilerFrame() => SpoilerFrame(groupId: newId),
         DetailsFrame(:final summary, :final open) =>
-          DetailsFrame(groupId: newId, summary: summary, open: open),
+          DetailsFrame(groupId: newId, aiGenerated: f.aiGenerated, summary: summary, open: open),
         CalloutFrame(
           :final kind,
           :final typeRaw,
