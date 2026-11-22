@@ -179,7 +179,6 @@ class RenderQuoteCard extends StatelessWidget {
               color: barColor,
               width: barWidth,
               textDirection: textDirection,
-              rounded: false,
             ),
             child: Padding(
               padding: EdgeInsetsDirectional.fromSTEB(
@@ -199,7 +198,7 @@ class RenderQuoteCard extends StatelessWidget {
           color: barColor,
           width: barWidth,
           textDirection: textDirection,
-          rounded: true,
+          radius: context.renderShapes.radius(barWidth / 2),
         ),
         child: Padding(
           padding: EdgeInsetsDirectional.fromSTEB(
@@ -398,10 +397,11 @@ class _FloorBadge extends StatelessWidget {
 
     if (!interactive) return content;
 
+    final badgeRadius = context.renderShapes.borderRadius(4);
     final pill = DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: badgeRadius,
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
@@ -411,7 +411,7 @@ class _FloorBadge extends StatelessWidget {
     return _QuoteLink(
       onTap: onTap,
       label: label,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: badgeRadius,
       child: pill,
     );
   }
@@ -443,7 +443,7 @@ class _QuoteLink extends StatelessWidget {
       label: label,
       child: InkWell(
         onTap: onTap,
-        borderRadius: borderRadius ?? BorderRadius.circular(4),
+        borderRadius: borderRadius ?? context.renderShapes.borderRadius(4),
         child: inner,
       ),
     );
@@ -456,13 +456,13 @@ class _QuoteRailPainter extends CustomPainter {
     required this.color,
     required this.width,
     required this.textDirection,
-    required this.rounded,
+    this.radius,
   });
 
   final Color color;
   final double width;
   final TextDirection textDirection;
-  final bool rounded;
+  final Radius? radius;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -471,9 +471,9 @@ class _QuoteRailPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.fill;
     final left = textDirection == TextDirection.rtl ? size.width - width : 0.0;
-    if (rounded) {
+    final r = radius;
+    if (r != null && r != Radius.zero) {
       final inset = size.height > 4 ? 1.0 : 0.0;
-      final r = Radius.circular(width / 2);
       canvas.drawRRect(
         RRect.fromLTRBR(
           left,
@@ -494,7 +494,7 @@ class _QuoteRailPainter extends CustomPainter {
       oldDelegate.color != color ||
       oldDelegate.width != width ||
       oldDelegate.textDirection != textDirection ||
-      oldDelegate.rounded != rounded;
+      oldDelegate.radius != radius;
 }
 
 class _ExternalArrowPainter extends CustomPainter {
