@@ -99,7 +99,8 @@ class _InlineSpanTextState extends State<InlineSpanText> {
   // ---- acquire key 快照(判断是否需要换引用) ----
   List<InlineNode>? _keyInlines;
   TextStyle? _keyBaseStyle;
-  ThemeData? _keyTheme;
+  ThemeData? _keyThemeRaw;
+  FlattenThemeKey? _keyTheme;
   InlineFlattener? _keyFlattener;
   int _keyTotalImages = -1;
 
@@ -131,13 +132,22 @@ class _InlineSpanTextState extends State<InlineSpanText> {
     _result = null;
   }
 
-  bool _cacheValid(ThemeData theme) =>
-      _result != null &&
-      identical(_keyInlines, widget.inlines) &&
-      _keyBaseStyle == widget.baseStyle &&
-      identical(_keyTheme, theme) &&
-      identical(_keyFlattener, widget.flattener) &&
-      _keyTotalImages == widget.totalImagesInPost;
+  bool _cacheValid(ThemeData theme) {
+    if (_result == null ||
+        !identical(_keyInlines, widget.inlines) ||
+        _keyBaseStyle != widget.baseStyle ||
+        !identical(_keyFlattener, widget.flattener) ||
+        _keyTotalImages != widget.totalImagesInPost) {
+      return false;
+    }
+    if (identical(_keyThemeRaw, theme)) return true;
+    final themeKey = FlattenThemeKey.fromTheme(theme);
+    if (_keyTheme == themeKey) {
+      _keyThemeRaw = theme;
+      return true;
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -169,7 +179,8 @@ class _InlineSpanTextState extends State<InlineSpanText> {
       );
       _keyInlines = widget.inlines;
       _keyBaseStyle = widget.baseStyle;
-      _keyTheme = theme;
+      _keyThemeRaw = theme;
+      _keyTheme = FlattenThemeKey.fromTheme(theme);
       _keyFlattener = widget.flattener;
       _keyTotalImages = widget.totalImagesInPost;
     }
@@ -197,12 +208,13 @@ class _InlineSpanTextState extends State<InlineSpanText> {
         widget.maxLines == null &&
         widget.overflow == TextOverflow.clip;
 
-    if (useDirectPaint) {
-      // 预热探针:登记挂载真实使用的 (baseStyle, theme, flattener),
-      // idle 预热用同源 key 构缓存条目(见 paragraph_warmup.dart)。
-      ParagraphWarmupProbe.noteStyle(
-          widget.baseStyle, theme, widget.flattener);
-    }
+    final warmupStyle = useDirectPaint
+        ? ParagraphWarmupStyle(
+            baseStyle: widget.baseStyle,
+            theme: theme,
+            flattener: widget.flattener,
+          )
+        : null;
 
     // 选区注册 + 高亮统一由 SelectableTextBox 封装(无 SelectionScope 时退化
     // 为裸文本,零成本)。直绘块经 BlockTextGeometry 接入同一套选区。
@@ -215,6 +227,7 @@ class _InlineSpanTextState extends State<InlineSpanText> {
           ? CachedParagraphText(
               result: result,
               textAlign: widget.textAlign,
+              warmupStyle: warmupStyle,
             )
           : Text.rich(
               result.span,

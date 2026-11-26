@@ -32,8 +32,15 @@ export 'src/render/iframe_handler.dart';
 export 'src/render/audio_handler.dart';
 export 'src/render/cached_paragraph_text.dart'
     show ParagraphLayoutCache, CachedParagraphText;
+export 'src/render/glyph_prebaker.dart' show GlyphPrebaker;
 export 'src/render/paragraph_warmup.dart'
-    show ParagraphWarmup, ParagraphWarmupProbe, WarmupContext;
+    show
+        ParagraphWarmup,
+        ParagraphWarmupProbe,
+        ParagraphWarmupScope,
+        ParagraphWarmupStyle,
+        ParagraphWarmupTracker,
+        WarmupContext;
 export 'src/render/spoiler_effect.dart' show SpoilerShader;
 export 'src/render/video_handler.dart';
 export 'src/render/image_handler.dart';

@@ -90,4 +90,32 @@ class FluxdoRenderPalette extends ThemeExtension<FluxdoRenderPalette> {
       ),
     );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      other is FluxdoRenderPalette &&
+      other.blue == blue &&
+      other.cyan == cyan &&
+      other.teal == teal &&
+      other.green == green &&
+      other.orange == orange &&
+      other.red == red &&
+      other.purple == purple &&
+      other.grey == grey &&
+      other.clickCountBackground == clickCountBackground &&
+      other.clickCountForeground == clickCountForeground;
+
+  @override
+  int get hashCode => Object.hash(
+    blue,
+    cyan,
+    teal,
+    green,
+    orange,
+    red,
+    purple,
+    grey,
+    clickCountBackground,
+    clickCountForeground,
+  );
 }

@@ -158,18 +158,52 @@ class _FlattenEntry {
   bool dead = false;
 }
 
+/// flatten 期间同步读取的主题色摘要(值语义)。
+///
+/// 不能用 `identical(oldTheme, theme)` 做缓存 key:`Theme.of(context)`
+/// 内部只缓存少量本地化结果,局部 `Theme(data: theme.copyWith(...))`
+/// 即可把根主题挤出缓存,之后返回的 `ThemeData` 值完全一致但对象身份不同,
+/// 会触发全应用文字缓存集体失效。
+@immutable
+class FlattenThemeKey {
+  const FlattenThemeKey({
+    required this.primary,
+    required this.onSurfaceVariant,
+  });
+
+  factory FlattenThemeKey.fromTheme(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    return FlattenThemeKey(
+      primary: scheme.primary,
+      onSurfaceVariant: scheme.onSurfaceVariant,
+    );
+  }
+
+  final Color primary;
+  final Color onSurfaceVariant;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FlattenThemeKey &&
+      other.primary == primary &&
+      other.onSurfaceVariant == onSurfaceVariant;
+
+  @override
+  int get hashCode => Object.hash(primary, onSurfaceVariant);
+}
+
 class _FlattenKey {
   _FlattenKey(
     this.inlines,
     this.baseStyle,
-    this.theme,
+    ThemeData theme,
     this.totalImagesInPost,
     this.flattener,
-  );
+  ) : themeKey = FlattenThemeKey.fromTheme(theme);
 
   final List<InlineNode> inlines;
   final TextStyle baseStyle;
-  final ThemeData theme;
+  final FlattenThemeKey themeKey;
   final int totalImagesInPost;
   final InlineFlattener flattener;
 
@@ -178,7 +212,7 @@ class _FlattenKey {
       other is _FlattenKey &&
       identical(other.inlines, inlines) &&
       other.baseStyle == baseStyle &&
-      identical(other.theme, theme) &&
+      other.themeKey == themeKey &&
       other.totalImagesInPost == totalImagesInPost &&
       identical(other.flattener, flattener);
 
@@ -186,7 +220,7 @@ class _FlattenKey {
   int get hashCode => Object.hash(
         identityHashCode(inlines),
         baseStyle,
-        identityHashCode(theme),
+        themeKey,
         totalImagesInPost,
         identityHashCode(flattener),
       );

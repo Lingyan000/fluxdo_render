@@ -1,5 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../config/render_palette.dart';
+import '../config/render_shapes.dart';
+import '../config/render_style.dart';
 import '../node/node.dart';
 import '../parser/paragraph_parser.dart';
 import '../render/code_block_handler.dart';
@@ -287,7 +290,8 @@ class _FluxdoRenderState extends State<FluxdoRender> {
   ///   同步路径读这三个 inherited —— 表格虚拟化限高用 size.height ——
   ///   派生值内嵌在产出的 widget 里)
   Widget? _cachedColumn;
-  ThemeData? _cacheTheme;
+  ThemeData? _cacheThemeRaw;
+  _RenderThemeKey? _cacheThemeKey;
   TextDirection? _cacheDirectionality;
   Size? _cacheMediaSize;
 
@@ -420,11 +424,19 @@ class _FluxdoRenderState extends State<FluxdoRender> {
     final theme = Theme.of(context);
     final directionality = Directionality.of(context);
     final mediaSize = MediaQuery.sizeOf(context);
-    if (!identical(_cacheTheme, theme) ||
+    var themeChanged = false;
+    if (!identical(_cacheThemeRaw, theme)) {
+      final nextThemeKey = _RenderThemeKey.fromTheme(theme);
+      _cacheThemeRaw = theme;
+      if (_cacheThemeKey != nextThemeKey) {
+        _cacheThemeKey = nextThemeKey;
+        themeChanged = true;
+      }
+    }
+    if (themeChanged ||
         _cacheDirectionality != directionality ||
         _cacheMediaSize != mediaSize) {
       _cachedColumn = null;
-      _cacheTheme = theme;
       _cacheDirectionality = directionality;
       _cacheMediaSize = mediaSize;
     }
@@ -507,4 +519,65 @@ class _FluxdoRenderState extends State<FluxdoRender> {
       ],
     );
   }
+}
+
+/// 正文列缓存的主题值指纹:只比较真正影响 [NodeFactory] 产出的主题字段,
+/// 避免 `Theme.of(context)` 本地化缓存被其他页面局部主题挤出后产生同值新
+/// 实例,导致已渲染正文无故整棵重建。
+@immutable
+class _RenderThemeKey {
+  const _RenderThemeKey({
+    required this.brightness,
+    required this.colorScheme,
+    required this.textTheme,
+    required this.cardColor,
+    required this.dividerColor,
+    required this.renderStyle,
+    required this.renderPalette,
+    required this.renderShapes,
+  });
+
+  factory _RenderThemeKey.fromTheme(ThemeData theme) => _RenderThemeKey(
+        brightness: theme.brightness,
+        colorScheme: theme.colorScheme,
+        textTheme: theme.textTheme,
+        cardColor: theme.cardTheme.color,
+        dividerColor: theme.dividerColor,
+        renderStyle: FluxdoRenderStyle.of(theme),
+        renderPalette: FluxdoRenderPalette.of(theme),
+        renderShapes: FluxdoRenderShapes.of(theme),
+      );
+
+  final Brightness brightness;
+  final ColorScheme colorScheme;
+  final TextTheme textTheme;
+  final Color? cardColor;
+  final Color dividerColor;
+  final FluxdoRenderStyle renderStyle;
+  final FluxdoRenderPalette renderPalette;
+  final FluxdoRenderShapes renderShapes;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _RenderThemeKey &&
+      other.brightness == brightness &&
+      other.colorScheme == colorScheme &&
+      other.textTheme == textTheme &&
+      other.cardColor == cardColor &&
+      other.dividerColor == dividerColor &&
+      other.renderStyle == renderStyle &&
+      other.renderPalette == renderPalette &&
+      other.renderShapes == renderShapes;
+
+  @override
+  int get hashCode => Object.hash(
+        brightness,
+        colorScheme,
+        textTheme,
+        cardColor,
+        dividerColor,
+        renderStyle,
+        renderPalette,
+        renderShapes,
+      );
 }

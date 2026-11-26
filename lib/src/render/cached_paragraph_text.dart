@@ -346,6 +346,7 @@ class CachedParagraphText extends MultiChildRenderObjectWidget {
     super.key,
     required this.result,
     this.textAlign,
+    this.warmupStyle,
   }) : super(
           children: [
             for (final island in result.islands)
@@ -355,6 +356,7 @@ class CachedParagraphText extends MultiChildRenderObjectWidget {
 
   final FlattenResult result;
   final TextAlign? textAlign;
+  final ParagraphWarmupStyle? warmupStyle;
 
   ParagraphEnv _env(BuildContext context) {
     final defaults = DefaultTextStyle.of(context);
@@ -368,16 +370,27 @@ class CachedParagraphText extends MultiChildRenderObjectWidget {
     );
   }
 
+  ParagraphWarmupTracker _tracker(BuildContext context) =>
+      ParagraphWarmupScope.maybeOf(context) ??
+      ParagraphWarmupProbe.globalTracker;
+
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      RenderCachedParagraph(result: result, env: _env(context));
+      RenderCachedParagraph(
+        result: result,
+        env: _env(context),
+        warmupStyle: warmupStyle,
+        warmupTracker: _tracker(context),
+      );
 
   @override
   void updateRenderObject(
       BuildContext context, RenderCachedParagraph renderObject) {
     renderObject
       ..result = result
-      ..env = _env(context);
+      ..env = _env(context)
+      ..warmupStyle = warmupStyle
+      ..warmupTracker = _tracker(context);
   }
 }
 
@@ -395,8 +408,12 @@ class RenderCachedParagraph extends RenderBox
   RenderCachedParagraph({
     required FlattenResult result,
     required ParagraphEnv env,
+    ParagraphWarmupStyle? warmupStyle,
+    ParagraphWarmupTracker? warmupTracker,
   })  : _result = result,
-        _env = env;
+        _env = env,
+        _warmupStyle = warmupStyle,
+        _warmupTracker = warmupTracker;
 
   FlattenResult _result;
   FlattenResult get result => _result;
@@ -419,8 +436,48 @@ class RenderCachedParagraph extends RenderBox
     markNeedsSemanticsUpdate();
   }
 
+  ParagraphWarmupStyle? _warmupStyle;
+  set warmupStyle(ParagraphWarmupStyle? value) {
+    if (_warmupStyle == value) return;
+    _warmupStyle = value;
+    _syncWarmupContextIfLaidOut();
+  }
+
+  ParagraphWarmupTracker? _warmupTracker;
+  set warmupTracker(ParagraphWarmupTracker? value) {
+    if (identical(_warmupTracker, value)) return;
+    _warmupTracker?.remove(this);
+    _warmupTracker = value;
+    final ctx = _lastWarmupContext;
+    if (attached && ctx != null) {
+      _warmupTracker?.put(this, ctx);
+    }
+  }
+
   ParagraphLayoutEntry? _entry;
   String? _cachedPlainText;
+  WarmupContext? _lastWarmupContext;
+  double? _lastLayoutMinWidth;
+  double? _lastLayoutMaxWidth;
+
+  void _syncWarmupContextIfLaidOut() {
+    final style = _warmupStyle;
+    final minW = _lastLayoutMinWidth;
+    final maxW = _lastLayoutMaxWidth;
+    if (style == null || minW == null || maxW == null) return;
+    final ctx = WarmupContext(
+      baseStyle: style.baseStyle,
+      theme: style.theme,
+      flattener: style.flattener,
+      env: _env,
+      minWidth: minW,
+      maxWidth: maxW,
+    );
+    _lastWarmupContext = ctx;
+    if (attached) {
+      _warmupTracker?.put(this, ctx);
+    }
+  }
 
   /// 交还当前条目的持有权(换内容 / 换环境 / 本对象销毁)。
   void _releaseEntry() {
@@ -429,9 +486,25 @@ class RenderCachedParagraph extends RenderBox
   }
 
   @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    final ctx = _lastWarmupContext;
+    if (ctx != null) {
+      _warmupTracker?.put(this, ctx);
+    }
+  }
+
+  @override
+  void detach() {
+    _warmupTracker?.remove(this);
+    super.detach();
+  }
+
+  @override
   void dispose() {
     // RenderObject 销毁时必须交还持有权,否则被逐出的条目永远等不到
     // 引用归零,native Paragraph 泄漏。
+    _warmupTracker?.remove(this);
     _releaseEntry();
     super.dispose();
   }
@@ -467,9 +540,26 @@ class RenderCachedParagraph extends RenderBox
       _entry = obtained;
     }
     final entry = obtained;
-    // 预热探针:登记真实布局用的 (env, 约束宽),idle 预热同源构 key。
-    ParagraphWarmupProbe.noteEnv(
-        _env, constraints.minWidth, constraints.maxWidth);
+    // 预热探针:按活跃实例原子登记真实布局用的 (style, env, 约束宽),
+    // 宽度/主题/字号变化时原地覆写，不保留过期历史宽度。
+    _lastLayoutMinWidth = constraints.minWidth;
+    _lastLayoutMaxWidth = constraints.maxWidth;
+    final style = _warmupStyle;
+    if (style != null) {
+      final ctx = WarmupContext(
+        baseStyle: style.baseStyle,
+        theme: style.theme,
+        flattener: style.flattener,
+        env: _env,
+        minWidth: constraints.minWidth,
+        maxWidth: constraints.maxWidth,
+      );
+      _lastWarmupContext = ctx;
+      _warmupTracker?.put(this, ctx);
+    } else {
+      ParagraphWarmupProbe.noteEnv(
+          _env, constraints.minWidth, constraints.maxWidth);
+    }
     size = constraints.constrain(entry.size);
 
     // 岛子节点:tight 约束到占位尺寸(与 addPlaceholder 一致;emoji

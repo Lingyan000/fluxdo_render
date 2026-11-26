@@ -30,11 +30,38 @@ import '../node/node.dart';
 import 'cached_paragraph_text.dart';
 import 'emoji_handler.dart';
 import 'footnote_handler.dart';
+import 'glyph_prebaker.dart';
 import 'image_handler.dart';
 import 'link_handler.dart';
 import 'local_date_handler.dart';
 import 'math_handler.dart';
 import 'mention_handler.dart';
+
+/// 直绘段落的样式快照(由 InlineSpanText 传给 CachedParagraphText 原子登记)。
+@immutable
+class ParagraphWarmupStyle {
+  ParagraphWarmupStyle({
+    required this.baseStyle,
+    required this.theme,
+    required this.flattener,
+  }) : themeKey = FlattenThemeKey.fromTheme(theme);
+
+  final TextStyle baseStyle;
+  final ThemeData theme;
+  final FlattenThemeKey themeKey;
+  final InlineFlattener flattener;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ParagraphWarmupStyle &&
+      other.baseStyle == baseStyle &&
+      other.themeKey == themeKey &&
+      identical(other.flattener, flattener);
+
+  @override
+  int get hashCode =>
+      Object.hash(baseStyle, themeKey, identityHashCode(flattener));
+}
 
 /// 直绘段落的挂载环境快照(探针产物)。
 class WarmupContext {
@@ -53,38 +80,140 @@ class WarmupContext {
   final ParagraphEnv env;
   final double minWidth;
   final double maxWidth;
+
+  /// 值语义环境指纹:用于宿主判断宽度/主题/字号是否已变更，从而重置预热游标。
+  Object get environmentKey => (
+        baseStyle,
+        FlattenThemeKey.fromTheme(theme),
+        identityHashCode(flattener),
+        env,
+        (minWidth * 2).round(),
+        (maxWidth * 2).round(),
+      );
 }
 
-/// 挂载环境探针:直绘块登记,预热器取众数快照。
+/// 单个页面/列表作用域的活跃段落环境追踪器。
+///
+/// 按**当前已挂载的 RenderCachedParagraph 实例**实时维护环境样本:
+/// - 宽度变化(如 280→360)、主题或字号变化时，已挂载段落会在 performLayout
+///   里原地覆写自己的样本，旧宽度/旧样式立即消失，不会被历史计数压住；
+/// - 段落卸载时从活跃表移除，保留最近一次有效快照供全量回收后继续预热；
+/// - 不同页面各自持有独立 [ParagraphWarmupTracker]（经 [ParagraphWarmupScope]
+///   注入），彻底避免上一页宽度或样式污染当前页预热。
+class ParagraphWarmupTracker {
+  final Map<Object, WarmupContext> _live = {};
+  WarmupContext? _lastSnapshot;
+
+  void put(Object owner, WarmupContext ctx) {
+    _live.remove(owner); // 重插到尾部，保留最新顺序用于平票决胜
+    _live[owner] = ctx;
+    _lastSnapshot = null;
+  }
+
+  void remove(Object owner) {
+    if (!_live.containsKey(owner)) return;
+    if (_live.length == 1) {
+      _lastSnapshot = _live[owner];
+    }
+    _live.remove(owner);
+  }
+
+  /// 当前作用域的最佳预热环境快照。
+  ///
+  /// 有活跃挂载段落时严格只从活跃样本里取众数（同票取更宽、更新的样本，
+  /// 正文段落宽度大于引用/列表缩进）；全部卸载时退回最后一次有效快照。
+  WarmupContext? snapshot() {
+    if (_live.isEmpty) return _lastSnapshot;
+
+    final counts = <_WarmupBucketKey, int>{};
+    final latestByBucket = <_WarmupBucketKey, WarmupContext>{};
+    final orderByBucket = <_WarmupBucketKey, int>{};
+    var order = 0;
+    for (final ctx in _live.values) {
+      final bucket = _WarmupBucketKey.fromContext(ctx);
+      counts[bucket] = (counts[bucket] ?? 0) + 1;
+      latestByBucket[bucket] = ctx;
+      orderByBucket[bucket] = order++;
+    }
+
+    _WarmupBucketKey? bestBucket;
+    var bestCount = 0;
+    var bestWidth = -1.0;
+    var bestOrder = -1;
+    counts.forEach((bucket, count) {
+      final ctx = latestByBucket[bucket]!;
+      final bucketOrder = orderByBucket[bucket]!;
+      final better = count > bestCount ||
+          (count == bestCount && ctx.maxWidth > bestWidth) ||
+          (count == bestCount &&
+              ctx.maxWidth == bestWidth &&
+              bucketOrder > bestOrder);
+      if (better) {
+        bestBucket = bucket;
+        bestCount = count;
+        bestWidth = ctx.maxWidth;
+        bestOrder = bucketOrder;
+      }
+    });
+
+    final result = bestBucket == null ? null : latestByBucket[bestBucket!];
+    if (result != null) {
+      _lastSnapshot = result;
+    }
+    return result;
+  }
+
+  void reset() {
+    _live.clear();
+    _lastSnapshot = null;
+  }
+}
+
+/// 为当前页面/列表子树隔离段落预热探针的轻量作用域。
+class ParagraphWarmupScope extends InheritedWidget {
+  const ParagraphWarmupScope({
+    super.key,
+    required this.tracker,
+    required super.child,
+  });
+
+  final ParagraphWarmupTracker tracker;
+
+  /// 只读查询(不注册 rebuild 依赖):tracker 本身是可变容器。
+  static ParagraphWarmupTracker? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<ParagraphWarmupScope>()?.tracker;
+
+  @override
+  bool updateShouldNotify(ParagraphWarmupScope oldWidget) =>
+      !identical(tracker, oldWidget.tracker);
+}
+
+/// 挂载环境探针(默认全局入口，兼容未包裹 [ParagraphWarmupScope] 的场景)。
 class ParagraphWarmupProbe {
   ParagraphWarmupProbe._();
 
-  static const int _cap = 8;
+  static final ParagraphWarmupTracker globalTracker = ParagraphWarmupTracker();
 
-  // (baseStyle, theme, flattener) → 出现次数
-  static final Map<_StyleKey, int> _styles = {};
-  // (env, minWidth, maxWidth) → 出现次数
-  static final Map<_EnvKey, int> _envs = {};
+  static _StyleKey? _legacyLatestStyle;
+  static _EnvKey? _legacyLatestEnv;
 
-  /// InlineSpanText 直绘分路成立时登记(build 路径,只做 map 自增)。
+  /// 兼容接口:手动登记样式(独立调用时取最近一次样本)。
   static void noteStyle(
       TextStyle baseStyle, ThemeData theme, InlineFlattener flattener) {
-    final key = _StyleKey(baseStyle, theme, flattener);
-    _styles[key] = (_styles[key] ?? 0) + 1;
-    if (_styles.length > _cap) _prune(_styles);
+    _legacyLatestStyle = _StyleKey(baseStyle, theme, flattener);
   }
 
-  /// RenderCachedParagraph.performLayout 登记(layout 路径)。
+  /// 兼容接口:手动登记布局环境(独立调用时取最近一次样本)。
   static void noteEnv(ParagraphEnv env, double minWidth, double maxWidth) {
-    final key = _EnvKey(env, minWidth, maxWidth);
-    _envs[key] = (_envs[key] ?? 0) + 1;
-    if (_envs.length > _cap) _prune(_envs);
+    _legacyLatestEnv = _EnvKey(env, minWidth, maxWidth);
   }
 
-  /// 众数快照;任一侧未收敛(无登记)返回 null(预热器跳过本轮)。
+  /// 当前全局探针快照:优先使用活跃实例追踪器，无活跃记录时退回手动登记。
   static WarmupContext? snapshot() {
-    final style = _top(_styles);
-    final env = _top(_envs);
+    final tracked = globalTracker.snapshot();
+    if (tracked != null) return tracked;
+    final style = _legacyLatestStyle;
+    final env = _legacyLatestEnv;
     if (style == null || env == null) return null;
     return WarmupContext(
       baseStyle: style.baseStyle,
@@ -96,51 +225,80 @@ class ParagraphWarmupProbe {
     );
   }
 
-  /// 主题/字号切换后旧登记失去意义,宿主可主动清(不清也会被新登记
-  /// 的计数逐步反超,只是慢几拍)。
+  /// 清空全局探针(主题/字号切换或测试清理时调用)。
   static void reset() {
-    _styles.clear();
-    _envs.clear();
-  }
-
-  static K? _top<K>(Map<K, int> map) {
-    K? best;
-    var bestCount = 0;
-    map.forEach((k, v) {
-      if (v > bestCount) {
-        bestCount = v;
-        best = k;
-      }
-    });
-    return best;
-  }
-
-  /// 超容时砍掉计数最低的一半,防主题反复切换堆积。
-  static void _prune<K>(Map<K, int> map) {
-    final entries = map.entries.toList()
-      ..sort((a, b) => a.value.compareTo(b.value));
-    for (var i = 0; i < entries.length ~/ 2; i++) {
-      map.remove(entries[i].key);
-    }
+    globalTracker.reset();
+    _legacyLatestStyle = null;
+    _legacyLatestEnv = null;
   }
 }
 
+class _WarmupBucketKey {
+  _WarmupBucketKey({
+    required this.baseStyle,
+    required this.themeKey,
+    required this.flattener,
+    required this.env,
+    required this.minWidthBucket,
+    required this.maxWidthBucket,
+  });
+
+  factory _WarmupBucketKey.fromContext(WarmupContext ctx) => _WarmupBucketKey(
+        baseStyle: ctx.baseStyle,
+        themeKey: FlattenThemeKey.fromTheme(ctx.theme),
+        flattener: ctx.flattener,
+        env: ctx.env,
+        minWidthBucket: (ctx.minWidth * 2).round(),
+        maxWidthBucket: (ctx.maxWidth * 2).round(),
+      );
+
+  final TextStyle baseStyle;
+  final FlattenThemeKey themeKey;
+  final InlineFlattener flattener;
+  final ParagraphEnv env;
+  final int minWidthBucket;
+  final int maxWidthBucket;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _WarmupBucketKey &&
+      other.baseStyle == baseStyle &&
+      other.themeKey == themeKey &&
+      identical(other.flattener, flattener) &&
+      other.env == env &&
+      other.minWidthBucket == minWidthBucket &&
+      other.maxWidthBucket == maxWidthBucket;
+
+  @override
+  int get hashCode => Object.hash(
+        baseStyle,
+        themeKey,
+        identityHashCode(flattener),
+        env,
+        minWidthBucket,
+        maxWidthBucket,
+      );
+}
+
 class _StyleKey {
-  _StyleKey(this.baseStyle, this.theme, this.flattener);
+  _StyleKey(this.baseStyle, this.theme, this.flattener)
+      : themeKey = FlattenThemeKey.fromTheme(theme);
+
   final TextStyle baseStyle;
   final ThemeData theme;
+  final FlattenThemeKey themeKey;
   final InlineFlattener flattener;
 
   @override
   bool operator ==(Object other) =>
       other is _StyleKey &&
       other.baseStyle == baseStyle &&
-      identical(other.theme, theme) &&
+      other.themeKey == themeKey &&
       identical(other.flattener, flattener);
 
   @override
-  int get hashCode => Object.hash(
-      baseStyle, identityHashCode(theme), identityHashCode(flattener));
+  int get hashCode =>
+      Object.hash(baseStyle, themeKey, identityHashCode(flattener));
 }
 
 class _EnvKey {
@@ -190,12 +348,20 @@ class ParagraphWarmup {
     LocalDateBuilder? localDateBuilder,
     MathInlineBuilder? mathInlineBuilder,
     AttachmentDownloadHandler? onDownloadAttachment,
+    GlyphPrebaker? glyphBaker,
+    double? devicePixelRatio,
     int startIndex = 0,
     int budgetMicros = 4000,
   }) {
     final sw = Stopwatch()..start();
+    final newlyLaidOut =
+        glyphBaker == null ? null : <ParagraphLayoutEntry>[];
+    var nextIndex = -1;
     for (var i = startIndex; i < nodes.length; i++) {
-      if (sw.elapsedMicroseconds > budgetMicros) return i;
+      if (sw.elapsedMicroseconds > budgetMicros) {
+        nextIndex = i;
+        break;
+      }
       final node = nodes[i];
       if (node is! ParagraphNode) continue;
       final flat = FlattenCache.acquire(
@@ -224,11 +390,28 @@ class ParagraphWarmup {
       if ((!flat.hasPlaceholders || flat.allPlaceholdersAreIslands) &&
           !projection.hasInlineCode &&
           !projection.hasSpanMention) {
-        ParagraphLayoutCache.obtain(flat, ctx.env, ctx.minWidth, ctx.maxWidth);
+        final missesBefore = ParagraphLayoutCache.misses;
+        final entry = ParagraphLayoutCache.obtain(
+          flat,
+          ctx.env,
+          ctx.minWidth,
+          ctx.maxWidth,
+        );
+        if (newlyLaidOut != null && ParagraphLayoutCache.misses > missesBefore) {
+          newlyLaidOut.add(entry);
+        }
       }
       FlattenCache.release(flat); // refs 归 0,条目留 LRU 待挂载命中
       warmedParagraphs++;
     }
-    return -1;
+    if (glyphBaker != null &&
+        newlyLaidOut != null &&
+        newlyLaidOut.isNotEmpty) {
+      glyphBaker.enqueueEntries(
+        newlyLaidOut,
+        devicePixelRatio: devicePixelRatio ?? 1.0,
+      );
+    }
+    return nextIndex;
   }
 }
