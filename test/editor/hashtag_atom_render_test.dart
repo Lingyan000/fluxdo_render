@@ -37,6 +37,7 @@ void main() {
     await tester.pump();
 
     expect(tester.takeException(), isNull);
+    expect(find.text('开发调优'), findsOneWidget);
     final para = tester.getSize(find.byType(EditableParagraph).first);
     expect(para.height, lessThan(80), reason: '一行文字的段落不该几百像素高');
   });

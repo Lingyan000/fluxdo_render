@@ -476,50 +476,61 @@ class InlineFlattener {
     final isTag = RegExp(r'/tags?/').hasMatch(href);
     final resolver = hashtagIconResolver;
     final handler = p.handler;
-    final emojiBaseSize = p.emojiBaseSize;
+    final fontSize = p.emojiBaseSize * 0.93;
     // context == null 是本 flattener 的「交互开关」(见 flatten 文档):
     // 编辑态和纯 unit test 都不传,此时不能挂手势 —— 药丸吃掉点击会让
     // 编辑器落不了光标(同图片原子 AbsorbPointer 的原则)。
     final interactive = p.context != null;
     return WidgetSpan(
-      alignment: PlaceholderAlignment.middle,
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
       child: Builder(
         builder: (ctx) {
           final scheme = Theme.of(ctx).colorScheme;
-          final fontSize = emojiBaseSize * 0.82;
-          final lineHeight = emojiBaseSize * 1.5;
           // 图标解析放在 build 里:宿主要拿 context 去查分类表(cooked 给
           // 的默认图标是个色块,分类自己配的图标才是想要的那个)。
           final icon = resolver?.call(ctx, iconName, href);
           return ContentTapTarget(
+            behavior: HitTestBehavior.opaque,
             onTap: interactive
                 ? () {
-                    final bare = label.startsWith('#')
-                        ? label.substring(1)
-                        : label;
-                    if (hashtagTapHandler?.call(ctx, href, ref, bare) == true) {
+                    if (hashtagTapHandler?.call(ctx, href, ref, label) == true) {
                       return;
                     }
                     handler(ctx, href);
                   }
                 : null,
             child: Container(
-              height: lineHeight,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: ShapeDecoration(color: scheme.surfaceContainerHigh,shape: RoundedSuperellipseBorder(borderRadius: FluxdoRenderShapes.current.borderRadius(6), ),),
+              // 底色包住文字和内边距，相邻两行的空隙由正文行高决定。
+              padding: EdgeInsets.symmetric(
+                horizontal: fontSize * 0.34,
+                vertical: fontSize * 0.2,
+              ),
+              decoration: ShapeDecoration(
+                color: scheme.surfaceContainerHigh,
+                shape: RoundedSuperellipseBorder(
+                  borderRadius: FluxdoRenderShapes.current.borderRadius(6),
+                ),
+              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Icon(
-                    icon ??
-                        (isTag ? Icons.sell_outlined : Icons.folder_outlined),
-                    size: fontSize * 1.05,
-                    color: scheme.primary,
+                  // 行内基线跟随名称，避免不同图标字体影响文字对齐。
+                  IgnoreBaseline(
+                    child: Icon(
+                      icon ??
+                          (isTag ? Icons.sell_outlined : Icons.folder_outlined),
+                      size: fontSize * 0.93,
+                      applyTextScaling: false,
+                      color: scheme.primary,
+                    ),
                   ),
                   const SizedBox(width: 3),
                   Text(
                     label,
+                    // WidgetSpan 已按正文字号缩放整枚标签。
+                    textScaler: TextScaler.noScaling,
                     style: TextStyle(
                       color: scheme.primary,
                       fontSize: fontSize,
@@ -535,7 +546,7 @@ class InlineFlattener {
     );
   }
 
-  /// 取 hashtag 锚文本(cooked 里就是 `<span>名称</span>`,可能带前导 `#`)。
+  /// 图标已标明类型，显示名称时只去掉开头的井号，保留 C# 等名称里的井号。
   String _hashtagLabel(List<InlineNode> children) {
     final buf = StringBuffer();
     void walk(List<InlineNode> nodes) {
@@ -565,7 +576,7 @@ class InlineFlattener {
 
     walk(children);
     final text = buf.toString().trim();
-    return text.startsWith('#') ? text : '#$text';
+    return text.startsWith('#') ? text.substring(1) : text;
   }
 
   TextSpan _buildLinkSpan(

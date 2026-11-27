@@ -231,6 +231,14 @@ class _InlineSpanTextState extends State<InlineSpanText> {
             )
           : Text.rich(
               result.span,
+              // 纯标签行缺少正文文字来撑行，仍应使用所在段落的最小行高。
+              strutStyle: projection.entries.any(
+                (entry) => entry.kind == ProjectionKind.hashtag,
+              )
+                  ? StrutStyle.fromTextStyle(
+                      DefaultTextStyle.of(context).style.merge(widget.baseStyle),
+                    )
+                  : null,
               textAlign: widget.textAlign,
               maxLines: widget.maxLines,
               overflow: widget.overflow,
