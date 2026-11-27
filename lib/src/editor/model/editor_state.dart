@@ -332,6 +332,16 @@ class EditorState extends ChangeNotifier {
   List<EditorBlock> _blocks;
   List<EditorBlock> get blocks => _blocks;
 
+  /// 空标题、列表项和引用各有自己的输入位置，不显示整篇正文的占位提示。
+  bool get isEmptyDocument {
+    final block = _blocks.first;
+    return _blocks.length == 1 &&
+        block is TextBlock &&
+        block.isParagraph &&
+        block.containers.isEmpty &&
+        block.content.length == 0;
+  }
+
   /// [InputRuleOutcome.calloutRequest] 命中时临时存放匹配到的 callout
   /// 类型(如 "note")。触发规则那一刻就把标记文本清空了,视图层收到
   /// outcome 时已经读不到原始 `[!note]` 字面量,靠这个字段带过去；
@@ -1707,9 +1717,24 @@ class EditorState extends ChangeNotifier {
     _insertParagraphNear(i, after: after);
   }
 
-  /// The trailing writing space represents the next line, even if the current
-  /// last paragraph is empty. It becomes document content only when clicked.
+  /// 段内换行也能留下可直接输入的末行；行内图片等原子算作内容。
+  bool get endsWithBlankLine {
+    final last = _blocks.last;
+    if (last is! TextBlock) return false;
+    final text = last.content.text;
+    final contentEnd = text.trimRight().length;
+    return contentEnd == 0 || text.indexOf('\n', contentEnd) >= 0;
+  }
+
+  /// 已有空行时只放置光标，否则在文末新增一个可撤销的段落。
   void continueAfterDocument() {
+    if (endsWithBlankLine) {
+      final last = _blocks.last;
+      updateSelection(EditorSelection.collapsed(
+        EditorPosition(blockId: last.id, offset: last.selectionLength),
+      ));
+      return;
+    }
     _insertParagraphNear(_blocks.length - 1, after: true);
   }
 

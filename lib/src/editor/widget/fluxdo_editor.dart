@@ -4016,9 +4016,10 @@ class _FluxdoEditorState extends State<FluxdoEditor>
             if (widget.emptyParagraphHint != null &&
                 block is TextBlock &&
                 block.content.length == 0 &&
-                _focusNode.hasFocus &&
-                state.selection?.isCollapsed == true &&
-                state.selection?.extent.blockId == block.id)
+                (state.isEmptyDocument ||
+                    (_focusNode.hasFocus &&
+                        state.selection?.isCollapsed == true &&
+                        state.selection?.extent.blockId == block.id)))
               Positioned.fill(
                 child: IgnorePointer(
                   child: Padding(
@@ -4142,7 +4143,7 @@ class _FluxdoEditorState extends State<FluxdoEditor>
     }
 
     final children = buildLevel(0, state.blocks.length, 0);
-    if (widget.showTrailingParagraph) {
+    if (widget.showTrailingParagraph && !state.endsWithBlankLine) {
       children.add(
         MouseRegion(
           key: const ValueKey('editor-trailing-paragraph'),

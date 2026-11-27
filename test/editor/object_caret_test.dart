@@ -4,6 +4,28 @@ import 'package:fluxdo_render/fluxdo_render.dart';
 
 void main() {
   const image = ImageRun(src: 'image.png', width: 100, height: 80);
+  test('末行内容决定续写入口，图片、代码块和文字后的空格都算在当前行', () {
+    for (final last in <EditorBlock>[
+      TextBlock(id: 'end', content: EditableTextContent(text: '正文  ')),
+      TextBlock(id: 'end', content: EditableTextContent.fromInlines(const [image])),
+      const IslandBlock(id: 'end', node: CodeBlockNode(id: 'code', code: '')),
+    ]) {
+      final state = EditorState(blocks: [
+        TextBlock(id: 'first', content: EditableTextContent.empty),
+        last,
+      ]);
+      addTearDown(state.dispose);
+      expect(state.endsWithBlankLine, isFalse);
+      state.continueAfterDocument();
+      expect(state.endsWithBlankLine, isTrue);
+      final blank = state.blocks.last;
+      state.continueAfterDocument();
+      expect(state.blocks.last, same(blank));
+      state.undo();
+      expect(state.blocks.last, same(last));
+    }
+  });
+
   for (final after in [false, true]) {
     test('图${after ? '后' : '前'}已有段落，继续输入不制造空段', () {
       final state = EditorState(
