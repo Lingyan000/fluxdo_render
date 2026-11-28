@@ -1,8 +1,7 @@
 /// 渲染一段含 LinkRun 等需要 GestureRecognizer 的行内内容。
 ///
-/// flatten 产物经 [FlattenCache] 全局复用(State 只持引用不持所有权,
-/// recognizer 生命周期随缓存条目);没有 link 的纯样式段落同样受益
-/// (跨挂载免重 flatten)。
+/// 纯文字产物经 [FlattenCache] 跨挂载复用；带交互或内嵌组件的产物
+/// 由当前 State 独占，回调变化时更新，卸载时释放。
 
 library;
 
@@ -84,16 +83,8 @@ class InlineSpanText extends StatefulWidget {
 }
 
 class _InlineSpanTextState extends State<InlineSpanText> {
-  /// 当前持有的 flatten 产物(FlattenCache 引用,acquire/release 配对)。
-  ///
-  /// 缓存 key = (inlines 身份, baseStyle, theme 身份, totalImagesInPost,
-  /// flattener 身份)。**handlers 不进 key**(设计见 FlattenCache 类注释):
-  /// 内容一变 inlines 身份必变 → miss → 新 handler 生效;内容不变时旧
-  /// handler 语义等价,点击 context 经 mount 桥挂载时现取,无悬空。
-  ///
-  /// 相比旧 State 级缓存的收益:sliver 回收重进直接命中(span identical →
-  /// RenderParagraph text setter 短路,免重排版);recognizer 跨挂载存续,
-  /// 命中路径上进行中的 tap 手势不被 dispose 打断。
+  /// 当前持有的 flatten 产物，统一通过 acquire/release 管理。
+  /// 纯文字可共享；包含回调或内嵌组件时仅在本 State 内复用。
   FlattenResult? _result;
 
   // ---- acquire key 快照(判断是否需要换引用) ----
@@ -107,6 +98,28 @@ class _InlineSpanTextState extends State<InlineSpanText> {
   /// 当前选区映射表(供 SelectableTextBox 读取),与 span 同源。
   RenderTextProjection get _projection =>
       _result?.projection ?? RenderTextProjection.empty;
+
+  // 点击代理跟随 State 存活，调用时读取当前 widget。只换回调不销毁
+  // recognizer，避免 pointer down 到 up 之间的父级重建吞掉这次点击。
+  void _handleLink(BuildContext context, String href) =>
+      (widget.linkHandler ?? defaultLinkHandler)(context, href);
+
+  void _handleMention(BuildContext context, String username, String href) =>
+      (widget.mentionTapHandler ?? defaultMentionTapHandler)(
+        context, username, href,
+      );
+
+  void _handleFootnote(BuildContext context, String id, String? html) =>
+      (widget.footnoteTapHandler ?? defaultFootnoteTapHandler)(context, id, html);
+
+  void _handleAttachment(BuildContext context, String href, String filename) {
+    final handler = widget.onDownloadAttachment;
+    if (handler != null) {
+      handler(context, href, filename);
+    } else {
+      _handleLink(context, href);
+    }
+  }
 
   @override
   void dispose() {
@@ -165,14 +178,14 @@ class _InlineSpanTextState extends State<InlineSpanText> {
         create: () => widget.flattener.flatten(
           widget.inlines,
           widget.baseStyle,
-          linkHandler: widget.linkHandler,
-          emojiImageBuilder: widget.emojiImageBuilder,
-          mentionTapHandler: widget.mentionTapHandler,
-          imageContentBuilder: widget.imageContentBuilder,
-          footnoteTapHandler: widget.footnoteTapHandler,
-          localDateBuilder: widget.localDateBuilder,
-          mathInlineBuilder: widget.mathInlineBuilder,
-          onDownloadAttachment: widget.onDownloadAttachment,
+          linkHandler: _handleLink,
+          emojiImageBuilder: _InlineBuilders.buildEmoji,
+          mentionTapHandler: _handleMention,
+          imageContentBuilder: _InlineBuilders.buildImage,
+          footnoteTapHandler: _handleFootnote,
+          localDateBuilder: _InlineBuilders.buildLocalDate,
+          mathInlineBuilder: _InlineBuilders.buildMath,
+          onDownloadAttachment: _handleAttachment,
           totalImagesInPost: widget.totalImagesInPost,
           context: context,
         ),
@@ -185,16 +198,15 @@ class _InlineSpanTextState extends State<InlineSpanText> {
       _keyTotalImages = widget.totalImagesInPost;
     }
     final result = _result!;
-    // 挂载登记:recognizer 点击闭包经 mount 现取活 context(flatten 契约
-    // 已去 context 捕获),每次 build 刷新登记保证拿到的是当前挂载点。
-    result.mount.attach(context);
+    // 带手势的产物由本 State 独占，登记的 context 就是实际点击所在区域。
+    // 全局共享的纯文字不需要 context，也不应保留页面引用。
+    if (!result.canShare) result.mount.attach(context);
 
     // ---- 分路:直绘缓存 vs RichText ----
     //
     // 直绘(CachedParagraphText,缓存 ui.Paragraph drawParagraph):
     // sliver 回收重进零排版零测量 —— 笔3 收益主体。判据(全部满足):
-    // - 占位全是「岛」(emoji,占位尺寸确定)或无占位;其他 WidgetSpan
-    //   原子(图/chip/公式)占位尺寸依赖 widget 布局,画不了;
+    // - 能提取纯排版数据：文字或尺寸已知的占位，不缓存页面回调/组件;
     // - 无行内代码/TextSpan-mention(灰底 InlineCodeBackgroundPainter
     //   仍直读 RenderParagraph,首期不动它);
     // - 无 maxLines/overflow 定制(引用卡标题单行省略语义走 TextPainter
@@ -202,7 +214,7 @@ class _InlineSpanTextState extends State<InlineSpanText> {
     // 其余段落(交互原子/富装饰)走原 RichText 路径,行为不变。
     final projection = result.projection;
     final useDirectPaint = !InlineSpanText.debugForceRichText &&
-        (!result.hasPlaceholders || result.allPlaceholdersAreIslands) &&
+        result.layoutData != null &&
         !projection.hasInlineCode &&
         !projection.hasSpanMention &&
         widget.maxLines == null &&
@@ -218,7 +230,7 @@ class _InlineSpanTextState extends State<InlineSpanText> {
 
     // 选区注册 + 高亮统一由 SelectableTextBox 封装(无 SelectionScope 时退化
     // 为裸文本,零成本)。直绘块经 BlockTextGeometry 接入同一套选区。
-    return SelectableTextBox(
+    final text = SelectableTextBox(
       projectionGetter: () => _projection,
       documentOrder: widget.documentOrder,
       chunkIndex: widget.chunkIndex,
@@ -244,5 +256,45 @@ class _InlineSpanTextState extends State<InlineSpanText> {
               overflow: widget.overflow,
             ),
     );
+    return result.hasPlaceholders
+        ? _InlineBuilders(configuration: widget, child: text)
+        : text;
+  }
+}
+
+/// 内嵌组件在实际挂载处读取最新 builder。依赖变化只重建组件，不销毁
+/// 文字手势；相同占位尺寸继续命中原布局。此作用域仅属于当前显示实例。
+class _InlineBuilders extends InheritedWidget {
+  const _InlineBuilders({required this.configuration, required super.child});
+
+  final InlineSpanText configuration;
+
+  static InlineSpanText _of(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<_InlineBuilders>()!
+      .configuration;
+
+  static Widget buildEmoji(BuildContext context, EmojiRun node, double size) =>
+      (_of(context).emojiImageBuilder ?? defaultEmojiImageBuilder)(
+        context, node, size,
+      );
+
+  static Widget buildImage(BuildContext context, ImageRun node, int total) =>
+      (_of(context).imageContentBuilder ?? defaultImageContentBuilder)(
+        context, node, total,
+      );
+
+  static Widget? buildLocalDate(BuildContext context, LocalDateRun node) =>
+      _of(context).localDateBuilder?.call(context, node);
+
+  static Widget? buildMath(BuildContext context, MathInlineRun node) =>
+      _of(context).mathInlineBuilder?.call(context, node);
+
+  @override
+  bool updateShouldNotify(_InlineBuilders oldWidget) {
+    final old = oldWidget.configuration;
+    return !identical(old.emojiImageBuilder, configuration.emojiImageBuilder) ||
+        !identical(old.imageContentBuilder, configuration.imageContentBuilder) ||
+        !identical(old.localDateBuilder, configuration.localDateBuilder) ||
+        !identical(old.mathInlineBuilder, configuration.mathInlineBuilder);
   }
 }

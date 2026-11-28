@@ -78,9 +78,10 @@ void main() {
           id: 'p_$i',
           inlines: [
             TextRun('第 $i 段正文内容 '),
-            LinkRun(href: 'https://example.com/$i', children: [
-              TextRun('链接$i'),
-            ]),
+            if (i.isEven)
+              LinkRun(href: 'https://example.com/$i', children: [
+                TextRun('链接$i'),
+              ]),
           ],
         ),
     ];

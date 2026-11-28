@@ -31,6 +31,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../node/inline_node.dart';
 import '../render/content_tap_target.dart';
+import 'paragraph_layout_data.dart';
 import 'soft_break.dart';
 import '../render/emoji_handler.dart';
 import '../render/footnote_handler.dart';
@@ -48,13 +49,9 @@ import '../config/render_shapes.dart';
 
 /// 挂载上下文宿主:flatten 产物与当前挂载点(State)之间的活 context 桥。
 ///
-/// recognizer 的 onTap 闭包只捕获本对象(随 [FlattenResult] 走,可安全跨
-/// State 复用/进全局缓存),点击时经 [context] 现取挂载方登记的活 context
-/// —— 产物重挂载后不再持有已销毁 Element 的悬空引用(旧契约:闭包直接
-/// 捕获 flatten 时的 context,State 级缓存下恰好同生共死,全局缓存下必悬空)。
-///
-/// 支持多重挂载(同一产物同时挂正文与预览 sheet):attach 压栈,
-/// detach 只摘自己,[context] 取最近仍挂载的一个。
+/// recognizer 的 onTap 闭包经 [context] 取得仍挂载的 context，
+/// 不捕获 flatten 时的 context。包含交互的产物由显示实例独占，
+/// 同文多处显示必须各自 flatten，不能靠最近挂载的 context 分发点击。
 class SpanMountContext {
   final List<BuildContext> _contexts = [];
 
@@ -81,7 +78,7 @@ class SpanMountContext {
 }
 
 /// 直绘「岛」:占位尺寸**不依赖 widget 布局即可确定**的 WidgetSpan 原子。
-/// 当前只有 emoji(普通 = 1em、only-emoji = 32dp,margin 常量),这是它
+/// emoji 和附件图标的尺寸可从字号推导，这是它们
 /// 能进直绘路径(CachedParagraphText)的根本前提 —— 图片/公式/chip 的
 /// 占位尺寸都要先布局 widget 才知道,进不了。
 class SpanIsland {
@@ -119,11 +116,41 @@ class FlattenResult {
 
   /// 纯文本段落直接使用块的选取光标，悬停时可以跳过字形定位。
   late final bool hasInteractiveText = !span.visitChildren(
-    (run) => run is! TextSpan ||
+    (run) =>
+        run is! TextSpan ||
         (run.recognizer == null &&
             run.mouseCursor == MouseCursor.defer &&
             run.onEnter == null &&
             run.onExit == null),
+  );
+
+  /// 只有纯文字排版可以跨挂载共享。内嵌组件可能捕获宿主 builder，
+  /// 手势及悬停回调则依赖所在页面，均须由当前显示实例持有。
+  /// 根据实际产物判断，嵌套样式里的交互也不能进入全局缓存。
+  late final bool canShare =
+      recognizers.isEmpty && !hasPlaceholders && _canShareSpan(span);
+
+  static bool _canShareSpan(InlineSpan span) =>
+      span is TextSpan &&
+      span.recognizer == null &&
+      span.mouseCursor == MouseCursor.defer &&
+      span.onEnter == null &&
+      span.onExit == null &&
+      span.visitDirectChildren(_canShareSpan);
+
+  /// 只复制排版值，不把当前实例的交互或组件带进全局布局缓存。
+  /// null 表示有未知占位尺寸，必须使用 RichText 测量。
+  late final ParagraphLayoutData? layoutData = ParagraphLayoutData.fromSpan(
+    span,
+    [
+      for (final island in islands)
+        island == null
+            ? null
+            : PlaceholderDimensions(
+                size: Size(island.width, island.height),
+                alignment: island.alignment,
+              ),
+    ],
   );
 
   /// 这次 flatten 创建的所有 GestureRecognizer,调用方必须在 widget
@@ -216,7 +243,7 @@ class InlineFlattener {
   /// 行内代码字色 / mention 主色,共 3 处,产物带色所以调用方缓存 key 须含
   /// ColorScheme);② 作"交互开关":null 时不创建 recognizer(纯 unit test
   /// 场景)。**点击回调不捕获它**——tap 时经 [FlattenResult.mount] 现取
-  /// 挂载方登记的活 context,产物可安全跨挂载复用。
+  /// 挂载方登记的活 context；交互产物仍须由当前显示实例独占。
   FlattenResult flatten(
     List<InlineNode> inlines,
     TextStyle baseStyle, {
@@ -595,7 +622,7 @@ class InlineFlattener {
     // 识别附件并下载/外开)。普通链接:走 link handler。
     //
     // onTap 闭包只捕获 mount(不捕获 flatten 时的 ctx):点击时现取挂载方
-    // 登记的活 context,产物跨挂载复用不悬空;未挂载时 no-op。
+    // 登记的活 context;未挂载时 no-op。交互产物不跨挂载共享。
     final recognizer = ctx == null
         ? null
         : (TapGestureRecognizer()
@@ -844,7 +871,7 @@ class InlineFlattener {
         : const EdgeInsets.symmetric(horizontal: 2.0);
     // 选区文本由自研选区的映射表(buildInlineProjection)统一投影成 `:name:`,
     // 不在此处用 SelectableAdapter(那是已废弃的 SelectionArea 方案)。
-    // builder 用挂载处的活 Builder ctx(编辑器路径一直如此),产物可跨挂载复用。
+    // builder 用挂载处的活 Builder ctx，组件由当前显示实例独占。
     Widget child = Padding(
       padding: margin,
       child: Builder(

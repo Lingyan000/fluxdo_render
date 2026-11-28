@@ -1,4 +1,4 @@
-/// flatten 产物全局 LRU 缓存(跨挂载复用 span/recognizers/projection)。
+/// 纯文字 flatten 产物的全局 LRU 缓存。
 ///
 /// ## 为什么要全局
 ///
@@ -7,28 +7,20 @@
 /// 都需要一个"State 死了产物还在"的家 —— 与 RenderParseCache(解析层)
 /// 同构,这里是 flatten 层。
 ///
-/// ## key 设计(handler 不进 key)
+/// ## 共享边界
 ///
-/// key = (inlines 身份, baseStyle, theme 身份, totalImagesInPost,
-/// flattener 身份)。**handlers 刻意不进 key**:
-/// - inlines 实例来自解析产物(RenderParseCache 按内容签名缓存),
-///   内容(含 linkCounts/mentionedUsers)一变 → 签名变 → 重解析 →
-///   新 inlines 身份 → 本缓存 miss → 用新 handler 重 flatten;
-/// - 内容不变时 handler 的语义输入(post.id/topicId/heroNamespace)
-///   也不变,冻结旧闭包行为等价;
-/// - 点击 context 经 [SpanMountContext] 挂载时现取,不受闭包创建时机影响。
+/// [FlattenResult.canShare] 根据实际 span、手势和占位组件决定能否共享。
+/// 带交互或内嵌组件的产物只交给当前调用方，不写入 LRU；调用方 release
+/// 时立即释放手势。这样预热不会冻结默认回调，同文多处显示也不会串 context。
 ///
-/// theme 用身份比对(与 InlineSpanText 旧行为一致):flatten 同步读色
-/// 共 3 处(link primary / inline-code onSurfaceVariant / mention primary),
-/// 产物带色,主题切换必须 miss。
+/// key = (inlines 身份, baseStyle, theme 色值, totalImagesInPost,
+/// flattener 身份)。共享产物不含宿主行为，因此不需要把 handlers 放进 key。
 ///
-/// ## recognizer 生命周期(引用计数 + 死缓延迟释放)
+/// ## 生命周期
 ///
-/// recognizer 随缓存条目走,不再随 State 走:
 /// - [acquire] refs+1,State dispose 时 [release] refs-1;
-/// - LRU 逐出时:无人引用 → 立即 dispose recognizers;仍被挂载引用 →
-///   标记 dead,最后一个 release 时 dispose(在屏 span 的点击不会打到
-///   已 dispose 的 recognizer);
+/// - 独占产物不进入 LRU，最后一个 release 立即释放;
+/// - 共享产物被逐出后，仍被挂载引用的条目延迟到最后一个 release 释放;
 /// - [evictAll](hot reload / 主题级失效)同规则。
 ///
 /// 编辑器路径(EditableParagraph)不走本缓存(内容逐击键变化,缓存无意义),
@@ -98,8 +90,13 @@ class FlattenCache {
       hook(sw.elapsedMicroseconds);
     }
     final entry = _FlattenEntry(result)..refs = 1;
-    _entries[key] = entry;
     _byResult[result] = entry;
+    if (!result.canShare) {
+      // 独占产物也沿用 acquire/release，避免调用方遗漏手势资源的释放。
+      entry.dead = true;
+      return result;
+    }
+    _entries[key] = entry;
     _evictOverflow();
     return result;
   }

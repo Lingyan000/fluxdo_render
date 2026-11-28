@@ -2,10 +2,9 @@
 ///
 /// ## 模型(对齐 TopicCardLayout 的全局 LRU + ensureWidth)
 ///
-/// [ParagraphLayoutCache]:(FlattenResult 身份, 环境样式, 宽度桶) → 已
-/// layout 的 ui.Paragraph。FlattenResult 已按 (inlines, baseStyle, theme)
-/// 全局缓存(FlattenCache),其身份携带内容+样式+主题;这里再叠**环境**
-/// (DefaultTextStyle/方向/缩放/对齐)与宽度。
+/// [ParagraphLayoutCache]:(纯排版数据, 环境样式, 宽度约束) → 已
+/// layout 的 ui.Paragraph。文字、样式和占位尺寸按值比较，缓存不持有
+/// FlattenResult；手势、回调和内嵌组件留在各自的显示实例中。
 ///
 /// [CachedParagraphText]:直绘 widget。layout 阶段从缓存取(或建)
 /// ui.Paragraph → performLayout 查表报尺寸;paint = drawParagraph。
@@ -27,7 +26,8 @@
 ///
 /// ## 适用面(分路判据,由 InlineSpanText 把关)
 ///
-/// 支持纯文本及占位尺寸确定的行内组件，其他段落走 RichText。
+/// 文字及占位尺寸已知的段落可缓存排版，其他段落走 RichText。
+/// 链接命中和岛组件始终取自当前实例，预热只留下无行为的布局数据。
 ///
 /// ## 链接命中
 ///
@@ -48,6 +48,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import '../flatten/inline_flattener.dart';
+import '../flatten/paragraph_layout_data.dart';
 import '../selection/block_text_geometry.dart';
 import 'paragraph_warmup.dart';
 
@@ -146,7 +147,7 @@ class ParagraphIntrinsics {
   final double maxIntrinsicWidth;
 }
 
-/// (FlattenResult 身份, env, 宽度桶) → ParagraphLayoutEntry 的全局 LRU。
+/// (纯排版数据, env, 宽度约束) → ParagraphLayoutEntry 的全局 LRU。
 class ParagraphLayoutCache {
   ParagraphLayoutCache._();
 
@@ -168,16 +169,14 @@ class ParagraphLayoutCache {
   static void Function(int micros)? profileHook;
 
   /// 取(或排)某段落在 [minWidth]..[maxWidth] 约束下的布局。
-  /// 宽度桶 0.5px(TopicCardLayout.ensureWidth 同款阈值);tight 约束
-  /// (minWidth == maxWidth)单独成桶(不收缩)。
+  /// 完整记录 min/max，避免不同约束误用同一段落的收缩尺寸或换行结果。
   static ParagraphLayoutEntry obtain(
-    FlattenResult flat,
+    ParagraphLayoutData data,
     ParagraphEnv env,
     double minWidth,
     double maxWidth,
   ) {
-    final tight = minWidth == maxWidth;
-    final key = _LayoutKey(flat, env, (maxWidth * 2).round(), tight);
+    final key = _LayoutKey(data, env, minWidth, maxWidth);
     final existing = _entries.remove(key);
     if (existing != null) {
       _entries[key] = existing; // LRU touch
@@ -187,7 +186,7 @@ class ParagraphLayoutCache {
     misses++;
     final hook = profileHook;
     final sw = hook == null ? null : (Stopwatch()..start());
-    final entry = _layout(flat, env, minWidth, maxWidth);
+    final entry = _layout(data, env, minWidth, maxWidth);
     if (sw != null && hook != null) {
       sw.stop();
       hook(sw.elapsedMicroseconds);
@@ -202,18 +201,19 @@ class ParagraphLayoutCache {
   }
 
   /// 内在宽度度量(无限宽排一次,min/max 与约束无关;结果按 env 缓存)。
-  static ParagraphIntrinsics intrinsics(FlattenResult flat, ParagraphEnv env) {
-    final key = _MetricsKey(flat, env);
+  static ParagraphIntrinsics intrinsics(
+      ParagraphLayoutData data, ParagraphEnv env) {
+    final key = _MetricsKey(data, env);
     final cached = _metrics[key];
     if (cached != null) return cached;
-    final paragraph = _build(flat, env)
+    final paragraph = _build(data, env)
       ..layout(const ui.ParagraphConstraints(width: double.infinity));
     final result = ParagraphIntrinsics(
       minIntrinsicWidth: paragraph.minIntrinsicWidth,
       maxIntrinsicWidth: paragraph.maxIntrinsicWidth,
     );
     paragraph.dispose();
-    // 有界:跟布局缓存同源(FlattenResult 有限),粗略限一手防泄漏。
+    // 有界:与布局缓存保持同量级，避免度量结果无限增长。
     if (_metrics.length > _cap) _metrics.clear();
     _metrics[key] = result;
     return result;
@@ -232,9 +232,8 @@ class ParagraphLayoutCache {
     _metrics.clear();
   }
 
-  static ui.Paragraph _build(FlattenResult flat, ParagraphEnv env) {
+  static ui.Paragraph _build(ParagraphLayoutData data, ParagraphEnv env) {
     // Text.rich 同构:外层 DefaultTextStyle,内层我们的 span。
-    final root = TextSpan(style: env.rootStyle, children: [flat.span]);
     final builder = ui.ParagraphBuilder(
       env.rootStyle.getParagraphStyle(
         textAlign: env.textAlign,
@@ -242,46 +241,31 @@ class ParagraphLayoutCache {
         textScaler: env.textScaler,
       ),
     );
-    root.build(
+    builder.pushStyle(env.rootStyle.getTextStyle(textScaler: env.textScaler));
+    data.build(
       builder,
       textScaler: env.textScaler,
-      dimensions: _placeholderDims(flat, env),
+      placeholderScale: islandScale(data, env),
     );
+    builder.pop();
     return builder.build();
   }
 
-  /// 岛占位尺寸(直绘判据保证 islands 全非 null)。缩放语义对齐 SDK:
-  /// RichText 给 WidgetSpan child 包 _AutoScaleInlineWidget(按字号缩放
-  /// 因子放大 child),占位 = child 布局尺寸 × 因子;这里等价地把确定
-  /// 尺寸 × 因子(emoji 尺寸恒derive自根字号,因子按根字号算)。
-  static List<PlaceholderDimensions>? _placeholderDims(
-      FlattenResult flat, ParagraphEnv env) {
-    if (flat.islands.isEmpty) return const [];
-    final scale = islandScale(flat, env);
-    return [
-      for (final island in flat.islands)
-        PlaceholderDimensions(
-          size: Size(island!.width * scale, island.height * scale),
-          alignment: island.alignment,
-        ),
-    ];
-  }
-
   /// 岛的 textScaler 缩放因子(1.0 = 无系统字体缩放,绝对主流)。
-  static double islandScale(FlattenResult flat, ParagraphEnv env) {
+  static double islandScale(ParagraphLayoutData data, ParagraphEnv env) {
     final fontSize =
-        flat.span.style?.fontSize ?? env.rootStyle.fontSize ?? 14.0;
+        data.fontSize ?? env.rootStyle.fontSize ?? 14.0;
     if (fontSize == 0) return 0;
     return env.textScaler.scale(fontSize) / fontSize;
   }
 
   static ParagraphLayoutEntry _layout(
-    FlattenResult flat,
+    ParagraphLayoutData data,
     ParagraphEnv env,
     double minWidth,
     double maxWidth,
   ) {
-    final paragraph = _build(flat, env)
+    final paragraph = _build(data, env)
       ..layout(ui.ParagraphConstraints(width: maxWidth));
     var contentWidth = maxWidth;
     if (minWidth != maxWidth) {
@@ -301,38 +285,38 @@ class ParagraphLayoutCache {
 }
 
 class _LayoutKey {
-  _LayoutKey(this.flat, this.env, this.bucket, this.tight);
-  final FlattenResult flat;
+  _LayoutKey(this.data, this.env, this.minWidth, this.maxWidth);
+  final ParagraphLayoutData data;
   final ParagraphEnv env;
-  final int bucket;
-  final bool tight;
+  final double minWidth;
+  final double maxWidth;
 
   @override
   bool operator ==(Object other) =>
       other is _LayoutKey &&
-      identical(other.flat, flat) &&
+      other.data == data &&
       other.env == env &&
-      other.bucket == bucket &&
-      other.tight == tight;
+      other.minWidth == minWidth &&
+      other.maxWidth == maxWidth;
 
   @override
   int get hashCode =>
-      Object.hash(identityHashCode(flat), env, bucket, tight);
+      Object.hash(data, env, minWidth, maxWidth);
 }
 
 class _MetricsKey {
-  _MetricsKey(this.flat, this.env);
-  final FlattenResult flat;
+  _MetricsKey(this.data, this.env);
+  final ParagraphLayoutData data;
   final ParagraphEnv env;
 
   @override
   bool operator ==(Object other) =>
       other is _MetricsKey &&
-      identical(other.flat, flat) &&
+      other.data == data &&
       other.env == env;
 
   @override
-  int get hashCode => Object.hash(identityHashCode(flat), env);
+  int get hashCode => Object.hash(data, env);
 }
 
 /// 直绘段落 widget:缓存 ui.Paragraph 上屏 + 链接命中 + 选区几何 + 语义。
@@ -419,10 +403,13 @@ class RenderCachedParagraph extends RenderBox
   FlattenResult get result => _result;
   set result(FlattenResult value) {
     if (identical(_result, value)) return;
+    final layoutChanged = _result.layoutData != value.layoutData;
     _result = value;
-    _releaseEntry();
     _cachedPlainText = null;
-    markNeedsLayout();
+    if (layoutChanged) {
+      _releaseEntry();
+      markNeedsLayout();
+    }
     markNeedsSemanticsUpdate();
   }
 
@@ -527,7 +514,7 @@ class RenderCachedParagraph extends RenderBox
   @override
   void performLayout() {
     final obtained = ParagraphLayoutCache.obtain(
-      _result,
+      _result.layoutData!,
       _env,
       constraints.minWidth,
       constraints.maxWidth,
@@ -567,7 +554,7 @@ class RenderCachedParagraph extends RenderBox
     var child = firstChild;
     if (child == null) return;
     final boxes = entry.paragraph.getBoxesForPlaceholders();
-    final scale = ParagraphLayoutCache.islandScale(_result, _env);
+    final scale = ParagraphLayoutCache.islandScale(_result.layoutData!, _env);
     var boxIndex = 0;
     for (final island in _result.islands) {
       if (island == null) continue; // 直绘判据下不该出现,防御跳过
@@ -584,11 +571,11 @@ class RenderCachedParagraph extends RenderBox
 
   @override
   double computeMinIntrinsicWidth(double height) =>
-      ParagraphLayoutCache.intrinsics(_result, _env).minIntrinsicWidth;
+      ParagraphLayoutCache.intrinsics(_result.layoutData!, _env).minIntrinsicWidth;
 
   @override
   double computeMaxIntrinsicWidth(double height) =>
-      ParagraphLayoutCache.intrinsics(_result, _env).maxIntrinsicWidth;
+      ParagraphLayoutCache.intrinsics(_result.layoutData!, _env).maxIntrinsicWidth;
 
   @override
   double computeMinIntrinsicHeight(double width) =>
@@ -599,7 +586,7 @@ class RenderCachedParagraph extends RenderBox
       _heightAtWidth(width);
 
   double _heightAtWidth(double width) =>
-      ParagraphLayoutCache.obtain(_result, _env, 0, width).size.height;
+      ParagraphLayoutCache.obtain(_result.layoutData!, _env, 0, width).size.height;
 
   @override
   double? computeDistanceToActualBaseline(TextBaseline baseline) {

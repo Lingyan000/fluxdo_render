@@ -5,12 +5,12 @@
 /// FlattenCache + ParagraphLayoutCache 落地后,纯文字段落**回滚**已是
 /// 零排版;但**首次滚进视口**仍要在滚动帧里付 flatten + 排版。本模块
 /// 提供 idle 预热原语:滚动停止后,宿主(TopicPostList)在空闲帧对
-/// 即将滚到的楼层逐段预 flatten + 预排版,产物落进两层全局缓存 ——
-/// 滚到时全程查表,这是 Telegram「后台预排」的 UI 线程等价物。
+/// 即将滚到的楼层逐段预 flatten + 预排版。纯文字可复用两层缓存；
+/// 含链接或确定尺寸占位的段落复用排版，挂载时单独创建交互和组件。
 ///
 /// ## key 同源(探针,预热命中率的命门)
 ///
-/// 缓存 key 含 theme(identical 比对)与 env(挂载处 DefaultTextStyle
+/// 缓存 key 含 theme 色值与 env(挂载处 DefaultTextStyle
 /// 派生)。预热侧手工重建这条链必然漂移(值等而实例不等、或构造逻辑
 /// 复制后 drift),预热就全部白做。因此用**探针登记**:真实挂载的直绘
 /// 块把自己 acquire/obtain 时用的 (baseStyle, theme, flattener) 与
@@ -87,8 +87,8 @@ class WarmupContext {
         FlattenThemeKey.fromTheme(theme),
         identityHashCode(flattener),
         env,
-        (minWidth * 2).round(),
-        (maxWidth * 2).round(),
+        minWidth,
+        maxWidth,
       );
 }
 
@@ -239,8 +239,8 @@ class _WarmupBucketKey {
     required this.themeKey,
     required this.flattener,
     required this.env,
-    required this.minWidthBucket,
-    required this.maxWidthBucket,
+    required this.minWidth,
+    required this.maxWidth,
   });
 
   factory _WarmupBucketKey.fromContext(WarmupContext ctx) => _WarmupBucketKey(
@@ -248,16 +248,16 @@ class _WarmupBucketKey {
         themeKey: FlattenThemeKey.fromTheme(ctx.theme),
         flattener: ctx.flattener,
         env: ctx.env,
-        minWidthBucket: (ctx.minWidth * 2).round(),
-        maxWidthBucket: (ctx.maxWidth * 2).round(),
+        minWidth: ctx.minWidth,
+        maxWidth: ctx.maxWidth,
       );
 
   final TextStyle baseStyle;
   final FlattenThemeKey themeKey;
   final InlineFlattener flattener;
   final ParagraphEnv env;
-  final int minWidthBucket;
-  final int maxWidthBucket;
+  final double minWidth;
+  final double maxWidth;
 
   @override
   bool operator ==(Object other) =>
@@ -266,8 +266,8 @@ class _WarmupBucketKey {
       other.themeKey == themeKey &&
       identical(other.flattener, flattener) &&
       other.env == env &&
-      other.minWidthBucket == minWidthBucket &&
-      other.maxWidthBucket == maxWidthBucket;
+      other.minWidth == minWidth &&
+      other.maxWidth == maxWidth;
 
   @override
   int get hashCode => Object.hash(
@@ -275,8 +275,8 @@ class _WarmupBucketKey {
         themeKey,
         identityHashCode(flattener),
         env,
-        minWidthBucket,
-        maxWidthBucket,
+        minWidth,
+        maxWidth,
       );
 }
 
@@ -328,11 +328,10 @@ class ParagraphWarmup {
   /// 对 [nodes] 的顶层 ParagraphNode 从 [startIndex] 起逐段预热,
   /// 超 [budgetMicros] 即停。返回下一个待处理下标;全部完成返回 -1。
   ///
-  /// - flatten:acquire 进 FlattenCache 后**立即 release**(refs 归 0,
-  ///   条目按 LRU 存活;挂载时 acquire 直接命中)。所有段落都热
-  ///   (RichText 路径同样吃 FlattenCache);
-  /// - 排版:仅满足直绘判据(纯 TextSpan、无行内代码/mention)的段落
-  ///   obtain 进 ParagraphLayoutCache;
+  /// - flatten:仅纯文字产物进入 FlattenCache，立即 release 后按 LRU
+  ///   存活。带交互或内嵌组件的产物提取排版数据后立即释放;
+  /// - 排版:尺寸已知且无行内代码/mention 的段落可预排版，只把文字、
+  ///   样式和占位尺寸写入 ParagraphLayoutCache，挂载时独立创建交互;
   /// - [context] 仅供 flatten 同步读主题色;recognizer 点击走 mount 桥,
   ///   与预热时的 context 无关。
   static int warmParagraphs({
@@ -385,14 +384,14 @@ class ParagraphWarmup {
           context: context,
         ),
       );
-      // 直绘判据同 InlineSpanText:满足才预排版(emoji 占位岛可进)。
+      // 直绘判据同 InlineSpanText；缓存 key 绝不能保留临时 flatten 产物。
       final projection = flat.projection;
-      if ((!flat.hasPlaceholders || flat.allPlaceholdersAreIslands) &&
-          !projection.hasInlineCode &&
-          !projection.hasSpanMention) {
+      final data = flat.layoutData;
+      if (data != null &&
+          !projection.hasInlineCode && !projection.hasSpanMention) {
         final missesBefore = ParagraphLayoutCache.misses;
         final entry = ParagraphLayoutCache.obtain(
-          flat,
+          data,
           ctx.env,
           ctx.minWidth,
           ctx.maxWidth,
@@ -400,9 +399,9 @@ class ParagraphWarmup {
         if (newlyLaidOut != null && ParagraphLayoutCache.misses > missesBefore) {
           newlyLaidOut.add(entry);
         }
+        warmedParagraphs++;
       }
-      FlattenCache.release(flat); // refs 归 0,条目留 LRU 待挂载命中
-      warmedParagraphs++;
+      FlattenCache.release(flat); // 交互产物立即释放；纯文字留 LRU 待复用。
     }
     if (glyphBaker != null &&
         newlyLaidOut != null &&
