@@ -5,6 +5,15 @@ import 'package:fluxdo_render/fluxdo_render.dart';
 void main() {
   final parser = ParagraphParser();
 
+  test('Live 容器保留配对和其他正文，普通视频不误识别', () {
+    final nodes = parser.parse('<div class="d-wrap" data-wrap="live-photo"><video poster="/cover.jpg"><source src="/motion.mp4" type="video/mp4"></video><p><a href="/cover.jpg">原图</a></p><p>说明</p></div><video poster="/other.jpg" src="/other.mp4"></video>');
+    final videos = nodes.whereType<VideoNode>().toList();
+    expect(videos.first.livePhoto, true);
+    expect(videos.last.livePhoto, false);
+    expect(nodes.whereType<ParagraphNode>(), hasLength(2));
+    expect(parser.parse('<div class="d-wrap" data-wrap="live-photo"><video src="/motion.mp4"></video></div>').whereType<VideoNode>().single.livePhoto, false);
+  });
+
   test('video-placeholder-container → VideoNode(src=data-video-src, poster=data-thumbnail-src)', () {
     const html = '<p><div class="video-placeholder-container" '
         'data-video-src="/uploads/x.mp4" '

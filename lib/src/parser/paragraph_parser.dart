@@ -2156,6 +2156,14 @@ class ParagraphParser {
   /// - 含 <video> 的 div / 裸 video:src=首个 source[src] 或 video[src]，
   ///   poster=video[poster]，width/height=video 属性，mime=source[type]。
   VideoNode _parseVideo(dom.Element el, String Function() nextId) {
+    var livePhoto = false;
+    for (dom.Element? parent = el; parent != null; parent = parent.parent) {
+      if (parent.classes.contains('d-wrap') &&
+          parent.attributes['data-wrap'] == 'live-photo') {
+        livePhoto = true;
+        break;
+      }
+    }
     final tag = el.localName?.toLowerCase() ?? '';
     // 形态 1：placeholder 容器(自身或后代不含真 <video>，src 在 data-* 上)
     final isDiv = tag == 'div';
@@ -2210,6 +2218,7 @@ class ParagraphParser {
       mime: (mime == null || mime.isEmpty) ? null : mime,
       loop: loop,
       origSrc: (origSrc == null || origSrc.isEmpty) ? null : origSrc,
+      livePhoto: livePhoto && poster != null && src.isNotEmpty,
     );
   }
 

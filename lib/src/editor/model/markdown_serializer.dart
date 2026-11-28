@@ -9,6 +9,7 @@
 /// cook(JS bundle)→ parse → blockNodesToDoc,不在子包内。
 library;
 
+import 'dart:convert' show HtmlEscape, HtmlEscapeMode;
 import 'dart:math' as math;
 import 'dart:ui' show TextAlign;
 
@@ -755,6 +756,17 @@ String serializeIslandNode(BlockNode node) {
         :final width,
         :final height,
       ):
+      if (node.livePhoto && node.poster != null) {
+        const escape = HtmlEscape(HtmlEscapeMode.attribute);
+        String path(String value) => escape.convert(
+            value.startsWith('upload://')
+                ? '/uploads/short-url/${value.substring(9)}'
+                : value);
+        return '[wrap=live-photo]\n'
+            '<video controls playsinline preload="none" poster="${path(node.poster!)}">\n'
+            '  <source src="${path(src)}" type="${escape.convert(mime ?? 'video/mp4')}">\n'
+            '</video>\n[/wrap]';
+      }
       final rawMedia = serializeRawMediaHtml(node);
       if (rawMedia != null) return rawMedia;
       // upload:// 上传 → `![|video](短链)`;短链路径/直链 = raw 手写

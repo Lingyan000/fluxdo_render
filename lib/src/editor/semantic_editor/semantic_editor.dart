@@ -82,8 +82,9 @@ class SemanticEditorProjection {
     String path,
     List<ContainerFrame> frames,
     SemanticNode? list,
-    int depth,
-  ) {
+    int depth, {
+    bool livePhoto = false,
+  }) {
     final id = 'semantic_${_blocks.length}';
     final inline = _inline(n);
     if ({'paragraph', 'heading'}.contains(n.type) &&
@@ -118,7 +119,16 @@ class SemanticEditorProjection {
     final media = _projectMedia(n, id);
     if (media != null) {
       // IslandBlock 无 frames；容器归属由原树路径保留。
-      _add(path, n, IslandBlock(id: id, node: media));
+      _add(
+        path,
+        n,
+        IslandBlock(
+          id: id,
+          node: livePhoto && media is VideoNode && media.poster != null
+              ? media.asLivePhoto()
+              : media,
+        ),
+      );
       return;
     }
     final block = _projectSemanticBlock(n, id);
@@ -194,6 +204,8 @@ class SemanticEditorProjection {
         nextFrames,
         isList ? n : list,
         isList && list != null ? depth + 1 : depth,
+        livePhoto: livePhoto ||
+            (n.type == 'wrap' && n.attrs['data-wrap'] == 'live-photo'),
       );
     }
   }

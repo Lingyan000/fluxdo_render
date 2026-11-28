@@ -1343,6 +1343,7 @@ class VideoNode extends BlockNode {
     this.mime,
     this.loop = false,
     this.origSrc,
+    this.livePhoto = false,
   });
 
   /// 播放源 URL(`data-video-src` / 首个 `source[src]` / `video[src]`)。
@@ -1373,6 +1374,24 @@ class VideoNode extends BlockNode {
   /// `video[loop]` 属性,默认 false。
   final bool loop;
 
+  /// 来自 `[wrap=live-photo]` 的配对短片；封面是静态照片。
+  /// 编辑投影从祖先容器推导此标记，原始 HTML 签名不包含容器信息。
+  final bool livePhoto;
+
+  VideoNode asLivePhoto() => VideoNode(
+    id: id,
+    src: src,
+    rawHtml: rawHtml,
+    rawHtmlSignature: rawHtmlSignature,
+    poster: poster,
+    width: width,
+    height: height,
+    mime: mime,
+    loop: loop,
+    origSrc: origSrc,
+    livePhoto: true,
+  );
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1386,12 +1405,13 @@ class VideoNode extends BlockNode {
           height == other.height &&
           mime == other.mime &&
           loop == other.loop &&
+          livePhoto == other.livePhoto &&
           origSrc == other.origSrc;
 
   @override
   int get hashCode =>
       Object.hash(src, poster, width, height, mime, loop, origSrc,
-          rawHtml, rawHtmlSignature);
+          rawHtml, rawHtmlSignature, livePhoto);
 
   @override
   String toString() =>
